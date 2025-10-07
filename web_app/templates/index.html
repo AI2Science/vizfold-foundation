@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protein Structure Prediction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.1/3Dmol-min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+
+        #viewer {
+            width: 100%;
+            height: 100%;
+            min-height: 500px;
+            position: relative;
+        }
+
+        #viewer canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        #command-output {
+            height: 300px;
+            overflow-y: auto;
+            color: #1e1e1e;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-bottom: 20px;
+        }
+
+        #loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+    </style>
+</head>
+<div class="container">
+    <h1 class="mb-4">Protein Structure Prediction</h1>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Input Parameters</h5>
+        </div>
+        <div class="card-body">
+            <form id="protein-form" onsubmit="event.preventDefault(); submitForm(event); return false;">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="protein-id" class="form-label">Protein ID</label>
+                            <input type="text" class="form-control" id="protein-id" name="protein_id"
+                                placeholder="Enter protein ID" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="residue-idx" class="form-label">Residue Index</label>
+                            <input type="number" class="form-control" id="residue-idx" name="residue_idx" value="18"
+                                min="1" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="description" class="form-label">Description (Optional)</label>
+                    <input type="text" class="form-control" id="description" name="description"
+                        placeholder="Enter protein description">
+                    <div class="form-group">
+                        <label for="sequence" class="form-label">Amino Acid Sequence</label>
+                        <textarea class="form-control" id="sequence" name="sequence" rows="6"
+                            placeholder="Enter amino acid sequence" required></textarea>
+                        <div class="form-text">Enter protein sequence in single-letter amino acid code</div>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary me-2" id="run-btn">Run Prediction</button>
+                        <button type="button" class="btn btn-danger" id="cancel-btn" style="display: none;"
+                            onclick="cancelPrediction()">Cancel</button>
+                    </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="loading" id="loading">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Running OpenFold prediction. This may take several minutes...</p>
+    </div>
+
+    <!-- Collapsible Output Section -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse"
+            href="#outputCollapse" role="button" aria-expanded="false" aria-controls="outputCollapse"
+            style="cursor: pointer;">
+            <h5 class="mb-0">Command Output</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div class="collapse" id="outputCollapse">
+            <div class="card-body">
+                <pre id="command-output"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collapsible 3d Viewer Section -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse"
+            href="#threeDCollapse" role="button" aria-expanded="false" aria-controls="threeDCollapse"
+            style="cursor: pointer;">
+            <h5 class="mb-0">3d Structure Viewer</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div class="collapse" id="threeDCollapse">
+            <div class="card-body p-0" style="height: 500px;">
+                <div id="viewer" style="width: 100%; height: 100%;"></div>
+            </div>
+            <div id="viewer-controls" class="card-footer bg-transparent border-top-0" style="display: none">
+                <div class="btn-toolbar" role="toolbar">
+                    <div class="btn-group me-2" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-backbone">
+                            <i class="bi bi-diagram-2"></i> Backbone
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-sidechains">
+                            <i class="bi bi-bounding-box"></i> Sidechains
+                        </button>
+                    </div>
+                    <div class="btn-group me-2" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="color-cartoon">
+                            <i class="bi bi-bezier2"></i> Cartoon
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="color-chain">
+                            <i class="bi bi-braces"></i> Chain
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="color-residue">
+                            <i class="bi bi-dot"></i> Residue
+                        </button>
+                    </div>
+                    <div class="btn-group ms-auto" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-info" id="zoom-to-fit">
+                            <i class="bi bi-zoom-in"></i> Zoom to Fit
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="reset-view">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset View
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap Icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+<script>
+    // Function to handle form submission
+    let currentPredictionId = null;
+    let eventSource = null;
+
+    function cancelPrediction() {
+        if (!currentPredictionId) {
+            console.log('No prediction to cancel');
+            return;
+        }
+
+        const cancelButton = document.getElementById('cancel-btn');
+        const runButton = document.getElementById('run-btn');
+        const outputElement = document.getElementById('command-output');
+
+        // Disable cancel button to prevent multiple clicks
+        cancelButton.disabled = true;
+
+        fetch('/cancel_prediction', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prediction_id: currentPredictionId })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Cancel response:', data);
+
+                if (data.status === 'cancelled' || data.status === 'already_done') {
+                    outputElement.textContent += '\n' + (data.message || 'Prediction was cancelled.') + '\n';
+
+                    // Close the event source if it exists
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
+
+                    // Update UI
+                    document.getElementById('loading').style.display = 'none';
+                    runButton.disabled = false;
+                    cancelButton.style.display = 'none';
+                    cancelButton.disabled = false;
+
+                    // Reset prediction ID
+                    currentPredictionId = null;
+                } else {
+                    outputElement.textContent += '\nError: ' + (data.message || 'Failed to cancel prediction') + '\n';
+                    cancelButton.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Error cancelling prediction:', error);
+                outputElement.textContent += '\nError cancelling prediction: ' + error.message + '\n';
+                cancelButton.disabled = false;
+
+                // Still try to clean up
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+
+                document.getElementById('loading').style.display = 'none';
+                runButton.disabled = false;
+                cancelButton.style.display = 'none';
+                currentPredictionId = null;
+            });
+    }
+
+    function submitForm(event) {
+        event.preventDefault();
+
+        const form = document.getElementById('protein-form');
+        const loading = document.getElementById('loading');
+        const outputElement = document.getElementById('command-output');
+        const viewerControls = document.getElementById('viewer-controls');
+        const runButton = document.getElementById('run-btn');
+        const cancelButton = document.getElementById('cancel-btn');
+
+        // Reset and show output
+        outputElement.textContent = 'Starting prediction...\n';
+        let outputCollapse = new bootstrap.Collapse(document.getElementById('outputCollapse'), { toggle: false });
+        outputCollapse.show();
+        let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
+        threeDCollapse.hide();
+
+        // Show loading indicator and hide viewer controls
+        loading.style.display = 'block';
+        viewerControls.style.display = 'none';
+        runButton.disabled = true;
+        cancelButton.style.display = 'inline-block';
+
+        // Generate a new prediction ID
+        currentPredictionId = Date.now().toString();
+
+        // Store the form data
+        const formData = new FormData(form);
+
+        // Close any existing event source
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        // Add prediction ID to form data
+        formData.append('prediction_id', currentPredictionId);
+
+        // Create a URL with query parameters
+        const params = new URLSearchParams();
+        for (const [key, value] of formData.entries()) {
+            params.append(key, value);
+        }
+
+        // Set up event source for server-sent events
+        eventSource = new EventSource(`/process?${params.toString()}`);
+
+        eventSource.onmessage = function (event) {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'output') {
+                outputElement.textContent += data.message + '\n';
+                outputElement.scrollTop = outputElement.scrollHeight;
+            } else if (data.type === 'error') {
+                outputElement.textContent += '\nError: ' + data.message + '\n';
+                loading.style.display = 'none';
+                runButton.disabled = false;
+                cancelButton.style.display = 'none';
+                eventSource.close();
+            } else if (data.type === 'complete') {
+                outputElement.textContent += '\nPrediction complete! Loading structure...\n';
+                loading.style.display = 'none';
+                viewerControls.style.display = 'block';
+                runButton.disabled = false;
+                cancelButton.style.display = 'none';
+                loadPDB(data.pdb_file);
+                eventSource.close();
+            }
+        };
+
+        eventSource.onerror = function () {
+            outputElement.textContent += '\nConnection to server was closed.\n';
+            loading.style.display = 'none';
+            runButton.disabled = false;
+            cancelButton.style.display = 'none';
+            eventSource.close();
+        };
+
+        try {
+
+            // Handle incoming messages
+            eventSource.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'output') {
+                        // Append new output
+                        outputElement.textContent += data.message + '\n';
+                        // Auto-scroll to bottom
+                        outputElement.scrollTop = outputElement.scrollHeight;
+                    }
+                    else if (data.type === 'error') {
+                        outputElement.textContent += '\nERROR: ' + data.message + '\n';
+                        outputElement.scrollTop = outputElement.scrollHeight;
+                        loading.style.display = 'none';
+                        runButton.disabled = false;
+                        cancelButton.style.display = 'none';
+                        currentPredictionId = null;
+                        eventSource.close();
+                    }
+                    else if (data.type === 'complete') {
+                        // Close the event source when done
+                        eventSource.close();
+                        loading.style.display = 'none';
+                        runButton.disabled = false;
+                        cancelButton.style.display = 'none';
+                        currentPredictionId = null;
+                        outputCollapse.hide();
+                        threeDCollapse.show();
+                        // Load and display the PDB file if available
+                        if (data.pdb_file) {
+                            loadPDB(data.pdb_file).catch(error => {
+                                console.error('Error loading PDB:', error);
+                                outputElement.textContent += '\nError loading PDB: ' + error.message + '\n';
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error processing message:', e);
+                    outputElement.textContent += '\nError processing server response\n';
+                    loading.style.display = 'none';
+                    runButton.disabled = false;
+                    cancelButton.style.display = 'none';
+                    currentPredictionId = null;
+                    eventSource.close();
+                }
+            };
+
+            // Handle connection errors
+            eventSource.onerror = function () {
+                outputElement.textContent += '\nConnection error occurred. Please try again.\n';
+                loading.style.display = 'none';
+                runButton.disabled = false;
+                cancelButton.style.display = 'none';
+                currentPredictionId = null;
+                eventSource.close();
+            };
+
+            // Close the connection when leaving the page
+            window.addEventListener('beforeunload', function () {
+                if (eventSource) {
+                    eventSource.close();
+                }
+            });
+
+        } catch (error) {
+            outputElement.textContent += '\nError: ' + error.message + '\n';
+            console.error('Error:', error);
+            loading.style.display = 'none';
+        }
+
+        return false;
+    }
+
+    // Initialize 3DMol viewer
+    function initViewer() {
+        try {
+            // Create viewer with explicit dimensions
+            const viewer = $3Dmol.createViewer('viewer', {
+                defaultcolors: $3Dmol.rasmolElementColors,
+                backgroundColor: 0xffffff,
+                width: '100%',
+                height: '100%'
+            });
+
+            // Set a default style
+            viewer.setStyle({}, { cartoon: {} });
+            viewer.zoomTo();
+            viewer.render();
+
+            return viewer;
+        } catch (error) {
+            console.error('Error initializing 3DMol viewer:', error);
+            return null;
+        }
+    }
+
+    // Initialize viewer when the page loads
+    document.addEventListener('DOMContentLoaded', function () {
+        window.viewer = initViewer();
+
+
+        // Handle window resize
+        function handleResize() {
+            if (window.viewer) {
+                const container = document.getElementById('viewer');
+                if (container) {
+                    // Force canvas dimensions to match container
+                    const canvas = container.querySelector('canvas');
+                    if (canvas) {
+                        canvas.style.width = '100%';
+                        canvas.style.height = '100%';
+                    }
+                    window.viewer.resize();
+                    window.viewer.render();
+                }
+            }
+        }
+
+        // Initial render
+        handleResize();
+
+        // Debounce resize events
+        let resizeTimer;
+        window.addEventListener('resize', function () {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(handleResize, 100);
+        });
+
+        const controls = {
+            'toggle-backbone': () => {
+                window.viewer.setStyle({}, { line: {} });
+                window.viewer.render();
+            },
+            'toggle-sidechains': () => {
+                window.viewer.setStyle({}, { stick: {} });
+                window.viewer.render();
+            },
+            'color-cartoon': () => {
+                window.viewer.setStyle({}, { cartoon: {} });
+                window.viewer.render();
+            },
+            'color-chain': () => {
+                window.viewer.setStyle({}, { cartoon: { colorscheme: 'chainHetatm' } });
+                window.viewer.render();
+            },
+            'color-residue': () => {
+                window.viewer.setStyle({}, { cartoon: { colorscheme: 'shapely' } });
+                window.viewer.render();
+            },
+            'zoom-to-fit': () => {
+                window.viewer.zoomTo();
+                window.viewer.render();
+            },
+            'reset-view': () => {
+                window.viewer.zoomTo();
+                window.viewer.setStyle({}, { cartoon: {} });
+                window.viewer.render();
+            }
+        };
+
+        // Attach event listeners
+        Object.entries(controls).forEach(([id, handler]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('click', handler);
+            }
+        });
+    });
+    // Store the current model
+    let currentModel = null;
+
+    // Function to load and display PDB file
+    async function loadPDB(pdbPath) {
+        try {
+            // Clear previous model
+            window.viewer.clear();
+
+            // Load PDB file
+            const response = await fetch(`/pdb/${pdbPath}`);
+            const pdbData = await response.text();
+
+            // Add model to viewer
+            window.viewer.addModel(pdbData, 'pdb');
+
+            // Set style and zoom
+            window.viewer.setStyle({}, { cartoon: {} });
+            window.viewer.zoomTo();
+            window.viewer.render();
+
+            // Store the current model
+            currentModel = pdbData;
+
+            // Show viewer controls
+            document.getElementById('viewer-controls').style.display = 'block';
+
+        } catch (error) {
+            console.error('Error loading PDB:', error);
+            throw new Error('Failed to load protein structure');
+        }
+    }
+
+
+</script>
+</body>
+
+</html>
