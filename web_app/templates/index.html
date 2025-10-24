@@ -86,10 +86,20 @@
                             placeholder="Enter amino acid sequence" required></textarea>
                         <div class="form-text">Enter protein sequence in single-letter amino acid code</div>
                     </div>
-                    <div class="d-flex justify-content-end">
-                        <button type="submit" class="btn btn-primary me-2" id="run-btn">Run Prediction</button>
-                        <button type="button" class="btn btn-danger" id="cancel-btn" style="display: none;"
-                            onclick="cancelPrediction()">Cancel</button>
+                    <div class="d-flex">
+                        <div class="me-auto">
+                            <button class="btn btn-secondary dropdown-toggle" type="button" id="proteinDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                                Select a protein
+                              </button>
+                              <ul class="dropdown-menu" id="protein-dropdown-menu">
+                                <li><a class="dropdown-item" href="#">Loading proteins...</a></li>
+                              </ul>
+                        </div>
+                        <div>
+                            <button type="submit" class="btn btn-primary me-2" id="run-btn">Run Prediction</button>
+                            <button type="button" class="btn btn-danger" id="cancel-btn" style="display: none;"
+                                onclick="cancelPrediction()">Cancel</button>
+                        </div>
                     </div>
             </form>
         </div>
@@ -360,6 +370,7 @@
                 } catch (e) {
                     console.error('Error processing message:', e);
                     outputElement.textContent += '\nError processing server response\n';
+                    outputElement.scrollTop = outputElement.scrollHeight;
                     loading.style.display = 'none';
                     runButton.disabled = false;
                     cancelButton.style.display = 'none';
@@ -371,6 +382,7 @@
             // Handle connection errors
             eventSource.onerror = function () {
                 outputElement.textContent += '\nConnection error occurred. Please try again.\n';
+                outputElement.scrollTop = outputElement.scrollHeight;
                 loading.style.display = 'none';
                 runButton.disabled = false;
                 cancelButton.style.display = 'none';
@@ -387,6 +399,7 @@
 
         } catch (error) {
             outputElement.textContent += '\nError: ' + error.message + '\n';
+            outputElement.scrollTop = outputElement.scrollHeight;
             console.error('Error:', error);
             loading.style.display = 'none';
         }
@@ -421,6 +434,8 @@
     document.addEventListener('DOMContentLoaded', function () {
         window.viewer = initViewer();
 
+        // Load proteins into dropdown
+        loadProteins();
 
         // Handle window resize
         function handleResize() {
@@ -492,7 +507,90 @@
     // Store the current model
     let currentModel = null;
 
-    // Function to load and display PDB file
+    // Function to load proteins from /proteins endpoint
+    async function loadProteins() {
+        try {
+            const response = await fetch('/proteins');
+            const proteins = await response.json();
+
+            const dropdownMenu = document.getElementById('protein-dropdown-menu');
+            const dropdownButton = document.getElementById('proteinDropdown');
+
+            // Clear existing items
+            dropdownMenu.innerHTML = '';
+
+            if (proteins.length === 0) {
+                dropdownMenu.innerHTML = '<li><a class="dropdown-item disabled" href="#">No proteins available</a></li>';
+                return;
+            }
+
+            // Add protein options
+            proteins.forEach(protein => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.className = 'dropdown-item';
+                a.href = '#';
+                a.textContent = `${protein.protein_id}`;
+                a.onclick = () => selectProtein(protein);
+                li.appendChild(a);
+                dropdownMenu.appendChild(li);
+            });
+
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.className = 'dropdown-item';
+            a.href = '#';
+            a.textContent = `Clear`;
+            a.onclick = () => clearProtein();
+            li.appendChild(a);
+            dropdownMenu.appendChild(li);
+
+        } catch (error) {
+            console.error('Error loading proteins:', error);
+            const dropdownMenu = document.getElementById('protein-dropdown-menu');
+            dropdownMenu.innerHTML = '<li><a class="dropdown-item disabled" href="#">Error loading proteins</a></li>';
+        }
+    }
+
+    // Function to handle protein selection
+    function selectProtein(protein) {
+        // Update dropdown button text
+        document.getElementById('proteinDropdown').textContent = `${protein.protein_id}`;
+
+        // Populate form fields
+        document.getElementById('protein-id').value = protein.protein_id;
+        document.getElementById('description').value = protein.description;
+        document.getElementById('sequence').value = protein.sequence;
+        document.getElementById('residue-idx').value = protein.residue_idx;
+        loadPDB(protein.pdb_file);
+        let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
+        threeDCollapse.show();
+        // Close dropdown
+        const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('proteinDropdown'));
+        if (dropdown) {
+            dropdown.hide();
+        }
+
+    }
+
+    function clearProtein() {
+        document.getElementById('proteinDropdown').textContent = `Select a protein`;
+        document.getElementById('protein-id').value = '';
+        document.getElementById('description').value = '';
+        document.getElementById('sequence').value = '';
+        document.getElementById('residue-idx').value = '';
+        window.viewer.clear();
+        document.getElementById('viewer-controls').style.display = 'none';
+        let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
+        threeDCollapse.hide();
+        // Close dropdown
+        const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('proteinDropdown'));
+        if (dropdown) {
+            dropdown.hide();
+        }
+    }
+
+        // Function to load and display PDB file
     async function loadPDB(pdbPath) {
         try {
             // Clear previous model

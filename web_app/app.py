@@ -2,6 +2,8 @@ import os
 import subprocess
 import time
 import json
+import glob
+import shutil
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 
 app = Flask(__name__)
@@ -9,7 +11,7 @@ app.config['UPLOAD_FOLDER'] = './web_tmp_dir'
 # Store running processes
 running_processes = {}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
-DATA_DIR = "/ime/hdd/rhaas/SUP-5301/database"
+DATA_DIR = "/storage/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data"
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -29,24 +31,36 @@ def stream_output(process, pdb_file, protein_id, prediction_id):
         
         # Check for errors
         process.wait()
-        
-        # Clean up the process from the running processes
-        if prediction_id in running_processes:
-            del running_processes[prediction_id]
             
         if process.returncode != 0:
-            try:
-                error = process.stderr.read()
-                yield f"data: {json.dumps({'type': 'error', 'message': error})}\n\n"
-            except Exception:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'An error occurred while reading the error output'})}\n\n"
-        else:
+            for folder in running_processes[prediction_id]['output_folders']:
+                if os.path.exists(folder):
+                    try:
+                        shutil.rmtree(folder)
+                    except Exception as e:
+                        print(f'Error removing folder {folder}: {str(e)}')
+            # Check if process was killed (negative return code indicates termination by signal)
+            if process.returncode < 0:
+                # Process was cancelled/terminated
+                yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Prediction was cancelled'})}\n\n"
+            else:
+                # Process had a normal error, try to read stderr
+                try:
+                    error = process.stderr.read()
+                    yield f"data: {json.dumps({'type': 'error', 'message': error})}\n\n"
+                except Exception:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'An error occurred while reading the error output'})}\n\n"
+        else:                                             
             # Send completion message with PDB file info
             yield f"""data: {json.dumps({
                 'type': 'complete',
                 'pdb_file': pdb_file,
                 'protein_id': protein_id
             })}\n\n"""
+
+        # Clean up the process from the running processes
+        if prediction_id in running_processes:
+            del running_processes[prediction_id]
     
     return Response(
         generate(),
@@ -57,6 +71,35 @@ def stream_output(process, pdb_file, protein_id, prediction_id):
             'Connection': 'keep-alive'
         }
     )
+
+def parse_fasta_file(fasta_path):
+    """Parse a FASTA file and return protein details."""
+    all_outputs = os.listdir(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), 'outputs'))
+    with open(fasta_path, 'r') as f:
+        content = f.read().strip()
+        if not content:
+            return None
+        lines = content.split('\n')
+        protein_id = fasta_path.split('/')[-1].split('.')[0]
+        description = lines[0][1:]
+        sequence = ''.join(lines[1:])
+        residue_idx = -1
+        for i in all_outputs:
+            if i.startswith(f'my_outputs_align_{protein_id}_demo_tri_'):
+                residue_idx = i.split('_')[-1]
+                break
+        if (residue_idx == -1):
+            return None
+        pdb_file = f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions/{protein_id}_model_1_ptm_relaxed.pdb'
+        if not os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), pdb_file)):
+            return None
+        return {
+            'protein_id': protein_id,
+            'description': description,
+            'sequence': sequence,
+            'residue_idx': int(residue_idx),
+            'pdb_file': pdb_file
+        }
 
 @app.route('/cancel_prediction', methods=['POST'])
 def cancel_prediction():
@@ -79,7 +122,6 @@ def cancel_prediction():
                     except subprocess.TimeoutExpired:
                         # Force kill if it doesn't terminate
                         os.killpg(os.getpgid(process_info['process'].pid), 9)  # SIGKILL
-                        
                     return jsonify({
                         'status': 'cancelled',
                         'message': 'Prediction was successfully cancelled'
@@ -132,8 +174,12 @@ def process():
     if sequence == '':
         return jsonify({'error': 'Protein sequence is required'}), 400
     
+    fasta_exists = os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}'))
+    output_exists = os.listdir(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) if os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) else []
+    if fasta_exists or len(output_exists) > 0:
+        protein_id = f"{protein_id}_new"
     # Format FASTA content
-    fasta_content = f">{protein_id} {description}\n{sequence}"
+    fasta_content = f">{description if description else protein_id}\n{sequence}"
     
     # Run OpenFold in a subprocess with streaming output
     fasta_dir = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}')
@@ -190,7 +236,13 @@ def process():
     # Store the process in the global dictionary
     running_processes[prediction_id] = {
         'process': process,
-        'start_time': time.time()
+        'start_time': time.time(),
+        'output_folders': [
+            fasta_dir,
+            output_dir,
+            attn_map_dir,
+            image_output_dir
+        ]
     }
     
     # Path to the expected PDB file
@@ -201,6 +253,20 @@ def process():
 @app.route('/pdb/<path:filename>')
 def serve_pdb(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/proteins')
+def list_proteins():
+    """List all available proteins from FASTA files."""
+    fasta_files = glob.glob(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), 'fasta_*/*.fasta'))
+    print(fasta_files)
+    proteins = []
+    for fasta_file in fasta_files:
+        protein_data = parse_fasta_file(fasta_file)
+        if protein_data:
+            proteins.append(protein_data)
+    return jsonify(proteins)
+
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
