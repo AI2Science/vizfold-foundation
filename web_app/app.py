@@ -82,6 +82,7 @@ def parse_fasta_file(fasta_path):
         lines = content.split('\n')
         protein_id = fasta_path.split('/')[-1].split('.')[0]
         description = lines[0][1:]
+        description_protein = description.split('|')[0]
         sequence = ''.join(lines[1:])
         residue_idx = -1
         for i in all_outputs:
@@ -90,7 +91,7 @@ def parse_fasta_file(fasta_path):
                 break
         if (residue_idx == -1):
             return None
-        pdb_file = f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions/{protein_id}_model_1_ptm_relaxed.pdb'
+        pdb_file = f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions/{description_protein if description_protein else protein_id}_model_1_ptm_relaxed.pdb'
         if not os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), pdb_file)):
             return None
         return {
@@ -174,12 +175,14 @@ def process():
     if sequence == '':
         return jsonify({'error': 'Protein sequence is required'}), 400
     
+    description = description if description else protein_id
+    description_protein = description.split('|')[0]
     fasta_exists = os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}'))
     output_exists = os.listdir(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) if os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) else []
     if fasta_exists or len(output_exists) > 0:
         protein_id = f"{protein_id}_new"
     # Format FASTA content
-    fasta_content = f">{description if description else protein_id}\n{sequence}"
+    fasta_content = f">{description}\n{sequence}"
     
     # Run OpenFold in a subprocess with streaming output
     fasta_dir = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}')
@@ -214,6 +217,9 @@ def process():
         '--uniclust30_database_path', f'{data_dir}/uniclust30/uniclust30_2018_08/uniclust30_2018_08',
         '--bfd_database_path', f'{data_dir}/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt',
         '--save_outputs',
+        '--cpus', '8',
+        '--use_precomputed_alignments', '/home/hice1/vsr9/scratch/attention-viz-demo/examples/monomer/alignments',
+        '--enable_chunking',
         '--model_device', 'cuda:0',
         '--attn_map_dir', attn_map_dir,
         '--num_recycles_save', '1',
@@ -246,7 +252,7 @@ def process():
     }
     
     # Path to the expected PDB file
-    pdb_file = f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions/{protein_id}_model_1_ptm_relaxed.pdb'
+    pdb_file = f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions/{description_protein if description_protein else protein_id}_model_1_ptm_relaxed.pdb'
     # Return the streaming response
     return stream_output(process, pdb_file, protein_id, prediction_id)
 

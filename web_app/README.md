@@ -5,12 +5,17 @@ This is a Flask-based web interface for running OpenFold protein structure predi
 
 ## Running the Application
 
-1. Start the Flask development server:
+1. Change your directory to the web_app directory:
+   ```bash
+   cd web_app
+   ```
+
+2. Start the Flask development server:
    ```bash
    python app.py
    ```
 
-2. Open your web browser and navigate to:
+3. Open your web browser and navigate to:
    ```
    http://localhost:5000
    ```
