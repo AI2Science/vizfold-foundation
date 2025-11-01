@@ -4,7 +4,14 @@ import time
 import json
 import glob
 import shutil
+import threading
+import sys
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response
+
+# Ensure project root is importable when running from web_app
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = './web_tmp_dir'
@@ -101,6 +108,32 @@ def parse_fasta_file(fasta_path):
             'residue_idx': int(residue_idx),
             'pdb_file': pdb_file
         }
+
+def get_paths_for_protein(protein_id, residue_idx):
+    base = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    attn_map_dir = os.path.join(base, f'outputs/attention_files_{protein_id}_demo_tri_{residue_idx}')
+    return attn_map_dir
+
+def detect_available_layers(attn_map_dir, residue_idx):
+    layers_msa = set()
+    layers_tri = set()
+    if os.path.isdir(attn_map_dir):
+        for fname in os.listdir(attn_map_dir):
+            if fname.startswith('msa_row_attn_layer') and fname.endswith('.txt'):
+                try:
+                    L = int(fname.replace('msa_row_attn_layer', '').replace('.txt', ''))
+                    layers_msa.add(L)
+                except ValueError:
+                    pass
+            if fname.startswith('triangle_start_attn_layer') and f"residue_idx_{residue_idx}" in fname and fname.endswith('.txt'):
+                try:
+                    core = fname.split('triangle_start_attn_layer')[1]
+                    L = int(core.split('_')[0])
+                    layers_tri.add(L)
+                except Exception:
+                    pass
+    return sorted(layers_msa), sorted(layers_tri)
+
 
 @app.route('/cancel_prediction', methods=['POST'])
 def cancel_prediction():
@@ -260,6 +293,10 @@ def process():
 def serve_pdb(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+@app.route('/outputs/<path:filename>')
+def serve_outputs(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], os.path.join('outputs', filename))
+
 @app.route('/proteins')
 def list_proteins():
     """List all available proteins from FASTA files."""
@@ -271,6 +308,60 @@ def list_proteins():
         if protein_data:
             proteins.append(protein_data)
     return jsonify(proteins)
+
+@app.route('/viz/list')
+def list_viz():
+    protein_id = request.args.get('protein_id')
+    residue_idx = request.args.get('residue_idx', type=int)
+    if not protein_id or residue_idx is None:
+        return jsonify({'error': 'protein_id and residue_idx required'}), 400
+
+    attn_map_dir = get_paths_for_protein(protein_id, residue_idx)
+    layers_msa, layers_tri = detect_available_layers(attn_map_dir, residue_idx)
+
+    def arc_png_path(attn_type, L):
+        if attn_type == 'msa_row':
+            fname = f"msa_row_head_0_layer_{L}_{protein_id}_arc.png"
+            # Note: multiple heads exist; frontend can pick head; here we default head 0
+            path = os.path.join('attention_images_' + f"{protein_id}_demo_tri_{residue_idx}", 'msa_row_attention_plots', fname)
+        else:
+            fname = f"tri_start_res_{residue_idx}_head_0_layer_{L}_{protein_id}_arc.png"
+            path = os.path.join('attention_images_' + f"{protein_id}_demo_tri_{residue_idx}", 'tri_start_attention_plots', fname)
+        return f"/outputs/{path}"
+
+    def heatmap_html_path(attn_type, L):
+        if attn_type == 'msa_row':
+            fname = f"msa_row_layer{L}_heatmap_grid.html"
+        else:
+            fname = f"triangle_start_layer{L}_res{residue_idx}_heatmap_grid.html"
+        path = os.path.join('attention_images_' + f"{protein_id}_demo_tri_{residue_idx}", 'heatmaps', fname)
+        return f"/outputs/{path}"
+
+    def attn_file_path(attn_type, L):
+        if attn_type == 'msa_row':
+            fname = f"msa_row_attn_layer{L}.txt"
+        else:
+            fname = f"triangle_start_attn_layer{L}_residue_idx_{residue_idx}.txt"
+        path = os.path.join(f"attention_files_{protein_id}_demo_tri_{residue_idx}", fname)
+        return f"/outputs/{path}"
+
+    result = {
+        'protein_id': protein_id,
+        'residue_idx': residue_idx,
+        'msa_row': {
+            'layers': layers_msa,
+            'assets': {str(L): {
+                'attn_file_url': attn_file_path('msa_row', L),
+            } for L in layers_msa}
+        },
+        'triangle_start': {
+            'layers': layers_tri,
+            'assets': {str(L): {
+                'attn_file_url': attn_file_path('triangle_start', L),
+            } for L in layers_tri}
+        }
+    }
+    return jsonify(result)
 
 
 

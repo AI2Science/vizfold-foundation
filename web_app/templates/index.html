@@ -172,6 +172,71 @@
             </div>
         </div>
     </div>
+
+    <!-- Attention Visualizations Section -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse"
+            href="#attnCollapse" role="button" aria-expanded="false" aria-controls="attnCollapse"
+            style="cursor: pointer;">
+            <h5 class="mb-0">Attention Visualizations</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div class="collapse" id="attnCollapse">
+            <div class="card-body">
+                <div class="row align-items-center g-3 mb-3">
+                    <div class="col-md-4">
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" id="attnDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                                Select visualization
+                            </button>
+                            <ul class="dropdown-menu" id="attn-dropdown-menu">
+                                <li><a class="dropdown-item" href="#" data-type="msa_row">MSA Row Attention</a></li>
+                                <li><a class="dropdown-item" href="#" data-type="triangle_start">Triangle Start Attention</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center gap-3">
+                            <div class="flex-grow-1">
+                                <label for="layerRange" class="form-label mb-0">Layer: <span id="layerValue">-</span></label>
+                                <input type="range" class="form-range" id="layerRange" min="0" max="0" value="0" disabled>
+                            </div>
+                            <div class="form-check ms-2">
+                                <input class="form-check-input" type="checkbox" value="" id="noLayer3D">
+                                <label class="form-check-label" for="noLayer3D">No layer</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="attn-loading" class="text-center" style="display: none;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Preparing attention visualizations...</p>
+                </div>
+                <div class="row g-3 mb-2" id="attn-content" style="display: none;">
+                    <div class="col-12 d-flex align-items-center">
+                        <label class="me-2">Head:</label>
+                        <select id="headSelect" class="form-select form-select-sm" style="width:auto"></select>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100">
+                            <div class="fw-bold mb-2">Arc Diagram</div>
+                            <svg id="arcSvg" width="100%" height="480"></svg>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100">
+                            <div class="fw-bold mb-2">Attention Heatmap</div>
+                            <canvas id="heatmapCanvas" width="800" height="480" style="width:100%; height:480px;"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Bootstrap Icons -->
@@ -267,6 +332,8 @@
         outputCollapse.show();
         let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
         threeDCollapse.hide();
+        let attnCollapse = new bootstrap.Collapse(document.getElementById('attnCollapse'), { toggle: false });
+        attnCollapse.hide();
 
         // Show loading indicator and hide viewer controls
         loading.style.display = 'block';
@@ -316,6 +383,12 @@
                 runButton.disabled = false;
                 cancelButton.style.display = 'none';
                 loadPDB(data.pdb_file);
+                // Initialize attention UI and start polling for this prediction
+                const protId = document.getElementById('protein-id').value;
+                const resIdx = parseInt(document.getElementById('residue-idx').value || '0');
+                currentProteinMeta = { protein_id: protId, residue_idx: resIdx };
+                initAttentionUI();
+                attnCollapse.show();
                 eventSource.close();
             }
         };
@@ -366,6 +439,12 @@
                                 outputElement.textContent += '\nError loading PDB: ' + error.message + '\n';
                             });
                         }
+                        // Also initialize attention UI
+                        const protId = document.getElementById('protein-id').value;
+                        const resIdx = parseInt(document.getElementById('residue-idx').value || '0');
+                        currentProteinMeta = { protein_id: protId, residue_idx: resIdx };
+                        initAttentionUI();
+                        attnCollapse.show();
                     }
                 } catch (e) {
                     console.error('Error processing message:', e);
@@ -506,6 +585,10 @@
     });
     // Store the current model
     let currentModel = null;
+    let currentProteinMeta = null; // {protein_id, residue_idx}
+    let attnData = null; // cached list from /viz/list
+    let attnType = 'msa_row';
+    let attnPollTimer = null;
 
     // Function to load proteins from /proteins endpoint
     async function loadProteins() {
@@ -563,8 +646,14 @@
         document.getElementById('sequence').value = protein.sequence;
         document.getElementById('residue-idx').value = protein.residue_idx;
         loadPDB(protein.pdb_file);
+        currentProteinMeta = { protein_id: protein.protein_id, residue_idx: protein.residue_idx };
+        initAttentionUI();
+        let outputCollapse = new bootstrap.Collapse(document.getElementById('outputCollapse'), { toggle: false });
+        outputCollapse.hide();
         let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
         threeDCollapse.show();
+        let attnCollapse = new bootstrap.Collapse(document.getElementById('attnCollapse'), { toggle: false });
+        attnCollapse.show();
         // Close dropdown
         const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('proteinDropdown'));
         if (dropdown) {
@@ -581,8 +670,15 @@
         document.getElementById('residue-idx').value = '';
         window.viewer.clear();
         document.getElementById('viewer-controls').style.display = 'none';
+        currentProteinMeta = null;
+        attnData = null;
+        updateAttentionDisplay(null);
+        let outputCollapse = new bootstrap.Collapse(document.getElementById('outputCollapse'), { toggle: false });
+        outputCollapse.hide();
         let threeDCollapse = new bootstrap.Collapse(document.getElementById('threeDCollapse'), { toggle: false });
         threeDCollapse.hide();
+        let attnCollapse = new bootstrap.Collapse(document.getElementById('attnCollapse'), { toggle: false });
+        attnCollapse.hide();
         // Close dropdown
         const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('proteinDropdown'));
         if (dropdown) {
@@ -611,6 +707,16 @@
             // Store the current model
             currentModel = pdbData;
 
+            // Compute residue coordinates (CA atoms) for 3D overlays
+            try {
+                const model = window.viewer.getModel();
+                const caAtoms = model ? model.selectedAtoms({ atom: 'CA' }) : [];
+                window.residueCoords = caAtoms.map(a => ({ x: a.x, y: a.y, z: a.z }));
+            } catch (e) {
+                console.warn('Failed to compute CA coordinates', e);
+                window.residueCoords = [];
+            }
+
             // Show viewer controls
             document.getElementById('viewer-controls').style.display = 'block';
 
@@ -620,6 +726,531 @@
         }
     }
 
+
+    // Attention visualization logic
+    // Pan/Zoom view states
+    let arcView = { xMin: 0, xMax: null }; // in index units [0, n]
+    let currentArcConnections = [];
+    let currentSequence = '';
+    let heatView = { x: 0, y: 0, w: null, h: null }; // in grid units
+    let lastHeatSource = null; // offscreen canvas with full heatmap image
+    let lastHeatSeqLen = 0;
+    function initAttentionUI() {
+        const menu = document.getElementById('attn-dropdown-menu');
+        if (!menu) return;
+        menu.querySelectorAll('a').forEach(a => {
+            a.onclick = (e) => {
+                e.preventDefault();
+                attnType = a.getAttribute('data-type');
+                document.getElementById('attnDropdown').textContent = a.textContent;
+                if (attnData) updateLayerControls();
+                updateAttentionDisplay(getCurrentAssets());
+            };
+        });
+
+        // default selection
+        attnType = 'msa_row';
+        const attnBtn = document.getElementById('attnDropdown');
+        if (attnBtn) attnBtn.textContent = 'MSA Row Attention';
+
+        const range = document.getElementById('layerRange');
+        if (range) {
+            range.oninput = () => {
+                document.getElementById('layerValue').textContent = range.value;
+                updateAttentionDisplay(getCurrentAssets());
+            };
+        }
+
+        // Trigger generation and start polling for availability
+        triggerVizGeneration();
+        pollVizUntilReady();
+
+        // Setup interactions
+        setupArcInteractions();
+        setupHeatmapInteractions();
+
+        const noLayerChk = document.getElementById('noLayer3D');
+        if (noLayerChk) {
+            noLayerChk.onchange = () => {
+                if (noLayerChk.checked) {
+                    clear3DOverlay();
+                } else {
+                    maybeUpdate3DOverlay();
+                }
+            };
+        }
+    }
+
+    function setAttnLoading(loading) {
+        const loadingEl = document.getElementById('attn-loading');
+        const contentEl = document.getElementById('attn-content');
+        if (!loadingEl || !contentEl) return;
+        loadingEl.style.display = loading ? 'block' : 'none';
+        contentEl.style.display = loading ? 'none' : 'flex';
+    }
+
+    function updateLayerControls() {
+        const range = document.getElementById('layerRange');
+        const layers = (attnType === 'msa_row') ? (attnData?.msa_row?.layers || []) : (attnData?.triangle_start?.layers || []);
+        if (!range) return;
+        if (layers.length === 0) {
+            range.disabled = true;
+            range.min = 0; range.max = 0; range.value = 0;
+            document.getElementById('layerValue').textContent = '-';
+            return;
+        }
+        layers.sort((a,b)=>a-b);
+        range.disabled = false;
+        range.min = layers[0];
+        range.max = layers[layers.length-1];
+        if (!layers.includes(parseInt(range.value))) {
+            range.value = layers[0];
+        }
+        document.getElementById('layerValue').textContent = range.value;
+    }
+
+    function getCurrentAssets() {
+        if (!attnData) return null;
+        const L = document.getElementById('layerRange').value;
+        const assets = (attnType === 'msa_row') ? attnData.msa_row.assets[String(L)] : attnData.triangle_start.assets[String(L)];
+        return assets || null;
+    }
+
+    function updateAttentionDisplay(assets) {
+        if (!assets) {
+            setAttnLoading(true);
+            clearArcAndHeatmap();
+            return;
+        }
+        setAttnLoading(false);
+        fetchAndRenderAttention(assets.attn_file_url);
+    }
+
+    function clearArcAndHeatmap() {
+        const svg = document.getElementById('arcSvg');
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        const ctx = document.getElementById('heatmapCanvas').getContext('2d');
+        ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+    }
+
+    async function fetchAndRenderAttention(url) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('failed to fetch attention file');
+            const text = await res.text();
+            const parsed = parseAttentionFile(text);
+            populateHeadSelector(Object.keys(parsed).map(x=>parseInt(x,10)).sort((a,b)=>a-b));
+            const head = getSelectedHead();
+            const edges = preprocessConnections(parsed[head] || []);
+            currentArcConnections = edges;
+            currentSequence = getSequence();
+            // reset arc view to full range
+            arcView.xMin = 0; arcView.xMax = currentSequence.length;
+            renderArcDiagram(currentArcConnections, currentSequence);
+            renderHeatmap(parsed[head] || [], currentSequence.length);
+            // update 3D overlay if enabled
+            maybeUpdate3DOverlay();
+        } catch (e) {
+            console.warn('fetchAndRenderAttention error', e);
+            clearArcAndHeatmap();
+        }
+    }
+
+    function parseAttentionFile(text) {
+        const lines = text.split(/\r?\n/);
+        const heads = {};
+        let currentHead = null;
+        for (let raw of lines) {
+            const line = raw.trim();
+            if (!line) continue;
+            if (line.toLowerCase().startsWith('layer')) {
+                // e.g., "Layer 47, Head 0"
+                const parts = line.replace(',', '').split(/\s+/);
+                const headIdx = parseInt(parts[parts.length-1], 10);
+                currentHead = headIdx;
+                if (!(currentHead in heads)) heads[currentHead] = [];
+            } else {
+                const parts = line.split(/\s+/);
+                if (parts.length >= 3) {
+                    const r1 = parseInt(parts[0], 10);
+                    const r2 = parseInt(parts[1], 10);
+                    const w = parseFloat(parts[2]);
+                    if (!Number.isNaN(r1) && !Number.isNaN(r2) && !Number.isNaN(w)) {
+                        heads[currentHead].push([r1, r2, w]);
+                    }
+                }
+            }
+        }
+        return heads;
+    }
+
+    function populateHeadSelector(heads) {
+        const sel = document.getElementById('headSelect');
+        if (!sel) return;
+        const current = sel.value;
+        sel.innerHTML = '';
+        heads.forEach(h => {
+            const opt = document.createElement('option');
+            opt.value = String(h);
+            opt.textContent = `Head ${h}`;
+            sel.appendChild(opt);
+        });
+        if (heads.length > 0) {
+            sel.value = heads.includes(parseInt(current,10)) ? current : String(heads[0]);
+        }
+        sel.onchange = () => {
+            // Re-render with current layer/type
+            const assets = getCurrentAssets();
+            if (assets) fetchAndRenderAttention(assets.attn_file_url);
+        };
+    }
+
+    function getSelectedHead() {
+        const sel = document.getElementById('headSelect');
+        return sel && sel.value ? parseInt(sel.value, 10) : 0;
+    }
+
+    function getSequence() {
+        return (document.getElementById('sequence').value || '').trim();
+    }
+
+    function renderArcDiagram(connections, sequence) {
+        const svg = document.getElementById('arcSvg');
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const n = sequence.length;
+        const width = svg.clientWidth || svg.parentElement.clientWidth;
+        const height = svg.getAttribute('height') ? parseInt(svg.getAttribute('height'),10) : 480;
+        const padding = 20;
+        const baselineY = height - 40;
+        // Ensure view initialized
+        if (arcView.xMax === null) { arcView.xMin = 0; arcView.xMax = n; }
+        const viewSpan = Math.max(arcView.xMax - arcView.xMin, 1e-6);
+        const xScale = (width - 2*padding) / viewSpan;
+        const xCenter = (fIndex) => padding + xScale * (fIndex - arcView.xMin); // fIndex can be fractional (i+0.5)
+        const xTick = (i) => xCenter(i + 0.5);
+
+        // draw baseline residue labels (only those visible), snap to pixel to reduce flicker
+        const iStart = Math.max(0, Math.floor(arcView.xMin));
+        const iEnd = Math.min(n, Math.ceil(arcView.xMax));
+        for (let i=iStart;i<iEnd;i++) {
+            const tx = document.createElementNS('http://www.w3.org/2000/svg','text');
+            const xpix = Math.round(xTick(i));
+            tx.setAttribute('x', xpix);
+            tx.setAttribute('y', baselineY + 14);
+            tx.setAttribute('text-anchor','middle');
+            tx.setAttribute('font-size','10');
+            tx.textContent = sequence[i];
+            // Highlight specific residue for triangle_start, matching Python's behavior
+            if (attnType === 'triangle_start' && currentProteinMeta && typeof currentProteinMeta.residue_idx === 'number' && currentProteinMeta.residue_idx === i) {
+                tx.setAttribute('fill', 'blue');
+                tx.setAttribute('font-weight', 'bold');
+            }
+            svg.appendChild(tx);
+        }
+
+        if (!connections || connections.length === 0) return;
+        const weights = connections.map(c=>c[2]);
+        const wmin = Math.min(...weights), wmax = Math.max(...weights);
+        const norm = (w)=> (wmax!==wmin) ? (w - wmin)/(wmax-wmin) : 0.5;
+
+        // Determine scaling so tallest arc is 75% of drawable height
+        const drawableHeight = baselineY - padding; // from top padding to baseline
+        let maxAbsDist = 0;
+        for (const [r1, r2] of connections) {
+            const df = Math.abs((r2 + 0.5) - (r1 + 0.5));
+            if (df > maxAbsDist) maxAbsDist = df;
+        }
+        const rawMaxHeightPx = maxAbsDist * 0.5 * ((width - 2*padding) / n); // base scale uses full index scale to match parity across zoom
+        const targetMaxHeight = 0.75 * drawableHeight;
+        const heightScale = rawMaxHeightPx > 0 ? (targetMaxHeight / rawMaxHeightPx) : 1.0;
+
+        // Draw arcs as sampled semicircles to match matplotlib implementation
+        const SAMPLES = 60; // number of samples for the semicircle
+        connections.forEach(([r1, r2, w]) => {
+            // Apply +0.5 offset in index space
+            const f1 = r1 + 0.5;
+            const f2 = r2 + 0.5;
+            // Pixel x for endpoints
+            const px1 = xCenter(f1);
+            const px2 = xCenter(f2);
+            // Height in index units is |f2 - f1|/2; convert to pixels via BASE xScale (full index span) and global scaling
+            const baseXScale = (width - 2*padding) / n;
+            const heightPx = Math.abs(f2 - f1) * 0.5 * baseXScale * heightScale;
+            const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+            let d = '';
+            for (let i=0; i<=SAMPLES; i++) {
+                const t = i / SAMPLES; // 0..1
+                const xpx = px1 + (px2 - px1) * t;
+                const ypx = baselineY - heightPx * Math.sin(Math.PI * t);
+                d += (i===0 ? `M ${xpx} ${ypx}` : ` L ${xpx} ${ypx}`);
+            }
+            const nw = norm(w);
+            const strokeWidth = (0.5 + 3* nw).toFixed(2);
+            const blue = Math.round((0.5 + 0.5 * nw) * 255);
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', `rgb(0,0,${blue})`);
+            path.setAttribute('stroke-width', strokeWidth);
+            path.setAttribute('fill','none');
+            path.setAttribute('opacity','0.9');
+            svg.appendChild(path);
+        });
+    }
+
+    function clear3DOverlay() {
+        try { window.viewer.removeAllShapes(); window.viewer.render(); } catch (e) {}
+    }
+
+    function maybeUpdate3DOverlay() {
+        const noLayer = document.getElementById('noLayer3D');
+        if (noLayer && noLayer.checked) { clear3DOverlay(); return; }
+        if (!Array.isArray(window.residueCoords) || window.residueCoords.length === 0) return;
+        if (!currentArcConnections || currentArcConnections.length === 0) { clear3DOverlay(); return; }
+        try {
+            // Remove previous shapes
+            window.viewer.removeAllShapes();
+            const n = currentSequence ? currentSequence.length : window.residueCoords.length;
+            const weights = currentArcConnections.map(e=>e[2]);
+            const wmin = Math.min(...weights), wmax = Math.max(...weights);
+            const norm = (w)=> (wmax!==wmin) ? (w - wmin)/(wmax-wmin) : 0.5;
+            currentArcConnections.forEach(([i,j,w]) => {
+                if (i<0||j<0||i>=n||j>=n) return;
+                const a = window.residueCoords[i];
+                const b = window.residueCoords[j];
+                if (!a||!b) return;
+                const t = norm(w);
+                const radius = 0.1 + 0.4 * t; // scale radius by weight
+                const blue = Math.round((0.5 + 0.5*t) * 255);
+                window.viewer.addCylinder({
+                    start: a, end: b,
+                    radius: radius,
+                    fromCap: 1, toCap: 1,
+                    color: `rgb(0,0,${blue})`
+                });
+            });
+            window.viewer.render();
+        } catch (e) {
+            console.warn('Failed updating 3D overlay', e);
+        }
+    }
+
+    function preprocessConnections(connections) {
+        // Match Python generate_arc_diagrams behavior:
+        // - r1 != r2 (no self loops)
+        // - treat pairs as undirected (i<j), keep max weight per pair
+        // - apply top_k=50 by weight desc
+        const pairs = new Map();
+        for (const item of connections) {
+            const r1 = item[0]|0, r2 = item[1]|0; const w = Number(item[2]);
+            if (!Number.isFinite(w)) continue;
+            if (r1 === r2) continue;
+            const a = Math.min(r1, r2), b = Math.max(r1, r2);
+            const key = a + '-' + b;
+            const prev = pairs.get(key);
+            if (prev === undefined || w > prev) pairs.set(key, w);
+        }
+        const arr = Array.from(pairs.entries()).map(([key, w]) => {
+            const [a, b] = key.split('-').map(x=>parseInt(x,10));
+            return [a, b, w];
+        });
+        arr.sort((x,y)=> y[2]-x[2]);
+        const TOP_K = 50;
+        return arr.slice(0, TOP_K);
+    }
+
+    function renderHeatmap(connections, seqLen) {
+        const canvas = document.getElementById('heatmapCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        const W = canvas.width, H = canvas.height;
+        const grid = new Float32Array(seqLen*seqLen);
+        let wmin = Infinity, wmax = -Infinity;
+        for (const [r1,r2,w] of connections) {
+            const idx = r1*seqLen + r2;
+            grid[idx] = w;
+            if (w<wmin) wmin=w;
+            if (w>wmax) wmax=w;
+        }
+        if (!isFinite(wmin) || !isFinite(wmax)) { wmin=0; wmax=1; }
+        const norm = (v)=> (wmax!==wmin)? (v-wmin)/(wmax-wmin) : 0.5;
+        const img = ctx.createImageData(seqLen, seqLen);
+        for (let y=0;y<seqLen;y++){
+            for (let x=0;x<seqLen;x++){
+                const v = norm(grid[y*seqLen+x] || 0);
+                const i = (y*seqLen + x)*4;
+                const r = 230 - Math.floor(180*v);
+                const g = 240 - Math.floor(200*v);
+                const b = 255;
+                img.data[i]=r; img.data[i+1]=g; img.data[i+2]=b; img.data[i+3]=255;
+            }
+        }
+        // scale to canvas
+        const off = document.createElement('canvas');
+        off.width = seqLen; off.height = seqLen;
+        off.getContext('2d').putImageData(img,0,0);
+        // store for pan/zoom redraws
+        lastHeatSource = off;
+        lastHeatSeqLen = seqLen;
+        if (heatView.w === null || heatView.h === null) { heatView = { x: 0, y: 0, w: seqLen, h: seqLen }; }
+        redrawHeatmap();
+        // axes labels are omitted for simplicity
+    }
+
+    function redrawHeatmap() {
+        const canvas = document.getElementById('heatmapCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        if (!lastHeatSource) return;
+        const W = canvas.width, H = canvas.height;
+        const sx = Math.max(0, Math.min(lastHeatSeqLen-1, heatView.x));
+        const sy = Math.max(0, Math.min(lastHeatSeqLen-1, heatView.y));
+        const sw = Math.max(1, Math.min(lastHeatSeqLen - sx, heatView.w));
+        const sh = Math.max(1, Math.min(lastHeatSeqLen - sy, heatView.h));
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(lastHeatSource, sx, sy, sw, sh, 0, 0, W, H);
+    }
+
+    function setupArcInteractions() {
+        const svg = document.getElementById('arcSvg');
+        let isDown = false; let startX = 0; let startMin = 0;
+        svg.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            isDown = true;
+            startX = e.clientX;
+            startMin = arcView.xMin;
+            // prevent text selection during drag
+            document.body.style.userSelect = 'none';
+            svg.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mouseup', ()=> isDown=false);
+        window.addEventListener('mousemove', (e)=>{
+            if (!isDown || !currentSequence) return;
+            e.preventDefault();
+            const width = svg.clientWidth || svg.parentElement.clientWidth;
+            const padding = 20;
+            const drawable = Math.max(1, width - 2*padding);
+            const span = Math.max(1e-6, arcView.xMax - arcView.xMin);
+            const dxPx = e.clientX - startX;
+            const dIndex = dxPx / drawable * span;
+            const n = currentSequence.length;
+            let newMin = startMin - dIndex;
+            newMin = Math.max(0, Math.min(n - span, newMin));
+            arcView.xMin = newMin; arcView.xMax = newMin + span;
+            renderArcDiagram(currentArcConnections, currentSequence);
+        });
+        window.addEventListener('mouseup', ()=>{
+            document.body.style.userSelect = '';
+            svg.style.cursor = '';
+        });
+        svg.addEventListener('wheel', (e)=>{
+            if (!currentSequence) return;
+            e.preventDefault();
+            const rect = svg.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const width = svg.clientWidth || svg.parentElement.clientWidth;
+            const padding = 20;
+            const drawable = Math.max(1, width - 2*padding);
+            const n = currentSequence.length;
+            const span = Math.max(1e-6, arcView.xMax - arcView.xMin);
+            const mouseT = Math.max(0, Math.min(1, (x - padding) / drawable));
+            const mouseIndex = arcView.xMin + mouseT * span;
+            const factor = (e.deltaY < 0) ? 0.9 : 1.1; // zoom in/out
+            let newSpan = Math.max(5, Math.min(n, span * factor));
+            let newMin = mouseIndex - mouseT * newSpan;
+            newMin = Math.max(0, Math.min(n - newSpan, newMin));
+            arcView.xMin = newMin; arcView.xMax = newMin + newSpan;
+            renderArcDiagram(currentArcConnections, currentSequence);
+        }, { passive: false });
+    }
+
+    function setupHeatmapInteractions() {
+        const canvas = document.getElementById('heatmapCanvas');
+        let isDown = false; let startX=0, startY=0; let startView=null;
+        canvas.addEventListener('mousedown', (e)=>{
+            isDown = true;
+            startX = e.clientX; startY = e.clientY;
+            startView = { ...heatView };
+        });
+        window.addEventListener('mouseup', ()=> isDown=false);
+        window.addEventListener('mousemove', (e)=>{
+            if (!isDown || !lastHeatSource) return;
+            const W = canvas.clientWidth; const H = canvas.clientHeight;
+            const dxPx = e.clientX - startX; const dyPx = e.clientY - startY;
+            // translate in grid units proportionally to current view extents
+            const dX = dxPx / Math.max(1, W) * startView.w;
+            const dY = dyPx / Math.max(1, H) * startView.h;
+            const maxX = Math.max(0, lastHeatSeqLen - startView.w);
+            const maxY = Math.max(0, lastHeatSeqLen - startView.h);
+            heatView.x = Math.max(0, Math.min(maxX, startView.x - dX));
+            heatView.y = Math.max(0, Math.min(maxY, startView.y - dY));
+            redrawHeatmap();
+        });
+        canvas.addEventListener('wheel', (e)=>{
+            if (!lastHeatSource) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const W = canvas.clientWidth; const H = canvas.clientHeight;
+            const tx = Math.max(0, Math.min(1, mx / Math.max(1, W)));
+            const ty = Math.max(0, Math.min(1, my / Math.max(1, H)));
+            const factor = (e.deltaY < 0) ? 0.9 : 1.1;
+            let newW = Math.max(10, Math.min(lastHeatSeqLen, heatView.w * factor));
+            let newH = Math.max(10, Math.min(lastHeatSeqLen, heatView.h * factor));
+            const cx = heatView.x + tx * heatView.w;
+            const cy = heatView.y + ty * heatView.h;
+            let newX = cx - tx * newW;
+            let newY = cy - ty * newH;
+            newX = Math.max(0, Math.min(lastHeatSeqLen - newW, newX));
+            newY = Math.max(0, Math.min(lastHeatSeqLen - newH, newY));
+            heatView = { x: newX, y: newY, w: newW, h: newH };
+            redrawHeatmap();
+        }, { passive: false });
+    }
+
+    async function triggerVizGeneration() {
+        if (!currentProteinMeta) return;
+        try {
+            await fetch('/viz/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ protein_id: currentProteinMeta.protein_id })
+            });
+        } catch (e) {
+            console.warn('Failed to trigger viz generation:', e);
+        }
+    }
+
+    async function fetchVizList() {
+        if (!currentProteinMeta) return null;
+        const params = new URLSearchParams({
+            protein_id: currentProteinMeta.protein_id,
+            residue_idx: currentProteinMeta.residue_idx
+        });
+        const res = await fetch(`/viz/list?${params.toString()}`);
+        if (!res.ok) return null;
+        return await res.json();
+    }
+
+    async function pollVizUntilReady() {
+        if (attnPollTimer) clearInterval(attnPollTimer);
+        setAttnLoading(true);
+        const attempt = async () => {
+            try {
+                const data = await fetchVizList();
+                if (data && ((data.msa_row.layers && data.msa_row.layers.length>0) || (data.triangle_start.layers && data.triangle_start.layers.length>0))) {
+                    attnData = data;
+                    updateLayerControls();
+                    updateAttentionDisplay(getCurrentAssets());
+                    if (attnPollTimer) clearInterval(attnPollTimer);
+                }
+            } catch (e) {
+                console.warn('viz list fetch failed', e);
+            }
+        };
+        await attempt();
+        attnPollTimer = setInterval(attempt, 4000);
+    }
 
 </script>
 </body>
