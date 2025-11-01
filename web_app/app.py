@@ -251,14 +251,16 @@ def process():
         '--bfd_database_path', f'{data_dir}/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt',
         '--save_outputs',
         '--cpus', '8',
-        '--use_precomputed_alignments', '/home/hice1/vsr9/scratch/attention-viz-demo/examples/monomer/alignments',
-        '--enable_chunking',
         '--model_device', 'cuda:0',
         '--attn_map_dir', attn_map_dir,
         '--num_recycles_save', '1',
         '--triangle_residue_idx', str(residue_idx),
         '--demo_attn'
     ]
+
+    if (os.path.exists(os.path.abspath(f'./examples/monomer/alignments/fasta_dir_{protein_id}'))):
+        cmd.append('--use_precomputed_alignments')
+        cmd.append(os.path.abspath('./examples/monomer/alignments'))
 
     # Store the process
     process = subprocess.Popen(
