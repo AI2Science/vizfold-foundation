@@ -6,7 +6,9 @@ import glob
 import shutil
 import threading
 import sys
+import multiprocessing
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Ensure project root is importable when running from web_app
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -15,6 +17,7 @@ if PROJECT_ROOT not in sys.path:
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = './web_tmp_dir'
+
 # Store running processes
 running_processes = {}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
@@ -212,8 +215,10 @@ def process():
     description_protein = description.split('|')[0]
     fasta_exists = os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}'))
     output_exists = os.listdir(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) if os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) else []
+    prot_old = protein_id
     if fasta_exists or len(output_exists) > 0:
         protein_id = f"{protein_id}_new"
+
     # Format FASTA content
     fasta_content = f">{description}\n{sequence}"
     
@@ -250,7 +255,7 @@ def process():
         '--uniclust30_database_path', f'{data_dir}/uniclust30/uniclust30_2018_08/uniclust30_2018_08',
         '--bfd_database_path', f'{data_dir}/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt',
         '--save_outputs',
-        '--cpus', '8',
+        '--cpus', str(max(multiprocessing.cpu_count() - 2, 1)),
         '--model_device', 'cuda:0',
         '--attn_map_dir', attn_map_dir,
         '--num_recycles_save', '1',
@@ -258,9 +263,11 @@ def process():
         '--demo_attn'
     ]
 
-    if (os.path.exists(os.path.abspath(f'./examples/monomer/alignments/fasta_dir_{protein_id}'))):
+    if (os.path.exists(os.path.abspath(f'../examples/monomer/fasta_dir_{prot_old}'))):
         cmd.append('--use_precomputed_alignments')
-        cmd.append(os.path.abspath('./examples/monomer/alignments'))
+        cmd.append(os.path.abspath('../examples/monomer/alignments'))
+
+    print(os.path.abspath(f'../examples/monomer/fasta_dir_{prot_old}'))
 
     # Store the process
     process = subprocess.Popen(
@@ -368,4 +375,4 @@ def list_viz():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=9000, debug=True)
