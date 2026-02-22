@@ -107,7 +107,7 @@ def generate_arc_diagrams(
     residue_sequence,
     output_dir,
     protein,
-    attention_type="msa_row",  # or "triangle_start"
+    attention_type="msa_row",  # or "triangle_start" or "triangle_end"
     residue_indices=None,      # only for triangle
     top_k=50,
     layer_idx=47,
@@ -144,6 +144,34 @@ def generate_arc_diagrams(
                 plt_title = f"Residue Attention: {protein} Tri Start (Head {head_idx} Layer {layer_idx})"
                 plot_arc_diagram_with_labels(connections, residue_sequence, output_file=out_png,
                              highlight_residue_index=res_idx, save_to_png=save_to_png, plt_title=plt_title)
+                pngs.append(out_png)
+
+    elif attention_type == "triangle_end":
+        assert residue_indices is not None, "residue_indices required for triangle_end attention"
+
+        for res_idx in residue_indices:
+            file_path = os.path.join(attention_dir, f"triangle_end_attn_layer{layer_idx}_residue_idx_{res_idx}.txt")
+            if not os.path.exists(file_path):
+                print(f"[Warning] Missing file for residue {res_idx}")
+                continue
+
+            heads = load_all_heads(file_path, top_k=top_k)
+            pngs = []
+
+            for head_idx, connections in heads.items():
+                out_png = os.path.join(
+                    output_dir,
+                    f"tri_end_res_{res_idx}_head_{head_idx}_layer_{layer_idx}_{protein}_arc.png"
+                )
+                plt_title = f"Residue Attention: {protein} Tri End (Head {head_idx} Layer {layer_idx})"
+                plot_arc_diagram_with_labels(
+                    connections,
+                    residue_sequence,
+                    output_file=out_png,
+                    highlight_residue_index=res_idx,
+                    save_to_png=save_to_png,
+                    plt_title=plt_title
+                )
                 pngs.append(out_png)
 
 

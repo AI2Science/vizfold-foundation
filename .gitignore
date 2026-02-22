@@ -18,3 +18,18 @@ cutlass/
 *.sto
 *.a3m
 *.hhr
+
+# Boltz tracing
+slurm-*.out
+slurm-*.err
+logs/
+outputs/boltz_runs/
+outputs/boltz_runs/**
+.cache/
+.cache/**
+**/__pycache__/
+**/*.pyc
+
+# Allow small Boltz example inputs to be tracked
+!scripts/boltz/inputs/
+!scripts/boltz/inputs/*.fasta

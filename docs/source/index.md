@@ -102,6 +102,7 @@ Any work that cites OpenFold should also cite [AlphaFold](https://www.nature.com
 :caption: Guides
 Installation.md
 Inference.md
+Boltz_Inference.md
 Single_Sequence_Inference.md
 Multimer_Inference.md
 OpenFold_Training_Setup.md
