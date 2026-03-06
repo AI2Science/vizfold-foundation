@@ -1,0 +1,180 @@
+From f210089a746a0f36793ab473d784a412497dbe39 Mon Sep 17 00:00:00 2001
+From: Mose Kim <mosekim@Moses-MacBook-Pro.local>
+Date: Thu, 5 Mar 2026 20:42:52 -0500
+Subject: [PATCH] Add ESMFold tracing scaffold and document setup
+
+---
+ .gitignore                     |   4 ++
+ docs/esmfold_tracing.md        |  23 +++++++
+ openfold/resources/__init__.py |   0
+ scripts/esmfold_tracer.py      | 110 +++++++++++++++++++++++++++++++++
+ 4 files changed, 137 insertions(+)
+ create mode 100644 docs/esmfold_tracing.md
+ create mode 100644 openfold/resources/__init__.py
+ create mode 100644 scripts/esmfold_tracer.py
+
+diff --git a/.gitignore b/.gitignore
+index 3f1d838..806d758 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -18,3 +18,7 @@ cutlass/
+ *.sto
+ *.a3m
+ *.hhr
++
++# Local env + build artifacts
++.venv/
++*.so
+diff --git a/docs/esmfold_tracing.md b/docs/esmfold_tracing.md
+new file mode 100644
+index 0000000..7c22418
+--- /dev/null
++++ b/docs/esmfold_tracing.md
+@@ -0,0 +1,23 @@
++# ESMFold Tracing (Prototype)
++
++This repo includes a prototype script to run ESMFold inference and capture
++layer-wise activations with forward hooks.
++
++## Environment notes
++
++ESMFold in `fair-esm` is most reliable on Python 3.10. (Python 3.11+ may
++error due to dataclass default validation in older ESMFold code.)
++
++## Setup
++
++From repo root:
++
++```bash
++python -m venv .venv
++source .venv/bin/activate
++python -m pip install --upgrade pip
++
++python -m pip install torch fair-esm numpy omegaconf ml-collections dm-tree biopython scipy einops tqdm modelcif
++
++python -m pip install -U setuptools wheel
++python -m pip install -e . --no-build-isolation
+\ No newline at end of file
+diff --git a/openfold/resources/__init__.py b/openfold/resources/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/scripts/esmfold_tracer.py b/scripts/esmfold_tracer.py
+new file mode 100644
+index 0000000..a01ce32
+--- /dev/null
++++ b/scripts/esmfold_tracer.py
+@@ -0,0 +1,110 @@
++"""
++ESMFold Tracer Prototype (VizFold Foundation)
++
++- Loads ESMFold (fair-esm)
++- Runs inference on a sample sequence
++- Captures layer-wise activations using forward hooks
++- Saves predicted structure (PDB) to outputs/
++
++This is a first step toward integrating ESMFold traces into VizFold's
++archive + visualization pipeline (Issue #43).
++"""
++
++from __future__ import annotations
++
++import os
++from dataclasses import dataclass
++from typing import List, Optional, Tuple, Union
++
++import torch
++import esm
++
++
++TensorOrTuple = Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
++
++
++@dataclass
++class TraceSummary:
++    num_layers_captured: int
++    first_shape: Optional[Tuple[int, ...]]
++    last_shape: Optional[Tuple[int, ...]]
++    pdb_path: str
++
++
++class ESMFoldTracer:
++    def __init__(self, device: Optional[str] = None):
++        print("Loading ESMFold model...")
++
++        self.model = esm.pretrained.esmfold_v1()
++        self.model.eval()
++
++        if device is None:
++            device = "mps" if torch.backends.mps.is_available() else "cpu"
++
++        self.device = device
++        self.model = self.model.to(self.device)
++        print(f"Using device: {self.device}")
++
++        self.activations: List[torch.Tensor] = []
++        self._hooks = []
++
++    def _activation_hook(self, module, inputs, output: TensorOrTuple):
++        # Some modules return tuples; capture the first tensor-like output
++        if isinstance(output, (tuple, list)) and len(output) > 0:
++            output = output[0]
++
++        if torch.is_tensor(output):
++            self.activations.append(output.detach().to("cpu"))
++
++    def register_hooks(self):
++        # Hook each transformer layer in the ESM backbone
++        for layer in self.model.esm.layers:
++            h = layer.register_forward_hook(self._activation_hook)
++            self._hooks.append(h)
++
++    def clear_hooks(self):
++        for h in self._hooks:
++            h.remove()
++        self._hooks = []
++
++    def run(self, sequence: str, out_pdb_path: str = "outputs/esmfold_traced.pdb") -> TraceSummary:
++        self.activations.clear()
++        self.register_hooks()
++
++        os.makedirs(os.path.dirname(out_pdb_path), exist_ok=True)
++
++        with torch.no_grad():
++            pdb_str = self.model.infer_pdb(sequence)
++
++        with open(out_pdb_path, "w") as f:
++            f.write(pdb_str)
++
++        self.clear_hooks()
++
++        first_shape = tuple(self.activations[0].shape) if self.activations else None
++        last_shape = tuple(self.activations[-1].shape) if self.activations else None
++
++        return TraceSummary(
++            num_layers_captured=len(self.activations),
++            first_shape=first_shape,
++            last_shape=last_shape,
++            pdb_path=out_pdb_path,
++        )
++
++
++def main():
++    # Small sequence to keep runtime reasonable
++    sequence = "MKTVRQERLKSIVRILERSKEPVSGAQ"
++
++    tracer = ESMFoldTracer()
++    summary = tracer.run(sequence)
++
++    print("Inference complete.")
++    print("Saved PDB to:", summary.pdb_path)
++    print("Captured activation tensors:", summary.num_layers_captured)
++    print("First activation shape:", summary.first_shape)
++    print("Last activation shape:", summary.last_shape)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+-- 
+2.49.0
+
