@@ -18,3 +18,7 @@ cutlass/
 *.sto
 *.a3m
 *.hhr
+
+# Local env + build artifacts
+.venv/
+*.so
