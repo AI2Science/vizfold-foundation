@@ -56,7 +56,7 @@ if ! command -v module >/dev/null 2>&1; then
   [ -f /usr/share/Modules/init/bash ] && source /usr/share/Modules/init/bash
 fi
 
-module load anaconda3
+module load anaconda3 >/dev/null 2>&1 || true
 
 # make conda activate work in non-interactive shells
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -144,8 +144,8 @@ for L in layers:
 print("[INFO] Wrote arc PNGs to", out_dir)
 PY
 
-echo "[INFO] Arc PNGs:"
-ls -l "$OUT_ARC" || true
+echo "[INFO] Arc PNGs count: $(find "$OUT_ARC" -maxdepth 1 -type f -name '*.png' | wc -l)"
+ls -1 "$OUT_ARC" | head -n 50 || true
 
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
 python - <<PY
@@ -163,5 +163,13 @@ with open(os.path.join("$OUT_RUN", "manifest.json"), "w") as f:
   json.dump(manifest, f, indent=2)
 print("[INFO] wrote", os.path.join("$OUT_RUN", "manifest.json"))
 PY
+
+python scripts/boltz/validate_boltz_traces.py \
+  --run_dir "$OUT_RUN" \
+  --layers "$TRACE_LAYERS" \
+  --residues "$TRACE_RESIDUES" \
+  --expect_heads 4 || { echo "[FAIL] validate_boltz_traces.py" >&2; exit 1; }
+
+echo "[PASS] validate_boltz_traces.py"
 
 echo "[DONE] $OUT_RUN"
