@@ -1,0 +1,11 @@
+{
+    "archive_version": "1.0",
+    "compressor": "blosc-zstd-l3",
+    "created_at": "2026-03-08T20:21:03",
+    "dataset": "MNIST",
+    "framework": "pytorch",
+    "model_name": "ViT-MNIST-scratch",
+    "num_classes": 10,
+    "num_samples": 8,
+    "task": "image_classification"
+}

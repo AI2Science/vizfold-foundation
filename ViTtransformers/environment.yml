@@ -1,0 +1,45 @@
+name: vip-zarr-vit
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  # Core scientific stack
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - pillow
+  - tqdm
+  - psutil
+
+  # Notebook / interactive workflow
+  - jupyterlab
+  - ipykernel
+
+  # PyTorch — pick ONE of the two options below:
+  # CPU-only (default, works everywhere):
+  # - pytorch
+  # - torchvision
+  # - cpuonly
+  # GPU (CUDA 12.1) — comment out the two lines above and uncomment these:
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1
+
+  # Zarr stack
+  - zarr=2.16
+  - numcodecs
+  - fsspec
+
+  # Install the Hugging Face pieces from pip for freshest compatibility
+  - pip:
+      - transformers
+      - huggingface_hub
+      - safetensors
+      - accelerate
