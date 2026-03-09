@@ -9,6 +9,8 @@
 
 ## 0. Environment Setup
 
+`cd ViTtransformers`\
+`conda env create -f environment.yml`
 
 ---
 
