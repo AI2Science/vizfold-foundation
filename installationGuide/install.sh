@@ -36,7 +36,7 @@ cd $ROOT_DIR/openfold
 source "$(conda info --base)/etc/profile.d/conda.sh"
 export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
 export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-$MAMBA_CMD init
+conda init
 # Create the OpenFold conda environment
 $MAMBA_CMD env create -n openfold_env -f environment.yml -y
 # Activate the OpenFold conda environment
@@ -53,7 +53,7 @@ module load $CONDA_MODULE
 source "$(conda info --base)/etc/profile.d/conda.sh"
 export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
 export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-$MAMBA_CMD init
+conda init
 $MAMBA_CMD activate openfold_env
 # Change directory to OpenFold
 cd $ROOT_DIR/openfold
@@ -89,7 +89,7 @@ module load $CONDA_MODULE
 source "$(conda info --base)/etc/profile.d/conda.sh"
 export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
 export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-$MAMBA_CMD init
+conda init
 $MAMBA_CMD activate openfold_env
 # Install additional required packages
 $MAMBA_CMD install -y ipykernel
@@ -112,7 +112,7 @@ module load $CONDA_MODULE
 source "$(conda info --base)/etc/profile.d/conda.sh"
 export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
 export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-$MAMBA_CMD init
+conda init
 $MAMBA_CMD activate openfold_env
 # Install matplotlib
 $MAMBA_CMD install -y conda-forge::matplotlib
