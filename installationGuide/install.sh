@@ -45,15 +45,6 @@ $MAMBA_CMD activate openfold_env
 pip install -v deepspeed==0.14.5 dm-tree==0.1.6 git+https://github.com/NVIDIA/dllogger.git https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.5cxx11abiTRUE-cp310-cp310-linux_x86_64.whl --no-build-isolation
 echo "openfold_env created and activated"
 
-# Load Miniforge module
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-# Activate Conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
-export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
-export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-conda init
 $MAMBA_CMD activate openfold_env
 # Change directory to OpenFold
 cd $ROOT_DIR/openfold
@@ -81,16 +72,6 @@ pip install . --no-build-isolation
 # Install third-party dependencies
 scripts/install_third_party_dependencies.sh
 
-# Load Miniforge module
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-# Activate Conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
-export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
-export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-conda init
-$MAMBA_CMD activate openfold_env
 # Install additional required packages
 $MAMBA_CMD install -y ipykernel
 python -m ipykernel install --user --name=openfold_env \\
@@ -104,16 +85,6 @@ mkdir -p $ROOT_DIR/vizfold-foundation/openfold/resources
 ln -s $(realpath $DATA_DIR/params) $ROOT_DIR/vizfold-foundation/openfold/resources/params
 wget -N --no-check-certificate -P $ROOT_DIR/vizfold-foundation/openfold/resources https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
 
-# Load Miniforge module
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-module load $CONDA_MODULE
-# Activate Conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
-export CONDA_ENVS_PATH=$CONDA_INSTALL_DIR/.conda/envs
-export CONDA_PKGS_DIRS=$CONDA_INSTALL_DIR/.conda/pkgs
-conda init
-$MAMBA_CMD activate openfold_env
 # Install matplotlib
 $MAMBA_CMD install -y conda-forge::matplotlib
 # Set strict channel priority for consistent package resolution
