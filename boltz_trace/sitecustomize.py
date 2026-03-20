@@ -165,7 +165,167 @@ else:
 
         seen_start = set()
         seen_end = set()
+        fired_start = set()
+        fired_end = set()
         attached = 0
+
+        def _first_tensor(x):
+            try:
+                import torch
+            except Exception:
+                return None
+            if x is None:
+                return None
+            if isinstance(x, torch.Tensor):
+                return x
+            if isinstance(x, (tuple, list)):
+                for it in x:
+                    t = _first_tensor(it)
+                    if t is not None:
+                        return t
+            if isinstance(x, dict):
+                for it in x.values():
+                    t = _first_tensor(it)
+                    if t is not None:
+                        return t
+            return None
+
+        def _iter_tensors(x):
+            try:
+                import torch
+            except Exception:
+                return
+            if x is None:
+                return
+            if isinstance(x, torch.Tensor):
+                yield x
+                return
+            if isinstance(x, (tuple, list)):
+                for it in x:
+                    yield from _iter_tensors(it)
+                return
+            if isinstance(x, dict):
+                for it in x.values():
+                    yield from _iter_tensors(it)
+                return
+
+        def _proxy_mats_from_out(out):
+            """Fallback: derive a single-head (1,N,N) weight matrix from TriangleAttention output.
+
+            Boltz versions may not expose real attention weights. However, TriangleAttention typically
+            returns an updated pair representation of shape (N,N,C). We convert it to weights by
+            taking the L2 norm across channels.
+            """
+            try:
+                import torch
+            except Exception:
+                return None
+            # TriangleAttention outputs can be nested structures; pick the best square (N,N,C)
+            # (or (B,N,N,C)) tensor we can find.
+            cand = None
+            for t in _iter_tensors(out):
+                if t is None:
+                    continue
+                if t.ndim == 4:
+                    # expect (B,N,N,C)
+                    if t.shape[0] >= 1 and t.shape[1] == t.shape[2]:
+                        cand = t[0]
+                        break
+                elif t.ndim == 3:
+                    if t.shape[0] == t.shape[1]:
+                        cand = t
+                        break
+            if cand is None:
+                return None
+            t = cand
+            if DEBUG:
+                try:
+                    print(f"[BOLTZ_TRACE] proxy source tensor shape={tuple(t.shape)} dtype={getattr(t,'dtype',None)}", file=sys.stderr)
+                except Exception:
+                    pass
+            w = torch.linalg.vector_norm(t.float(), ord=2, dim=-1)  # (N,N)
+            if not torch.isfinite(w).all():
+                w = torch.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
+            # Normalize to avoid extreme value ranges (keeps top-k comparable across runs)
+            try:
+                denom = torch.max(w)
+                if torch.isfinite(denom) and float(denom) > 0:
+                    w = w / denom
+            except Exception:
+                pass
+            mats = w.unsqueeze(0)  # (1,N,N)
+            try:
+                x = mats.detach()
+                if getattr(x, "is_cuda", False):
+                    x = x.cpu()
+                x = x.float().numpy()
+                if DEBUG:
+                    try:
+                        mn = float(np.min(x))
+                        mx = float(np.max(x))
+                        mean = float(np.mean(x))
+                        print(f"[BOLTZ_TRACE] proxy mats stats min={mn:.6g} max={mx:.6g} mean={mean:.6g}", file=sys.stderr)
+                    except Exception:
+                        pass
+                return x
+            except Exception:
+                return mats
+
+        def _looks_like_attn(t):
+            try:
+                import torch
+            except Exception:
+                return False
+            if not isinstance(t, torch.Tensor):
+                return False
+            if t.ndim < 3:
+                return False
+            try:
+                return int(t.shape[-1]) == int(t.shape[-2])
+            except Exception:
+                return False
+
+        def _extract_attn_from_output(out):
+            try:
+                import torch
+            except Exception:
+                torch = None
+            if out is None:
+                return None
+
+            # If the module directly returns a tensor, it might already be attention.
+            if torch is not None and isinstance(out, torch.Tensor):
+                return out if _looks_like_attn(out) else None
+
+            if isinstance(out, (tuple, list)):
+                # Prefer tensors that look like attention.
+                for item in out:
+                    if torch is not None and isinstance(item, torch.Tensor) and _looks_like_attn(item):
+                        return item
+                # Otherwise recurse.
+                for item in out:
+                    if isinstance(item, (tuple, list, dict)):
+                        a = _extract_attn_from_output(item)
+                        if a is not None:
+                            return a
+                return None
+
+            if isinstance(out, dict):
+                for k in ('attn', 'attn_weights', 'attention', 'weights'):
+                    v = out.get(k)
+                    if v is not None:
+                        if torch is not None and isinstance(v, torch.Tensor) and _looks_like_attn(v):
+                            return v
+                        a = _extract_attn_from_output(v)
+                        if a is not None:
+                            return a
+                for v in out.values():
+                    a = _extract_attn_from_output(v)
+                    if a is not None:
+                        return a
+                return None
+
+            return None
 
         for name, mod in model.named_modules():
             m = layer_pat.search(name)
@@ -177,16 +337,39 @@ else:
 
             if isinstance(mod, TriangleAttentionEndingNode):
                 def _hook_end(mmod, inp, out, _layer=layer_idx):
+                    if DEBUG and _layer not in fired_end:
+                        fired_end.add(_layer)
+                        print(f"[BOLTZ_TRACE] hook_end fired layer={_layer} type={type(mmod).__name__}", file=sys.stderr)
                     if _layer in seen_end:
                         return
-                    if not hasattr(mmod, "mha") or not hasattr(mmod.mha, "_last_attn"):
+                    if not hasattr(mmod, "mha"):
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] hook_end missing mha layer={_layer}", file=sys.stderr)
                         return
-                    la = mmod.mha._last_attn
+                    mha = mmod.mha
+                    la = getattr(mha, "_last_attn", None)
                     if la is None:
-                        return
-                    mats = mats_from_last_attn(la)
-                    if mats is None:
-                        return
+                        la = getattr(mha, "_vizfold_last_attn", None)
+                    if la is None:
+                        mats = _proxy_mats_from_out(out)
+                        if mats is None:
+                            mats = _proxy_mats_from_out(getattr(mha, "_vizfold_last_out", None))
+                        if mats is None:
+                            if DEBUG:
+                                print(f"[BOLTZ_TRACE] hook_end no attn; proxy failed layer={_layer}", file=sys.stderr)
+                            return
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] hook_end using proxy weights layer={_layer}", file=sys.stderr)
+                    else:
+                        mats = mats_from_last_attn(la)
+                        if mats is None:
+                            if DEBUG:
+                                try:
+                                    shp = tuple(getattr(la, 'shape', ()))
+                                except Exception:
+                                    shp = None
+                                print(f"[BOLTZ_TRACE] hook_end mats_from_last_attn returned None layer={_layer} last_attn_shape={shp}", file=sys.stderr)
+                            return
 
                     # choose heads
                     if HEAD is None:
@@ -196,8 +379,23 @@ else:
                             return
                         use = mats[HEAD:HEAD+1]
 
+                    # Writers expect numpy arrays (they call .copy())
+                    try:
+                        import torch
+                        if isinstance(use, torch.Tensor):
+                            u = use.detach()
+                            if getattr(u, "is_cuda", False):
+                                u = u.cpu()
+                            use = u.float().numpy()
+                    except Exception:
+                        pass
+
                     seen_end.add(_layer)
-                    write_row_heads(use, _layer, "triangle_end")
+                    try:
+                        write_row_heads(use, _layer, "triangle_end")
+                    except Exception as e:
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] write_row_heads failed kind=triangle_end layer={_layer}: {e}", file=sys.stderr)
                     save_activation_npz("triangle_end", _layer, out)
 
                 mod.register_forward_hook(_hook_end)
@@ -205,16 +403,39 @@ else:
 
             elif isinstance(mod, TriangleAttention) and getattr(mod, "starting", True):
                 def _hook_start(mmod, inp, out, _layer=layer_idx):
+                    if DEBUG and _layer not in fired_start:
+                        fired_start.add(_layer)
+                        print(f"[BOLTZ_TRACE] hook_start fired layer={_layer} type={type(mmod).__name__}", file=sys.stderr)
                     if _layer in seen_start:
                         return
-                    if not hasattr(mmod, "mha") or not hasattr(mmod.mha, "_last_attn"):
+                    if not hasattr(mmod, "mha"):
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] hook_start missing mha layer={_layer}", file=sys.stderr)
                         return
-                    la = mmod.mha._last_attn
+                    mha = mmod.mha
+                    la = getattr(mha, "_last_attn", None)
                     if la is None:
-                        return
-                    mats = mats_from_last_attn(la)
-                    if mats is None:
-                        return
+                        la = getattr(mha, "_vizfold_last_attn", None)
+                    if la is None:
+                        mats = _proxy_mats_from_out(out)
+                        if mats is None:
+                            mats = _proxy_mats_from_out(getattr(mha, "_vizfold_last_out", None))
+                        if mats is None:
+                            if DEBUG:
+                                print(f"[BOLTZ_TRACE] hook_start no attn; proxy failed layer={_layer}", file=sys.stderr)
+                            return
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] hook_start using proxy weights layer={_layer}", file=sys.stderr)
+                    else:
+                        mats = mats_from_last_attn(la)
+                        if mats is None:
+                            if DEBUG:
+                                try:
+                                    shp = tuple(getattr(la, 'shape', ()))
+                                except Exception:
+                                    shp = None
+                                print(f"[BOLTZ_TRACE] hook_start mats_from_last_attn returned None layer={_layer} last_attn_shape={shp}", file=sys.stderr)
+                            return
 
                     if HEAD is None:
                         use = mats
@@ -223,13 +444,92 @@ else:
                             return
                         use = mats[HEAD:HEAD+1]
 
+                    # Writers expect numpy arrays (they call .copy())
+                    try:
+                        import torch
+                        if isinstance(use, torch.Tensor):
+                            u = use.detach()
+                            if getattr(u, "is_cuda", False):
+                                u = u.cpu()
+                            use = u.float().numpy()
+                    except Exception:
+                        pass
+
                     seen_start.add(_layer)
-                    write_msa_row_heads(use, _layer)
-                    write_row_heads(use, _layer, "triangle_start")
+                    try:
+                        write_msa_row_heads(use, _layer)
+                    except Exception as e:
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] write_msa_row_heads failed layer={_layer}: {e}", file=sys.stderr)
+                    try:
+                        write_row_heads(use, _layer, "triangle_start")
+                    except Exception as e:
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] write_row_heads failed kind=triangle_start layer={_layer}: {e}", file=sys.stderr)
                     save_activation_npz("triangle_start", _layer, out)
 
                 mod.register_forward_hook(_hook_start)
                 attached += 1
+
+            if hasattr(mod, "mha"):
+                try:
+                    mha = mod.mha
+                    if mha is not None and not getattr(mha, "_vizfold_capture_installed", False):
+                        def _mha_hook(mmod, inp, out):
+                            # One-time debug dump to understand what boltz returns.
+                            if DEBUG and not getattr(mmod, "_vizfold_debug_dumped", False):
+                                try:
+                                    import torch
+                                    def _summ(x):
+                                        if isinstance(x, torch.Tensor):
+                                            return f"Tensor(shape={tuple(x.shape)}, dtype={x.dtype})"
+                                        return type(x).__name__
+                                    if isinstance(out, (tuple, list)):
+                                        print(f"[BOLTZ_TRACE] mha out is {type(out).__name__} len={len(out)}", file=sys.stderr)
+                                        for i, it in enumerate(out[:6]):
+                                            print(f"[BOLTZ_TRACE]   out[{i}]={_summ(it)}", file=sys.stderr)
+                                    elif isinstance(out, dict):
+                                        keys = list(out.keys())
+                                        print(f"[BOLTZ_TRACE] mha out is dict keys={keys[:12]}", file=sys.stderr)
+                                    else:
+                                        print(f"[BOLTZ_TRACE] mha out is {_summ(out)}", file=sys.stderr)
+                                    # Also inspect common attribute names
+                                    for attr in ("attn", "attn_weights", "attention", "weights", "_attn", "_attn_weights"):
+                                        if hasattr(mmod, attr):
+                                            v = getattr(mmod, attr)
+                                            if isinstance(v, torch.Tensor):
+                                                print(f"[BOLTZ_TRACE] mha has attr {attr}=Tensor(shape={tuple(v.shape)})", file=sys.stderr)
+                                except Exception as e:
+                                    print(f"[BOLTZ_TRACE] mha debug dump failed: {e}", file=sys.stderr)
+                                mmod._vizfold_debug_dumped = True
+
+                            attn = _extract_attn_from_output(out)
+                            # Always cache the output for proxy fallbacks (some versions never expose true weights).
+                            try:
+                                if getattr(mmod, "_vizfold_last_out", None) is None:
+                                    setattr(mmod, "_vizfold_last_out", out)
+                            except Exception:
+                                pass
+                            if attn is None:
+                                # Fallback: check for common attribute names if module stores attention.
+                                for attr in ("attn", "attn_weights", "attention", "weights", "_attn", "_attn_weights"):
+                                    try:
+                                        v = getattr(mmod, attr)
+                                    except Exception:
+                                        v = None
+                                    if v is not None and _looks_like_attn(v):
+                                        attn = v
+                                        break
+
+                            if attn is not None:
+                                setattr(mmod, "_vizfold_last_attn", attn)
+                        mha.register_forward_hook(_mha_hook)
+                        mha._vizfold_capture_installed = True
+                        if DEBUG:
+                            print(f"[BOLTZ_TRACE] installed mha capture hook on {type(mha).__name__}", file=sys.stderr)
+                except Exception as e:
+                    if DEBUG:
+                        print(f"[BOLTZ_TRACE] failed installing mha capture hook: {e}", file=sys.stderr)
 
         if DEBUG:
             print(f"[BOLTZ_TRACE] attached {attached} hooks", file=sys.stderr)
