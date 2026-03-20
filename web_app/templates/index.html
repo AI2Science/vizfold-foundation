@@ -76,6 +76,17 @@
                         </div>
                     </div>
                 </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="runner" class="form-label">Runner</label>
+                            <select class="form-select" id="runner" name="runner">
+                                <option value="openfold" selected>OpenFold</option>
+                                <option value="boltz">Boltz</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="description" class="form-label">Description (Optional)</label>
                     <input type="text" class="form-control" id="description" name="description"
@@ -337,6 +348,16 @@
 
         // Show loading indicator and hide viewer controls
         loading.style.display = 'block';
+        try {
+            const runnerSel = document.getElementById('runner');
+            const runnerName = runnerSel ? (runnerSel.value || 'openfold') : 'openfold';
+            const loadingText = document.querySelector('#loading p');
+            if (loadingText) {
+                loadingText.textContent = `Running ${runnerName === 'boltz' ? 'Boltz' : 'OpenFold'} prediction. This may take several minutes...`;
+            }
+        } catch (e) {
+            // ignore
+        }
         viewerControls.style.display = 'none';
         runButton.disabled = true;
         cancelButton.style.display = 'inline-block';
@@ -384,8 +405,12 @@
                 cancelButton.style.display = 'none';
                 loadPDB(data.pdb_file);
                 // Initialize attention UI and start polling for this prediction
-                const protId = document.getElementById('protein-id').value;
-                const resIdx = parseInt(document.getElementById('residue-idx').value || '0');
+                const protId = (data.protein_id || document.getElementById('protein-id').value);
+                const resIdx = parseInt((data.residue_idx ?? document.getElementById('residue-idx').value) || '0');
+                try {
+                    if (data.protein_id) document.getElementById('protein-id').value = data.protein_id;
+                    if (data.residue_idx !== undefined && data.residue_idx !== null) document.getElementById('residue-idx').value = data.residue_idx;
+                } catch (e) {}
                 currentProteinMeta = { protein_id: protId, residue_idx: resIdx };
                 initAttentionUI();
                 attnCollapse.show();
@@ -440,8 +465,12 @@
                             });
                         }
                         // Also initialize attention UI
-                        const protId = document.getElementById('protein-id').value;
-                        const resIdx = parseInt(document.getElementById('residue-idx').value || '0');
+                        const protId = (data.protein_id || document.getElementById('protein-id').value);
+                        const resIdx = parseInt((data.residue_idx ?? document.getElementById('residue-idx').value) || '0');
+                        try {
+                            if (data.protein_id) document.getElementById('protein-id').value = data.protein_id;
+                            if (data.residue_idx !== undefined && data.residue_idx !== null) document.getElementById('residue-idx').value = data.residue_idx;
+                        } catch (e) {}
                         currentProteinMeta = { protein_id: protId, residue_idx: resIdx };
                         initAttentionUI();
                         attnCollapse.show();
@@ -613,7 +642,9 @@
                 const a = document.createElement('a');
                 a.className = 'dropdown-item';
                 a.href = '#';
-                a.textContent = `${protein.protein_id}`;
+                const runner = (protein.runner || '').toString().toLowerCase();
+                const suffix = runner === 'boltz' ? ' - Boltz' : (runner === 'openfold' ? ' - OpenFold' : '');
+                a.textContent = `${protein.protein_id}${suffix}`;
                 a.onclick = () => selectProtein(protein);
                 li.appendChild(a);
                 dropdownMenu.appendChild(li);
@@ -697,7 +728,9 @@
             const pdbData = await response.text();
 
             // Add model to viewer
-            window.viewer.addModel(pdbData, 'pdb');
+            const lower = (pdbPath || '').toLowerCase();
+            const fmt = (lower.endsWith('.cif') || lower.endsWith('.mmcif')) ? 'mmcif' : 'pdb';
+            window.viewer.addModel(pdbData, fmt);
 
             // Set style and zoom
             window.viewer.setStyle({}, { cartoon: {} });
@@ -847,7 +880,7 @@
             // reset arc view to full range
             arcView.xMin = 0; arcView.xMax = currentSequence.length;
             renderArcDiagram(currentArcConnections, currentSequence);
-            renderHeatmap(parsed[head] || [], currentSequence.length);
+            renderHeatmap(currentArcConnections || [], currentSequence.length);
             // update 3D overlay if enabled
             maybeUpdate3DOverlay();
         } catch (e) {
@@ -1068,6 +1101,8 @@
         for (const [r1,r2,w] of connections) {
             const idx = r1*seqLen + r2;
             grid[idx] = w;
+            const idx2 = r2*seqLen + r1;
+            grid[idx2] = Math.max(grid[idx2] || 0, w);
             if (w<wmin) wmin=w;
             if (w>wmax) wmax=w;
         }
@@ -1235,14 +1270,27 @@
     async function pollVizUntilReady() {
         if (attnPollTimer) clearInterval(attnPollTimer);
         setAttnLoading(true);
+        let attempts = 0;
+        const MAX_ATTEMPTS = 30; // ~2 minutes at 4s interval
         const attempt = async () => {
             try {
+                attempts += 1;
                 const data = await fetchVizList();
                 if (data && ((data.msa_row.layers && data.msa_row.layers.length>0) || (data.triangle_start.layers && data.triangle_start.layers.length>0))) {
                     attnData = data;
                     updateLayerControls();
                     updateAttentionDisplay(getCurrentAssets());
                     if (attnPollTimer) clearInterval(attnPollTimer);
+                } else if (attempts >= MAX_ATTEMPTS) {
+                    if (attnPollTimer) clearInterval(attnPollTimer);
+                    setAttnLoading(false);
+                    clearArcAndHeatmap();
+                    const loadingEl = document.getElementById('attn-loading');
+                    if (loadingEl) {
+                        loadingEl.style.display = 'block';
+                        const p = loadingEl.querySelector('p');
+                        if (p) p.textContent = 'No attention files found yet. If you ran Boltz, make sure tracing is enabled and check server logs.';
+                    }
                 }
             } catch (e) {
                 console.warn('viz list fetch failed', e);
