@@ -27,6 +27,19 @@ def check_trace_file(path: str) -> None:
         except Exception:
             raise SystemExit(f"[FAIL] non-numeric edge line in {path}: '{ln}'")
 
+def count_heads_in_trace_file(path: str) -> int:
+    """Return number of unique Head indices present in the trace file."""
+    heads = set()
+    with open(path, "r") as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
+                continue
+            m = LAYER_RE.match(ln)
+            if m:
+                heads.add(int(m.group(2)))
+    return len(heads)
+
 def parse_int_list(s: str) -> list[int]:
     return [int(x) for x in s.split(",") if x.strip()]
 
@@ -35,7 +48,9 @@ def main():
     ap.add_argument("--run_dir", required=True, help="Run directory containing attn_txt/ and arc_png/")
     ap.add_argument("--layers", default="0", help="comma-separated layer indices")
     ap.add_argument("--residues", default="18", help="comma-separated residue indices")
-    ap.add_argument("--expect_heads", type=int, default=4, help="expected heads per file")
+    # Backward compatibility: older runner passes this. We no longer require fixed heads.
+    ap.add_argument("--expect_heads", type=int, default=None,
+                    help="(deprecated) kept for backward compatibility; ignored in proxy-aware validation")
     args = ap.parse_args()
 
     run_dir = os.path.abspath(args.run_dir)
@@ -55,12 +70,45 @@ def main():
             required.append(os.path.join(attn_dir, f"triangle_start_attn_layer{L}_residue_idx_{r}.txt"))
             required.append(os.path.join(attn_dir, f"triangle_end_attn_layer{L}_residue_idx_{r}.txt"))
 
+    msa_heads_by_layer: dict[int, int] = {}
+    tri_start_heads_by_layer_res: dict[tuple[int, int], int] = {}
+    tri_end_heads_by_layer_res: dict[tuple[int, int], int] = {}
+
     for p in required:
         check_trace_file(p)
+        nheads = count_heads_in_trace_file(p)
+
+        base = os.path.basename(p)
+        if base.startswith("msa_row_attn_layer"):
+            m = re.search(r"layer(\d+)\.txt$", base)
+            if m:
+                L = int(m.group(1))
+                msa_heads_by_layer[L] = nheads
+        elif base.startswith("triangle_start_attn_layer"):
+            m = re.search(r"layer(\d+)_residue_idx_(\d+)\.txt$", base)
+            if m:
+                L, r = int(m.group(1)), int(m.group(2))
+                tri_start_heads_by_layer_res[(L, r)] = nheads
+        elif base.startswith("triangle_end_attn_layer"):
+            m = re.search(r"layer(\d+)_residue_idx_(\d+)\.txt$", base)
+            if m:
+                L, r = int(m.group(1)), int(m.group(2))
+                tri_end_heads_by_layer_res[(L, r)] = nheads
 
     if os.path.isdir(arc_dir):
         pngs = glob.glob(os.path.join(arc_dir, "*.png"))
-        expected_min = len(layers)*args.expect_heads + 2*len(layers)*len(residues)*args.expect_heads
+
+        expected_min = 0
+        # msa row: 1 png per (layer, head)
+        for L in layers:
+            expected_min += msa_heads_by_layer.get(L, 0)
+
+        # triangle start/end: 1 png per (layer, residue, head)
+        for L in layers:
+            for r in residues:
+                expected_min += tri_start_heads_by_layer_res.get((L, r), 0)
+                expected_min += tri_end_heads_by_layer_res.get((L, r), 0)
+
         if len(pngs) < expected_min:
             print(f"[WARN] arc_png has {len(pngs)} PNGs, expected >= {expected_min}")
         else:

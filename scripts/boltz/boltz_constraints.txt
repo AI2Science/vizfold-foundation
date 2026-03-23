@@ -1,0 +1,10 @@
+# Keep these pinned to avoid Lightning/CUDAAccelerator mismatches
+pytorch-lightning==2.5.0
+lightning==2.5.0
+lightning-fabric==2.5.0
+lightning-utilities==0.15.3
+torchmetrics==1.9.0
+
+# Keep these compatible with boltz 2.2.1 + your env
+numpy<2.0
+pyyaml==6.0.2
