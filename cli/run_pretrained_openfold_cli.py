@@ -595,7 +595,10 @@ def main():
     cmd = build_command(script_path, fasta_dir, template_mmcif_dir, args)
 
     result = subprocess.run(cmd, cwd=repo_root)
-    print(f"[Vizfold CLI] Successfully ran pretrained OpenFold")
+    if result.returncode == 0:
+        print("[Vizfold CLI] Successfully ran pretrained OpenFold")
+    else:
+        print(f"[Vizfold CLI] OpenFold exited with error code {result.returncode}", file=sys.stderr)
     sys.exit(result.returncode)
 
 
