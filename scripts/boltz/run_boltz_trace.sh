@@ -126,6 +126,29 @@ echo "[INFO] Running boltz predict..."
 
 echo "[INFO] Attn txt:"
 ls -l "$OUT_ATTN" || true
+
+# New PoC layout: tracer may write component-separated outputs under
+#   $OUT_ATTN/components/{msa,pairformer_boltz,sm_boltz}/...
+# Keep legacy pipeline compatibility by copying pairformer_boltz attn_txt
+# files back to $OUT_ATTN root for plot/validator consumers.
+PAIR_ATTN="$OUT_ATTN/components/pairformer_boltz/attn_txt"
+if [ -d "$PAIR_ATTN" ]; then
+  cp -f "$PAIR_ATTN"/*.txt "$OUT_ATTN"/ 2>/dev/null || true
+  echo "[INFO] Copied pairformer_boltz attn_txt -> $OUT_ATTN (legacy compatibility)"
+fi
+if [ -f "$OUT_ATTN/component_status.json" ]; then
+  echo "[INFO] component_status.json:"
+  python - <<PY
+import json
+p = "$OUT_ATTN/component_status.json"
+try:
+    with open(p) as f:
+        print(json.dumps(json.load(f), indent=2))
+except Exception as e:
+    print("[WARN] failed reading component_status.json:", e)
+PY
+fi
+
 # If TRACE_HEAD=all but we only have Head 0 blocks, expand to 4 pseudo-heads (format shim)
 if [ "${TRACE_HEAD}" = "all" ]; then
   python scripts/boltz/expand_proxy_heads.py --attn_dir "$OUT_ATTN" --heads 4

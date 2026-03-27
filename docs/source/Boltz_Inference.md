@@ -84,6 +84,18 @@ A run produces:
 - `arc_png/` : arc diagram PNGs generated from `attn_txt/`
 - `act_npz/` : lightweight activation summaries (optional; only written when `BOLTZ_ACT_DIR` is set, which the provided runner does)
 
+### Component-separated PoC outputs (Boltz modular experiment)
+When tracing is enabled, the tracer also writes a component-oriented layout under:
+- `attn_txt/components/msa/attn_txt/`
+- `attn_txt/components/pairformer_boltz/attn_txt/`
+- `attn_txt/components/sm_boltz/attn_txt/` (reserved; currently may be empty)
+- `attn_txt/component_status.json` (availability/source summary)
+
+Current behavior in this PoC:
+- `pairformer_boltz` is expected to populate first (triangle attention + pair-derived activations).
+- `msa` is best-effort experimental (`BOLTZ_TRACE_EXPERIMENTAL_MSA=1`) and may be empty depending on Boltz internals/version.
+- Existing plotting/validation scripts continue to use legacy `attn_txt/*.txt`; the runner copies pairformer files back for compatibility.
+
 ## Attention-weight availability + proxy fallback
 
 Boltz versions differ in whether they expose **true attention weights** during inference. The tracer tries to capture attention weights when they exist, but can fall back to a proxy so that `attn_txt/` files and `arc_png/` visualizations are still produced.

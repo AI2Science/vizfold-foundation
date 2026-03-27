@@ -1,3 +1,4 @@
+import json
 import os, re, sys
 
 TRACE_DIR = os.environ.get("BOLTZ_TRACE_DIR")
@@ -12,11 +13,24 @@ else:
     import numpy as np
     os.makedirs(TRACE_DIR, exist_ok=True)
 
+    # Component-separated output roots (PoC for modular pipeline reporting)
+    COMP_ROOT = os.path.join(TRACE_DIR, "components")
+    MSA_ATTN_DIR = os.path.join(COMP_ROOT, "msa", "attn_txt")
+    PAIR_ATTN_DIR = os.path.join(COMP_ROOT, "pairformer_boltz", "attn_txt")
+    SM_ATTN_DIR = os.path.join(COMP_ROOT, "sm_boltz", "attn_txt")
+    os.makedirs(MSA_ATTN_DIR, exist_ok=True)
+    os.makedirs(PAIR_ATTN_DIR, exist_ok=True)
+    os.makedirs(SM_ATTN_DIR, exist_ok=True)
+
     ACT_DIR = os.environ.get("BOLTZ_ACT_DIR", "").strip()
     if ACT_DIR:
         os.makedirs(ACT_DIR, exist_ok=True)
     else:
         ACT_DIR = None
+    PAIR_ACT_DIR = None
+    if ACT_DIR is not None:
+        PAIR_ACT_DIR = os.path.join(ACT_DIR, "pairformer_boltz")
+        os.makedirs(PAIR_ACT_DIR, exist_ok=True)
 
     head_raw = os.environ.get("BOLTZ_TRACE_HEAD", "0").strip().lower()
     ALL_HEADS = head_raw in ("all", "-1")
@@ -26,6 +40,13 @@ else:
     RESIDUES = [int(x) for x in os.environ.get("BOLTZ_TRACE_RESIDUES", "18").split(",") if x.strip()]
     LAYER_SET = {int(x) for x in os.environ.get("BOLTZ_TRACE_LAYERS", "0").split(",") if x.strip()}
     DEBUG = os.environ.get("BOLTZ_TRACE_DEBUG", "0") == "1"
+    ENABLE_EXPERIMENTAL_MSA = os.environ.get("BOLTZ_TRACE_EXPERIMENTAL_MSA", "1") == "1"
+
+    COMPONENT_STATUS = {
+        "msa": {"available": False, "source": None, "files_written": 0},
+        "pairformer_boltz": {"available": False, "source": None, "files_written": 0},
+        "sm_boltz": {"available": False, "source": None, "files_written": 0},
+    }
 
     layer_pat = re.compile(r"layers\.(\d+)")
 
@@ -79,10 +100,34 @@ else:
             print(f"[BOLTZ_TRACE] unexpected attn shape {a.shape}", file=sys.stderr)
         return None
 
-    def write_msa_row_heads(mats, layer_idx):
+    def _note_write(component):
+        ent = COMPONENT_STATUS.get(component)
+        if ent is not None:
+            ent["available"] = True
+            ent["files_written"] += 1
+            write_component_status()
+
+    def _set_source(component, src):
+        ent = COMPONENT_STATUS.get(component)
+        if ent is not None and ent.get("source") is None:
+            ent["source"] = src
+            write_component_status()
+
+    def _status_path():
+        return os.path.join(TRACE_DIR, "component_status.json")
+
+    def write_component_status():
+        try:
+            with open(_status_path(), "w") as f:
+                json.dump(COMPONENT_STATUS, f, indent=2)
+        except Exception as e:
+            if DEBUG:
+                print(f"[BOLTZ_TRACE] failed writing component_status.json: {e}", file=sys.stderr)
+
+    def write_msa_row_heads(mats, layer_idx, out_dir=PAIR_ATTN_DIR):
         # mats: (H, N, N)
         Hh, N, _ = mats.shape
-        out_path = os.path.join(TRACE_DIR, f"msa_row_attn_layer{layer_idx}.txt")
+        out_path = os.path.join(out_dir, f"msa_row_attn_layer{layer_idx}.txt")
         with open(out_path, "w") as f:
             for h in range(Hh):
                 m = mats[h].copy()
@@ -105,14 +150,14 @@ else:
                 for i, j, v in edges:
                     f.write(f"{i} {j} {v}\n")
 
-    def write_row_heads(mats, layer_idx, kind):
+    def write_row_heads(mats, layer_idx, kind, out_dir=PAIR_ATTN_DIR):
         # mats: (H, N, N)
         Hh, N, _ = mats.shape
         for r in RESIDUES:
             if r < 0 or r >= N:
                 continue
 
-            out_path = os.path.join(TRACE_DIR, f"{kind}_attn_layer{layer_idx}_residue_idx_{r}.txt")
+            out_path = os.path.join(out_dir, f"{kind}_attn_layer{layer_idx}_residue_idx_{r}.txt")
             with open(out_path, "w") as f:
                 for h in range(Hh):
                     row = mats[h, r].copy()
@@ -139,7 +184,7 @@ else:
           - pair_norm: (N,N) norm over channels
           - pair_slice: (N,N,8) first 8 channels
         """
-        if ACT_DIR is None:
+        if PAIR_ACT_DIR is None:
             return
         try:
             import torch
@@ -154,8 +199,9 @@ else:
             x = x.float()[0]  # (N,N,C)
             pair_norm = torch.linalg.vector_norm(x, dim=-1).numpy().astype("float16")
             pair_slice = x[..., :8].numpy().astype("float16")
-            path = os.path.join(ACT_DIR, f"{kind}_act_layer{layer_idx}.npz")
+            path = os.path.join(PAIR_ACT_DIR, f"{kind}_act_layer{layer_idx}.npz")
             np.savez_compressed(path, pair_norm=pair_norm, pair_slice=pair_slice)
+            _note_write("pairformer_boltz")
         except Exception as e:
             if DEBUG:
                 print(f"[BOLTZ_TRACE] activation save failed layer={layer_idx} kind={kind}: {e}", file=sys.stderr)
@@ -350,6 +396,7 @@ else:
                     la = getattr(mha, "_last_attn", None)
                     if la is None:
                         la = getattr(mha, "_vizfold_last_attn", None)
+                    src = "true_attention"
                     if la is None:
                         mats = _proxy_mats_from_out(out)
                         if mats is None:
@@ -360,6 +407,7 @@ else:
                             return
                         if DEBUG:
                             print(f"[BOLTZ_TRACE] hook_end using proxy weights layer={_layer}", file=sys.stderr)
+                        src = "proxy_pair_norm"
                     else:
                         mats = mats_from_last_attn(la)
                         if mats is None:
@@ -392,7 +440,9 @@ else:
 
                     seen_end.add(_layer)
                     try:
-                        write_row_heads(use, _layer, "triangle_end")
+                        write_row_heads(use, _layer, "triangle_end", out_dir=PAIR_ATTN_DIR)
+                        _note_write("pairformer_boltz")
+                        _set_source("pairformer_boltz", src)
                     except Exception as e:
                         if DEBUG:
                             print(f"[BOLTZ_TRACE] write_row_heads failed kind=triangle_end layer={_layer}: {e}", file=sys.stderr)
@@ -416,6 +466,7 @@ else:
                     la = getattr(mha, "_last_attn", None)
                     if la is None:
                         la = getattr(mha, "_vizfold_last_attn", None)
+                    src = "true_attention"
                     if la is None:
                         mats = _proxy_mats_from_out(out)
                         if mats is None:
@@ -426,6 +477,7 @@ else:
                             return
                         if DEBUG:
                             print(f"[BOLTZ_TRACE] hook_start using proxy weights layer={_layer}", file=sys.stderr)
+                        src = "proxy_pair_norm"
                     else:
                         mats = mats_from_last_attn(la)
                         if mats is None:
@@ -457,12 +509,18 @@ else:
 
                     seen_start.add(_layer)
                     try:
-                        write_msa_row_heads(use, _layer)
+                        # In Boltz PoC, msa_row is produced from pairformer/triangle stream.
+                        # Write this explicitly under pairformer_boltz outputs.
+                        write_msa_row_heads(use, _layer, out_dir=PAIR_ATTN_DIR)
+                        _note_write("pairformer_boltz")
+                        _set_source("pairformer_boltz", src)
                     except Exception as e:
                         if DEBUG:
                             print(f"[BOLTZ_TRACE] write_msa_row_heads failed layer={_layer}: {e}", file=sys.stderr)
                     try:
-                        write_row_heads(use, _layer, "triangle_start")
+                        write_row_heads(use, _layer, "triangle_start", out_dir=PAIR_ATTN_DIR)
+                        _note_write("pairformer_boltz")
+                        _set_source("pairformer_boltz", src)
                     except Exception as e:
                         if DEBUG:
                             print(f"[BOLTZ_TRACE] write_row_heads failed kind=triangle_start layer={_layer}: {e}", file=sys.stderr)
@@ -470,6 +528,44 @@ else:
 
                 mod.register_forward_hook(_hook_start)
                 attached += 1
+
+            # Experimental best-effort MSA hook discovery (may not fire in all Boltz versions)
+            if ENABLE_EXPERIMENTAL_MSA:
+                lname = name.lower()
+                if "msa" in lname and hasattr(mod, "mha"):
+                    def _hook_msa(mmod, inp, out, _layer=layer_idx):
+                        mha = getattr(mmod, "mha", None)
+                        la = getattr(mha, "_last_attn", None) if mha is not None else None
+                        if la is None and mha is not None:
+                            la = getattr(mha, "_vizfold_last_attn", None)
+                        if la is None:
+                            return
+                        mats = mats_from_last_attn(la)
+                        if mats is None:
+                            return
+                        if HEAD is None:
+                            use = mats
+                        else:
+                            if HEAD < 0 or HEAD >= mats.shape[0]:
+                                return
+                            use = mats[HEAD:HEAD+1]
+                        try:
+                            import torch
+                            if isinstance(use, torch.Tensor):
+                                u = use.detach()
+                                if getattr(u, "is_cuda", False):
+                                    u = u.cpu()
+                                use = u.float().numpy()
+                        except Exception:
+                            pass
+                        try:
+                            write_msa_row_heads(use, _layer, out_dir=MSA_ATTN_DIR)
+                            _note_write("msa")
+                            _set_source("msa", "experimental_true_attention")
+                        except Exception:
+                            return
+                    mod.register_forward_hook(_hook_msa)
+                    attached += 1
 
             if hasattr(mod, "mha"):
                 try:
@@ -548,6 +644,7 @@ else:
             if not getattr(model, "_vizfold_hooks_installed", False):
                 install_hooks(model)
                 model._vizfold_hooks_installed = True
+            write_component_status()
             return model
 
         Boltz2.load_from_checkpoint = classmethod(_new_lfc)
