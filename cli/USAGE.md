@@ -158,6 +158,17 @@ Override auto-detected paths from the conda environment. All optional.
 |---|---|---|---|
 | `--data_random_seed` | No | Random | Integer seed for NumPy and PyTorch RNGs. |
 
+### HPC / Slurm Options
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--generate-slurm` | No | `false` | Generate a ready-to-submit `vizfold_job.sh` batch script in `--output_dir`. Populates `#SBATCH` directives from the flags below. |
+| `--slurm-account` | No | — | Slurm account / project to charge (`#SBATCH --account`). |
+| `--slurm-partition` | No | — | Slurm partition (queue) to submit to, e.g. `gpu-v100` (`#SBATCH --partition`). |
+| `--slurm-gpus` | No | — | GPU resource request, e.g. `1`, `v100:2`, or `a100:1` (`#SBATCH --gpus`). |
+| `--slurm-walltime` | No | — | Maximum wall-clock time in `HH:MM:SS`, e.g. `4:00:00` (`#SBATCH --time`). |
+| `--dry-run` | No | `false` | Validate all arguments and print the execution plan (directories, sequences, Slurm script) without loading models or running inference. |
+
 ---
 
 ## Model Presets
@@ -248,6 +259,46 @@ python cli/run_pretrained_openfold_cli.py examples/monomer/fasta_dir/ /path/to/m
 --output_dir ./results/
 ```
 
+### 7. Generate a Slurm batch script (HPC / PACE)
+
+Generate a `vizfold_job.sh` ready to submit with `sbatch`. The script contains
+all `#SBATCH` directives and the exact inference command.
+
+```bash
+python cli/run_pretrained_openfold_cli.py examples/monomer/fasta_dir/ /path/to/mmcifs/ 
+--use_precomputed_alignments examples/monomer/alignments/ 
+--model_device cuda:0 
+--output_dir ./results/ 
+--generate-slurm 
+--slurm-account GT-xyz123 
+--slurm-partition gpu-v100 
+--slurm-gpus v100:1 
+--slurm-walltime 4:00:00
+```
+
+Submit the generated script:
+
+```bash
+sbatch ./results/vizfold_job.sh
+```
+
+### 8. Dry-run (validate arguments without running inference)
+
+Use `--dry-run` to check that all paths and flags are valid and to preview
+exactly what the CLI would do. No models are loaded and no files are written. Good for not consuming GPU hours.
+
+```bash
+python cli/run_pretrained_openfold_cli.py examples/monomer/fasta_dir/ /path/to/mmcifs/ 
+--use_precomputed_alignments examples/monomer/alignments/ 
+--output_dir ./results/ 
+--generate-slurm 
+--slurm-account GT-xyz123 
+--slurm-partition gpu-v100 
+--slurm-gpus v100:1 
+--slurm-walltime 4:00:00 
+--dry-run
+```
+
 ---
 
 ## Output Files
@@ -261,6 +312,8 @@ Depending on the options used, the CLI writes the following to `--output_dir`:
 | `*_unrelaxed.cif` / `*_relaxed.cif` | When `--cif_output` is set |
 | `*_output.pkl` | When `--save_outputs` is set |
 | `<attn_map_dir>/*.npy` | When `--attn_map_dir` is set |
+| `vizfold_job.sh` | When `--generate-slurm` is set |
+| `vizfold_<jobid>.out` / `vizfold_<jobid>.err` | Slurm stdout/stderr after `sbatch` submission |
 
 ---
 
