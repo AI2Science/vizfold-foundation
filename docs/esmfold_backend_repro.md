@@ -154,3 +154,28 @@ Expected outputs:
 - `trace/activations/`
 
 GPU execution confirms cluster compatibility for larger inference workloads.
+
+
+## Additional Intermediate Output Validation
+
+The latest shared `feature/esmfold-backend` branch now exports additional intermediate outputs beyond the original encoder attention and activation traces.
+
+Verified local outputs include:
+
+- 36 attention tensors in `trace/attention/`
+- 36 activation tensors in `trace/activations/`
+- ~98 Evoformer trunk intermediate tensors in `trace/trunk/`
+- 36 VizFold attention text files in `attention_files/`
+
+Expected tensor shapes include:
+
+- attention tensors: `[B, H, N, N]`
+- activation tensors: `[B, N, D]`
+- pair representations (`s_z`): `[N, N, D]`
+
+If recycling outputs are enabled, they are expected to appear under `trace/trunk/` with keys such as:
+
+- `recycle_*_s_s`
+- `recycle_*_s_z`
+
+If structure-module / IPA outputs are enabled, they should also be saved as `.pt` tensors in the trace archive and can be validated separately for expected attention dimensions.

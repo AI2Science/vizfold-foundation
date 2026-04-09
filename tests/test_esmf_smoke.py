@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import torch
 from pathlib import Path
 
 # Repo root
@@ -242,3 +243,189 @@ if __name__ == "__main__":
         print("Failed:", failed)
         sys.exit(1)
     print("All checks passed.")
+
+import os
+import subprocess
+import sys
+import torch
+
+
+def test_esmfold_backend_smoke(tmp_path):
+    output_dir = tmp_path / "test_trace_ci"
+
+    cmd = [
+        sys.executable,
+        "run_pretrained_esmf.py",
+        "--fasta",
+        "examples/monomer/fasta_dir_6KWC/6KWC.fasta",
+        "--out",
+        str(output_dir),
+        "--trace_mode",
+        "attention+activations",
+        "--device",
+        "cpu",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    # expected top-level outputs
+    assert os.path.exists(output_dir / "meta.json")
+    assert os.path.exists(output_dir / "structure" / "predicted.pdb")
+    assert os.path.exists(output_dir / "trace")
+
+    # collect all .pt trace files
+    trace_files = []
+    for root, _, files in os.walk(output_dir / "trace"):
+        trace_files += [
+            os.path.join(root, f) for f in files if f.endswith(".pt")
+        ]
+
+    assert len(trace_files) >= 72
+
+    # validate attention tensor shape specifically
+    attention_dir = output_dir / "trace" / "attention"
+    assert attention_dir.exists()
+
+    attention_files = [
+        attention_dir / f
+        for f in os.listdir(attention_dir)
+        if f.endswith(".pt")
+    ]
+
+    assert len(attention_files) == 36
+
+    sample_attention = torch.load(attention_files[0], map_location="cpu")
+    assert len(sample_attention.shape) == 4
+    assert sample_attention.shape[0] == 1
+    assert sample_attention.shape[2] == sample_attention.shape[3]
+
+    # validate activation tensors exist
+    activation_dir = output_dir / "trace" / "activations"
+    assert activation_dir.exists()
+
+    activation_files = [
+        activation_dir / f
+        for f in os.listdir(activation_dir)
+        if f.endswith(".pt")
+    ]
+
+    assert len(activation_files) == 36
+
+    sample_activation = torch.load(activation_files[0], map_location="cpu")
+    assert len(sample_activation.shape) == 3
+    assert sample_activation.shape[0] == 1
+
+    # validate Evoformer trunk intermediates
+    trunk_dir = output_dir / "trace" / "trunk"
+    assert trunk_dir.exists()
+
+    trunk_files = [
+        trunk_dir / f
+        for f in os.listdir(trunk_dir)
+        if f.endswith(".pt")
+    ]
+
+    assert len(trunk_files) >= 96
+
+    # if final or pair outputs exist, validate s_z style shape [N, N, D]
+    trunk_sz_candidates = [
+        f for f in trunk_files
+        if "s_z" in f.name or "pair" in f.name
+    ]
+    if trunk_sz_candidates:
+        sample_sz = torch.load(trunk_sz_candidates[0], map_location="cpu")
+        assert len(sample_sz.shape) == 3
+        assert sample_sz.shape[0] == sample_sz.shape[1]
+
+    # validate attention text export
+    attention_txt_dir = output_dir / "attention_files"
+    assert attention_txt_dir.exists()
+
+    attention_txt_files = [
+        attention_txt_dir / f
+        for f in os.listdir(attention_txt_dir)
+        if f.endswith(".txt")
+    ]
+
+    assert len(attention_txt_files) == 36
+
+    # optional validation for recycling outputs if present
+    recycle_ss = [
+        f for f in activation_files
+        if "recycle_" in f.name and "_s_s" in f.name
+    ]
+    recycle_sz = [
+        f for f in activation_files
+        if "recycle_" in f.name and "_s_z" in f.name
+    ]
+
+    if recycle_ss:
+        sample_recycle_ss = torch.load(recycle_ss[0], map_location="cpu")
+        assert len(sample_recycle_ss.shape) == 3
+
+    if recycle_sz:
+        sample_recycle_sz = torch.load(recycle_sz[0], map_location="cpu")
+        assert len(sample_recycle_sz.shape) == 3
+        assert sample_recycle_sz.shape[0] == sample_recycle_sz.shape[1]
+
+    # optional validation for structure-module / IPA outputs if present
+    ipa_candidates = []
+    for root, _, files in os.walk(output_dir / "trace"):
+        ipa_candidates += [
+            os.path.join(root, f)
+            for f in files
+            if f.endswith(".pt") and "ipa" in f.lower()
+        ]
+
+    if ipa_candidates:
+        sample_ipa = torch.load(ipa_candidates[0], map_location="cpu")
+        assert len(sample_ipa.shape) >= 3
+
+def test_esmfold_full_validation(tmp_path):
+    output_dir = tmp_path / "test_trace_ci"
+
+    cmd = [
+        sys.executable,
+        "run_pretrained_esmf.py",
+        "--fasta",
+        "examples/monomer/fasta_dir_6KWC/6KWC.fasta",
+        "--out",
+        str(output_dir),
+        "--trace_mode",
+        "attention+activations",
+        "--device",
+        "cpu",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    # expected outputs
+    assert os.path.exists(f"{output_dir}/meta.json")
+    assert os.path.exists(f"{output_dir}/structure/predicted.pdb")
+    assert os.path.exists(f"{output_dir}/trace")
+
+    # collect all trace tensor files
+    trace_files = []
+    for root, _, files in os.walk(f"{output_dir}/trace"):
+        trace_files += [
+            os.path.join(root, f) for f in files if f.endswith(".pt")
+        ]
+
+    assert len(trace_files) >= 36
+
+    # validate attention tensor shape specifically
+    attention_dir = os.path.join(output_dir, "trace", "attention")
+    attention_files = [
+        os.path.join(attention_dir, f)
+        for f in os.listdir(attention_dir)
+        if f.endswith(".pt")
+    ]
+
+    assert len(attention_files) >= 1
+
+    sample_tensor = torch.load(attention_files[0], map_location="cpu")
+    assert len(sample_tensor.shape) == 4
+    assert sample_tensor.shape[0] == 1
+    assert sample_tensor.shape[2] == sample_tensor.shape[3]
