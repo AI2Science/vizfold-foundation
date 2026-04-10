@@ -1,0 +1,17 @@
+# Pip-only deps (installed with --no-deps)
+
+# RDKit from pip (to match boltz packaged canonicals)
+rdkit==2025.9.6
+
+# boltz pip deps
+einx==0.3.0
+fairscale==0.4.13
+mashumaro==3.14
+modelcif==1.2
+chembl_structure_pipeline==1.2.2
+types-requests==2.32.4.20260107
+
+# transitives required because we use --no-deps
+frozendict==2.4.7
+ihm==2.9
+msgpack==1.1.2

@@ -1,0 +1,50 @@
+name: vizfold-boltz
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - bioconda
+  - nodefaults
+
+dependencies:
+  - python=3.10
+  - pip
+
+  # GPU PyTorch from conda (do NOT let pip replace this)
+  - pytorch=2.5.*
+  - pytorch-cuda=12.1
+
+  # Core runtime deps (conda-managed)
+  - numpy<2.0
+  - scipy
+  - pandas
+  - pyyaml=6.0.2
+  - requests
+  - tqdm
+  - typing-extensions
+  - packaging
+
+  # Plotting + validator pipeline
+  - matplotlib
+
+  # Boltz/tracing stack (prefer conda for compiled libs)
+  - click=8.1.7
+  - hydra-core=1.3.2
+  - omegaconf=2.3.0
+  - einops=0.8.0
+  - dm-tree=0.1.8
+
+  # Lightning stack (pin here to avoid pip swaps)
+  - pytorch-lightning=2.5.0
+  - torchmetrics=1.9.0
+  - lightning-utilities=0.15.3
+  - fsspec
+  - aiohttp
+  - wandb=0.18.7
+
+  # Other deps boltz pulls (keep conda-managed when possible)
+  - biopython=1.84
+  - numba=0.61.0
+  - llvmlite=0.44.0
+  - scikit-learn=1.6.1
+  - gemmi=0.6.5

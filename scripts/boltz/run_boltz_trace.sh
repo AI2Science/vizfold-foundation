@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Repo root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -7,7 +7,10 @@ cd "$REPO_ROOT"
 
 # --------- User-configurable paths (override via env) ----------
 SCR="${SCR:-/storage/ice1/2/0/$USER}" # ICE default (user-based), override if needed
-BOLTZ_ENV="${BOLTZ_ENV:-$SCR/conda/envs/boltz}" # default to your boltz env on scratch
+
+# IMPORTANT: default to boltz_clean (not boltz) to avoid accidental Python 3.11 env
+BOLTZ_ENV="${BOLTZ_ENV:-$SCR/conda/envs/boltz_clean}"
+
 BOLTZ_CACHE="${BOLTZ_CACHE:-$SCR/boltz_cache}"
 OUT_BASE="${OUT_BASE:-$SCR/issue42/outputs}"
 
@@ -35,10 +38,22 @@ mkdir -p "$OUT_PRED" "$OUT_ATTN" "$OUT_ARC" "$OUT_ACT"
 
 echo "[INFO] OUT_RUN=$OUT_RUN"
 echo "[INFO] TRACE_HEAD=$TRACE_HEAD TRACE_TOPK=$TRACE_TOPK TRACE_RESIDUES=$TRACE_RESIDUES TRACE_LAYERS=$TRACE_LAYERS"
+echo "[INFO] BOLTZ_ENV=$BOLTZ_ENV"
 
 # Fail fast on missing inputs
 [ -f "$IN_YAML" ]  || { echo "[ERROR] Missing IN_YAML:  $IN_YAML" >&2; exit 2; }
 [ -f "$IN_FASTA" ] || { echo "[ERROR] Missing IN_FASTA: $IN_FASTA" >&2; exit 2; }
+
+# Guard against missing env path (prevents silent fallback to some other env)
+if [ -z "${BOLTZ_ENV:-}" ]; then
+  echo "[ERROR] BOLTZ_ENV is empty. Set BOLTZ_ENV=/storage/ice1/2/0/\$USER/conda/envs/boltz_clean" >&2
+  exit 2
+fi
+if [ ! -d "$BOLTZ_ENV" ]; then
+  echo "[ERROR] BOLTZ_ENV does not exist: $BOLTZ_ENV" >&2
+  echo "[HINT] Create it first, or export BOLTZ_ENV to an existing env path." >&2
+  exit 2
+fi
 
 # Put caches on scratch
 mkdir -p "$SCR"/{tmp,pip-cache,xdg-cache,hf-cache,torch-cache,wandb}
@@ -61,17 +76,32 @@ module load anaconda3 >/dev/null 2>&1 || true
 # make conda activate work in non-interactive shells
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
-# Guard against empty env
-if [ -z "${BOLTZ_ENV:-}" ]; then
-  echo "[ERROR] BOLTZ_ENV is empty. Set BOLTZ_ENV or keep the default." >&2
-  exit 2
-fi
-
+# conda activate scripts may reference unset vars; don't let `set -u` kill the job
+set +u
 conda activate "$BOLTZ_ENV"
+set -u
 
 echo "[INFO] which python: $(which python)"
 echo "[INFO] python: $(python -V)"
-python -c "import torch; print('[INFO] torch', torch.__version__, 'cuda?', torch.cuda.is_available())"
+python -c "import torch; print('[INFO] torch', torch.__version__, 'cuda?', torch.cuda.is_available(), 'torch.version.cuda:', getattr(torch.version, 'cuda', None))"
+
+# Hard guard: ensure we are using the requested env's python (robust, no readlink dependency)
+EXPECTED_PY="$BOLTZ_ENV/bin/python"
+REAL_ACTUAL_PY="$(python -c 'import os,sys; print(os.path.realpath(sys.executable))')"
+REAL_EXPECTED_PY="$(python -c "import os; print(os.path.realpath('$EXPECTED_PY'))")"
+
+if [ "$REAL_ACTUAL_PY" != "$REAL_EXPECTED_PY" ]; then
+  echo "[ERROR] Wrong python selected: $REAL_ACTUAL_PY" >&2
+  echo "[HINT] Expected: $REAL_EXPECTED_PY" >&2
+  exit 2
+fi
+
+# Also ensure boltz CLI exists inside this env
+if ! command -v boltz >/dev/null 2>&1; then
+  echo "[ERROR] boltz CLI not found in PATH after conda activate." >&2
+  echo "[HINT] Did setup_boltz_env.sh finish successfully for $BOLTZ_ENV ?" >&2
+  exit 2
+fi
 
 echo "[INFO] Running boltz predict..."
 (
@@ -96,6 +126,33 @@ echo "[INFO] Running boltz predict..."
 
 echo "[INFO] Attn txt:"
 ls -l "$OUT_ATTN" || true
+
+# New PoC layout: tracer may write component-separated outputs under
+#   $OUT_ATTN/components/{msa,pairformer_boltz,sm_boltz}/...
+# Keep legacy pipeline compatibility by copying pairformer_boltz attn_txt
+# files back to $OUT_ATTN root for plot/validator consumers.
+PAIR_ATTN="$OUT_ATTN/components/pairformer_boltz/attn_txt"
+if [ -d "$PAIR_ATTN" ]; then
+  cp -f "$PAIR_ATTN"/*.txt "$OUT_ATTN"/ 2>/dev/null || true
+  echo "[INFO] Copied pairformer_boltz attn_txt -> $OUT_ATTN (legacy compatibility)"
+fi
+if [ -f "$OUT_ATTN/component_status.json" ]; then
+  echo "[INFO] component_status.json:"
+  python - <<PY
+import json
+p = "$OUT_ATTN/component_status.json"
+try:
+    with open(p) as f:
+        print(json.dumps(json.load(f), indent=2))
+except Exception as e:
+    print("[WARN] failed reading component_status.json:", e)
+PY
+fi
+
+# If TRACE_HEAD=all but we only have Head 0 blocks, expand to 4 pseudo-heads (format shim)
+if [ "${TRACE_HEAD}" = "all" ]; then
+  python scripts/boltz/expand_proxy_heads.py --attn_dir "$OUT_ATTN" --heads 4
+fi
 echo "[INFO] Act npz:"
 ls -l "$OUT_ACT" || true
 
@@ -168,8 +225,8 @@ python scripts/boltz/validate_boltz_traces.py \
   --run_dir "$OUT_RUN" \
   --layers "$TRACE_LAYERS" \
   --residues "$TRACE_RESIDUES" \
-  --expect_heads 4 || { echo "[FAIL] validate_boltz_traces.py" >&2; exit 1; }
+  --expect_heads 4 \
+  || { echo "[FAIL] validate_boltz_traces.py" >&2; exit 1; }
 
 echo "[PASS] validate_boltz_traces.py"
-
 echo "[DONE] $OUT_RUN"

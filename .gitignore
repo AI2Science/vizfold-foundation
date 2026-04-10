@@ -33,3 +33,6 @@ outputs/boltz_runs/**
 # Allow small Boltz example inputs to be tracked
 !scripts/boltz/inputs/
 !scripts/boltz/inputs/*.fasta
+!scripts/boltz/inputs/*.yaml
+!scripts/boltz/boltz_pip_extras.txt
+!scripts/boltz/boltz_constraints.txt
