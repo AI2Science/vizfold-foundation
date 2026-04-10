@@ -1,8 +1,86 @@
 # VizFold CLI
 
-Currently, this CLI wraps `run_pretrained_openfold.py`. More inference scripts will be added later.
+This directory contains standardized CLI wrappers for common computational workflows.
 
-## Quick Start
+## Available Commands
+
+- [`generate_feature_dict_cli.py`](#generate-feature-dict-cli) — Generate AlphaFold feature dictionaries from sequences
+- [`run_pretrained_openfold_cli.py`](#openfold-cli) — Run pre-trained OpenFold structure prediction
+
+---
+
+## Generate Feature Dict CLI
+
+Generate AlphaFold feature dictionaries from FASTA sequences. This is typically the first preprocessing step before running structure prediction.
+
+### Quick Start
+
+```bash
+# From the repository root
+python cli/generate_feature_dict_cli.py <fasta_path> <mmcif_dir> <output_dir> [OPTIONS]
+```
+
+### Summary
+
+The feature dict CLI processes a FASTA file through the AlphaFold data pipeline to generate:
+- Multiple Sequence Alignments (MSAs) from sequence databases
+- Template structures from the template library
+- A serialized feature dictionary (`feature_dict.pickle`) for consumption by the structure prediction model
+
+### Examples
+
+#### Monomer mode (default)
+
+```bash
+python cli/generate_feature_dict_cli.py \
+  ./proteins/protein_A.fasta \
+  /path/to/templates/ \
+  ./features/protein_A/ \
+  --uniref90_database_path /data/uniref90/uniref90.fasta \
+  --mgnify_database_path /data/mgnify/mgnify.fasta \
+  --pdb70_database_path /data/pdb70/pdb70 \
+  --bfd_database_path /data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt
+```
+
+#### Multimer mode
+
+```bash
+python cli/generate_feature_dict_cli.py \
+  ./complexes/complex_AB.fasta \
+  /path/to/templates/ \
+  ./features/complex_AB/ \
+  --multimer \
+  --uniref90_database_path /data/uniref90/uniref90.fasta \
+  --pdb_seqres_database_path /data/pdb_seqres/pdb_seqres.txt \
+  --uniprot_database_path /data/uniprot/uniprot.fasta
+```
+
+### Arguments
+
+| Argument | Required | Type | Description |
+|---|---|---|---|
+| `fasta_path` | **Yes** | `str` | Path to FASTA file with protein sequence(s). |
+| `mmcif_dir` | **Yes** | `str` | Directory containing template mmCIF files. |
+| `output_dir` | **Yes** | `str` | Output directory for MSAs and `feature_dict.pickle`. |
+| `--multimer` | No | flag | Use multimer pipeline for protein complexes. |
+
+### Database & Tool Paths
+
+See [Database Paths](#database-paths) and [Binary Paths](#alignment-tool-binary-paths) sections below.
+
+### Output
+
+- `feature_dict.pickle` — Serialized feature dictionary for structure prediction
+- `a3m/` — Multiple sequence alignments (one per input sequence)
+- `sto/` — Stockholm-format alignments (if applicable)
+
+---
+
+## OpenFold CLI
+
+<openfold-cli>
+
+### Quick Start
 
 ```bash
 # From the repository root
@@ -319,9 +397,14 @@ Depending on the options used, the CLI writes the following to `--output_dir`:
 
 ## Help
 
+For the Generate Feature Dict CLI:
+```bash
+python cli/generate_feature_dict_cli.py --help
+```
+
+For the OpenFold CLI:
 ```bash
 python cli/run_pretrained_openfold_cli.py --help
 ```
 
-This prints the full argument reference with defaults and descriptions for
-every option.
+These print the full argument reference with defaults and descriptions for every option.
