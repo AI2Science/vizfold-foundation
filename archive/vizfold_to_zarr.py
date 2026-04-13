@@ -238,7 +238,63 @@ def store_single_representation(
     -------
     None
     """
-    pass
+    def store_pair_representation(path, pair_array):
+    """
+    Store pair representation embeddings.
+
+    Pair representations capture relationships between residues
+    or tokens in the model and are commonly used in protein
+    structure prediction models like OpenFold.
+
+    Typical shape:
+        (tokens, tokens, pair_dimension)
+
+    Archive layout:
+        representations/pair
+
+    Responsibilities:
+    -----------------
+    - Validate input shape
+    - Create representations group if needed
+    - Store pair representation array
+
+    Parameters
+    ----------
+    path : str
+        Root path to the Zarr archive.
+
+    pair_array : numpy.ndarray
+        Pair representation tensor.
+
+    Returns
+    -------
+    None
+    """
+    pair_array = tensor_to_numpy(pair_array)
+
+    # Validate shape: (tokens, tokens, pair_dim)
+    if pair_array.ndim != 3:
+        raise ValueError(
+            f"Expected 3D pair array (tokens, tokens, pair_dim), "
+            f"got {pair_array.ndim}D with shape {pair_array.shape}"
+        )
+    
+    tokens_i, tokens_j, _ = pair_array.shape
+
+    if tokens_i != tokens_j:
+        raise ValueError(
+            f"Pair representation must be square in first two dims (tokens x tokens), "
+            f"got shape {pair_array.shape}"
+        )
+    
+    archive_path = path.rstrip("/")
+
+    # Store using method 2
+    tensor_to_zarr_array(
+        f"{archive_path}::representations/pair",
+        pair_array,
+        overwrite=True
+    )
 
 
 # ============================================================
@@ -286,7 +342,75 @@ def store_pair_representation(
     -------
     None
     """
-    pass
+    def store_attention_heads(path, layer_index, attention_array):
+    """
+    Store attention head maps for a transformer layer.
+
+    Attention maps describe relationships between tokens and
+    are commonly visualized to interpret model behavior.
+
+    Expected tensor shape:
+        (num_heads, tokens, tokens)
+
+    Archive layout:
+        layers/{layer_index}/attention
+
+    Recommended chunking:
+        (1, tokens, tokens)
+
+    This chunking allows loading a single attention head without
+    loading the entire tensor.
+
+    Responsibilities:
+    -----------------
+    - Validate tensor shape
+    - Ensure correct archive structure exists
+    - Store the attention maps
+
+    Parameters
+    ----------
+    path : str
+        Root path to the archive.
+
+    layer_index : int
+        Transformer layer index.
+
+    attention_array : numpy.ndarray
+        Attention tensor.
+
+    Returns
+    -------
+    None
+    """
+    attention_array = tensor_to_numpy(attention_array)
+
+    # Validate tensor shape: (num_heads, tokens, tokens)
+    if attention_array.ndim != 3:
+        raise ValueError(
+            f"Expected 3D attention array (num_heads, tokens, tokens), "
+            f"got {attention_array.ndim}D with shape {attention_array.shape}"
+        )
+
+    num_heads, tokens_i, tokens_j = attention_array.shape
+    
+    if tokens_i != tokens_j:
+        raise ValueError(
+            f"Attention matrix must be square (tokens x tokens), "
+            f"got shape {attention_array.shape}"
+        )
+    
+    archive_path = path.rstrip("/")
+
+    # Chunk per head for efficient access
+    chunks = (1, tokens_i, tokens_j)
+
+    # Use method 2: archive_path::dataset_path for in-archive storage
+    tensor_to_zarr_array(
+        f"{archive_path}::layers/{layer_index}/attention",
+        attention_array,
+        chunks=chunks,
+        overwrite=True
+    )
 
 
 # ============================================================
