@@ -126,7 +126,20 @@ def open_archive(archive_path: str, overwrite: bool = False):
     zarr.Group
         The root group of the opened archive, ready for writing.
     """
-    pass
+    if overwrite and os.path.exists(archive_path):
+        shutil.rmtree(archive_path)
+
+    root = zarr.open_group(archive_path, mode="a")
+
+    root.require_group("metadata")
+    representations = root.require_group("representations")
+    representations.require_group("single")
+    representations.require_group("pair")
+    attention = root.require_group("attention")
+    attention.require_group("triangle_start")
+    root.require_group("structure")
+
+    return root
 
 
 # ============================================================
