@@ -208,7 +208,46 @@ def store_metadata(
     -------
     None
     """
-    pass
+    recycle_info = tensor_to_numpy(recycle_info)
+    residue_index = tensor_to_numpy(residue_index)
+
+    if len(sequence) != num_residues:
+        raise ValueError(
+            f"sequence length ({len(sequence)}) != num_residues ({num_residues})"
+        )
+    if recycle_info.shape != (num_recycles,):
+        raise ValueError(
+            f"recycle_info shape {recycle_info.shape} != ({num_recycles},)"
+        )
+    if residue_index.shape != (num_residues,):
+        raise ValueError(
+            f"residue_index shape {residue_index.shape} != ({num_residues},)"
+        )
+
+    root = zarr.open_group(archive_path, mode="a")
+    meta = root.require_group("metadata")
+
+    scalars = {
+        "model_version": np.array(model_version),
+        "config_version": np.array(config_version),
+        "sequence": np.array(sequence),
+        "num_residues": np.array(num_residues, dtype=np.int64),
+        "num_recycles": np.array(num_recycles, dtype=np.int64),
+    }
+    for key, value in scalars.items():
+        if key in meta:
+            del meta[key]
+        meta[key] = value
+
+    arrays = {
+        "recycle_info": np.asarray(recycle_info),
+        "residue_index": np.asarray(residue_index, dtype=np.int64),
+        "representation_names": np.asarray(representation_names),
+    }
+    for key, value in arrays.items():
+        if key in meta:
+            del meta[key]
+        meta[key] = value
 
 
 # ============================================================
