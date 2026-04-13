@@ -51,6 +51,9 @@ run.vizfold.zarr/
     └── ptm                  # scalar float
 """
 
+import os
+import shutil
+
 import numpy as np
 import zarr
 
@@ -84,7 +87,11 @@ def tensor_to_numpy(tensor):
     numpy.ndarray
         A CPU-based NumPy representation of the input.
     """
-    pass
+    if isinstance(tensor, np.ndarray):
+        return tensor
+    if hasattr(tensor, "detach") and hasattr(tensor, "cpu"):
+        return tensor.detach().cpu().numpy()
+    return np.asarray(tensor)
 
 
 # ============================================================
@@ -119,7 +126,20 @@ def open_archive(archive_path: str, overwrite: bool = False):
     zarr.Group
         The root group of the opened archive, ready for writing.
     """
-    pass
+    if overwrite and os.path.exists(archive_path):
+        shutil.rmtree(archive_path)
+
+    root = zarr.open_group(archive_path, mode="a")
+
+    root.require_group("metadata")
+    representations = root.require_group("representations")
+    representations.require_group("single")
+    representations.require_group("pair")
+    attention = root.require_group("attention")
+    attention.require_group("triangle_start")
+    root.require_group("structure")
+
+    return root
 
 
 # ============================================================
@@ -188,7 +208,46 @@ def store_metadata(
     -------
     None
     """
-    pass
+    recycle_info = tensor_to_numpy(recycle_info)
+    residue_index = tensor_to_numpy(residue_index)
+
+    if len(sequence) != num_residues:
+        raise ValueError(
+            f"sequence length ({len(sequence)}) != num_residues ({num_residues})"
+        )
+    if recycle_info.shape != (num_recycles,):
+        raise ValueError(
+            f"recycle_info shape {recycle_info.shape} != ({num_recycles},)"
+        )
+    if residue_index.shape != (num_residues,):
+        raise ValueError(
+            f"residue_index shape {residue_index.shape} != ({num_residues},)"
+        )
+
+    root = zarr.open_group(archive_path, mode="a")
+    meta = root.require_group("metadata")
+
+    scalars = {
+        "model_version": np.array(model_version),
+        "config_version": np.array(config_version),
+        "sequence": np.array(sequence),
+        "num_residues": np.array(num_residues, dtype=np.int64),
+        "num_recycles": np.array(num_recycles, dtype=np.int64),
+    }
+    for key, value in scalars.items():
+        if key in meta:
+            del meta[key]
+        meta[key] = value
+
+    arrays = {
+        "recycle_info": np.asarray(recycle_info),
+        "residue_index": np.asarray(residue_index, dtype=np.int64),
+        "representation_names": np.asarray(representation_names),
+    }
+    for key, value in arrays.items():
+        if key in meta:
+            del meta[key]
+        meta[key] = value
 
 
 # ============================================================
