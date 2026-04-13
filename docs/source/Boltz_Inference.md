@@ -4,13 +4,36 @@ This doc describes how to run **Boltz-2** inference and extract **attention-styl
 
 The repo ships a small example input under `scripts/boltz/inputs/` for validation. To run on your own target, override `IN_YAML` / `IN_FASTA` (see below).
 
+**Conda environment:** Boltz depends on RDKit and a pinned PyTorch/CUDA stack. **Mixed or half-upgraded conda prefixes often fail in subtle ways** (import errors, wrong shared libraries). Treat **`scripts/boltz/setup_boltz_env.sh` as “create a clean prefix”**, not “repair any old env”: pick a **new `ENV` path**, run `rm -rf "$ENV"` once, then run the setup script. If you point `ENV` at an existing directory, the script will run `conda env update` in place—which is fine only when the prefix is already healthy; **if anything looks wrong, delete the prefix and recreate** (see Quickstart §1).
+
 ---
 
-## Quickstart (ICE / coe-gpu H100)
+## Issue #42 (Boltz in VizFold): scope and status
+
+[Issue #42](https://github.com/AI2Science/vizfold-foundation/issues/42) tracks integrating Boltz inference with VizFold-style traces. The following mapping matches the **short PEARC paper** narrative (proxy vs true attention, optional activations, no diffusion-module tensor hooks):
+
+| Topic | In-repo behavior |
+|-------|------------------|
+| Dependencies / env | `scripts/boltz/setup_boltz_env.sh` + `environment_boltz.yml` + `boltz_pip_extras.txt`; `boltz_constraints.txt` is an optional human-readable pin list (e.g. `pip install -c ...`) if you debug outside the script |
+| Attention traces | `attn_txt/*.txt` in VizFold arc format; true weights when exposed, else **proxy** from triangle pair output (see above) |
+| Layer-wise summaries | Optional `act_npz/pairformer_boltz/*.npz` when `BOLTZ_ACT_DIR` is set (runner enables this) |
+| Structural outputs | `pred/` from `boltz predict` (CIF / confidence artifacts as produced by upstream) |
+| Run metadata | `manifest.json` (paths + layout); `attn_txt/component_status.json` (msa / pairformer_boltz / sm_boltz) |
+| Validation | `scripts/boltz/validate_boltz_traces.py` (`--strict` requires `manifest.json` **paths** to match `--run_dir` and the usual `pred/` / `attn_txt/` / `act_npz/` / `arc_png/` layout, plus non-empty `pred/`, `component_status.json`, and any present `act_npz`); `run_boltz_trace.sh` invokes validation with `--strict` after a successful run |
+| Offline format check | `scripts/boltz/check_trace_format_fixtures.py` + committed fixtures under `scripts/boltz/fixtures/` (CI, no GPU) |
+| Strict layout regression (CPU) | `tests/test_boltz_trace_validate.py` builds a minimal `OUT_RUN` from fixtures and runs `validate_boltz_traces.py --strict` (also checks manifest `run_dir` mismatch fails); `python -m unittest tests.test_boltz_trace_validate -v` |
+
+Nothing here claims Boltz **structure-module** or **diffusion** internal tensors are exported; only pairformer / MSA hooks and optional activation summaries as documented.
+
+---
+
+## Quickstart (PACE ICE / Slurm GPU)
 
 > **Goal:** create the env on **scratch** (not `$HOME`), then submit a trace job that produces `attn_txt/` + `arc_png/` and passes validation.
 
 ### 1) Create the environment (one-time)
+
+**Use a fresh prefix** (`rm -rf` before the first `setup_boltz_env.sh` on that path). Reusing an old Boltz/RDKit conda tree is a common cause of “works on one node, fails on another” import errors.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -18,11 +41,11 @@ cd "$(git rev-parse --show-toplevel)"
 # scratch location (recommended)
 export SCR=/storage/ice1/2/0/$USER
 
-# RECOMMENDED: use a fresh env prefix to avoid RDKit conflicts from older installs
+# REQUIRED for first-time or troubleshooting: new prefix, wipe before create
 export ENV="$SCR/conda/envs/boltz_clean_fresh"
 rm -rf "$ENV"
 
-# Build the env
+# Build the env (setup_boltz_env.sh honors ENV; default without ENV is boltz_clean and may update in place)
 bash scripts/boltz/setup_boltz_env.sh
 
 # ---- Sanity check: RDKit must import compiled symbols (rdBase + Mol) ----
@@ -73,9 +96,9 @@ find "$OUT_RUN/act_npz"  -name "*.npz" | wc -l
 find "$OUT_RUN/arc_png"  -name "*.png" | wc -l
 ```
 
-## Environment notes (ICE/H100)
+## Environment notes (ICE / GPU nodes)
 - Boltz runs on GPU.
-- On ICE/H100, run with `--no_kernels` to avoid CUDA kernel / cuBLAS symbol issues (the provided runner already uses this).
+- On ICE (including H100 and other allocated GPU types), run with `--no_kernels` to avoid CUDA kernel / cuBLAS symbol issues (the provided runner already uses this). Edit `run_boltz_trace.sbatch` if your site uses different partitions, accounts, or GPU GRES syntax.
 
 ## Output layout
 A run produces:
@@ -118,6 +141,12 @@ Important notes about proxy mode:
 - In proxy mode, `msa_row_attn_layer{L}.txt` is still generated for **format compatibility**, but it is also derived from the triangle output (not true MSA-row attention).
 - Proxy weights are intended for **visualization/diagnostics and format compatibility**, not as a perfect replacement for true attention weights.
 
+### Multi-head expansion after proxy mode (`expand_proxy_heads.py`)
+
+When **`BOLTZ_TRACE_HEAD=all`** (the default in `run_boltz_trace.sh`, exposed as internal `TRACE_HEAD`) but the tracer only produced **one** proxy head (usually **Head 0**), the runner calls **`scripts/boltz/expand_proxy_heads.py`** to **duplicate that same proxy matrix** into additional `Layer … Head {h}` blocks (e.g. heads 0–3) so the arc plotter emits the expected number of PNGs.
+
+**Downstream users must treat every expanded head after Head 0 as an identical copy of the proxy weights, not as independent per-head attention.** Only true multi-head traces from the model (when exposed) carry distinct head semantics. See the script’s docstring: it is a **format-level shim**, not a claim about Boltz’s internal heads.
+
 ## Trace text formats
 
 All trace files use repeated blocks of:
@@ -152,3 +181,7 @@ To run on your own target, override:
 export IN_YAML=/path/to/your_input.yaml
 export IN_FASTA=/path/to/your_input.fasta
 ```
+
+## Reviewer reproducibility and demonstration evidence
+
+Step-by-step verification commands, expected output, and submission screenshots are documented in **`submission/issue42-demonstration-evidence/REPRODUCIBILITY.md`**.

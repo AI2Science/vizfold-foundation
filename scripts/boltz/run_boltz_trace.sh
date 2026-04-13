@@ -28,7 +28,8 @@ TRACE_RESIDUES="${BOLTZ_TRACE_RESIDUES:-18}"
 TRACE_LAYERS="${BOLTZ_TRACE_LAYERS:-0}"
 TRACE_DEBUG="${BOLTZ_TRACE_DEBUG:-1}"
 
-RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
+# Unique per job: parallel sbatch in the same second used to collide on RUN_ID.
+RUN_ID="run_$(date +%Y%m%d_%H%M%S)_${SLURM_JOB_ID:-$$}"
 OUT_RUN="$OUT_BASE/$RUN_ID"
 OUT_PRED="$OUT_RUN/pred"
 OUT_ATTN="$OUT_RUN/attn_txt"
@@ -149,8 +150,10 @@ except Exception as e:
 PY
 fi
 
-# If TRACE_HEAD=all but we only have Head 0 blocks, expand to 4 pseudo-heads (format shim)
+# If TRACE_HEAD=all but we only have Head 0 blocks, expand to 4 pseudo-heads (format shim).
+# Duplicated heads repeat the same proxy weights for plotting—not independent attentions.
 if [ "${TRACE_HEAD}" = "all" ]; then
+  echo "[INFO] expand_proxy_heads (if needed): extra Head blocks are copies for arc PNG layout, not true per-head attention"
   python scripts/boltz/expand_proxy_heads.py --attn_dir "$OUT_ATTN" --heads 4
 fi
 echo "[INFO] Act npz:"
@@ -226,6 +229,7 @@ python scripts/boltz/validate_boltz_traces.py \
   --layers "$TRACE_LAYERS" \
   --residues "$TRACE_RESIDUES" \
   --expect_heads 4 \
+  --strict \
   || { echo "[FAIL] validate_boltz_traces.py" >&2; exit 1; }
 
 echo "[PASS] validate_boltz_traces.py"

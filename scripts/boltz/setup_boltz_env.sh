@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+#
+# Boltz + RDKit: use a clean conda prefix when anything fails mysteriously.
+#   export ENV=/path/to/new/env && rm -rf "$ENV" && bash scripts/boltz/setup_boltz_env.sh
+# If ENV already exists, this script runs "conda env update" in place—that can preserve
+# broken mixed installs. Prefer a fresh ENV path for first-time setup or troubleshooting.
+# See docs/source/Boltz_Inference.md (environment callout + Quickstart §1).
+#
 
 # Ensure module/conda work even in shells where `module` isn't preloaded
 if ! command -v module >/dev/null 2>&1; then
@@ -20,6 +27,7 @@ echo "[INFO] ENV=$ENV"
 # Create OR update env from YAML (idempotent)
 if [ -d "$ENV" ]; then
   echo "[INFO] Env exists; updating: $ENV"
+  echo "[HINT] If RDKit/Boltz imports fail after updates, stop and recreate: rm -rf \"$ENV\", pick a new ENV, re-run this script."
   conda env update -p "$ENV" -f environment_boltz.yml --prune
 else
   echo "[INFO] Creating env: $ENV"

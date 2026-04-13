@@ -1,0 +1,6 @@
+Layer 0 Head 0
+0 1 0.25
+2 3 0.10
+
+Layer 0 Head 1
+0 2 0.15

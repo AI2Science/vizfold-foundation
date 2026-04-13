@@ -36,3 +36,10 @@ outputs/boltz_runs/**
 !scripts/boltz/inputs/*.yaml
 !scripts/boltz/boltz_pip_extras.txt
 !scripts/boltz/boltz_constraints.txt
+# Reference trace text fixtures (Issue #42; format-only CI)
+!scripts/boltz/fixtures/
+!scripts/boltz/fixtures/*.txt
+
+# Issue #42 submission evidence
+!submission/issue42-demonstration-evidence/screenshots/
+!submission/issue42-demonstration-evidence/screenshots/*.png
