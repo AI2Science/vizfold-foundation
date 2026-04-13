@@ -51,6 +51,9 @@ run.vizfold.zarr/
     └── ptm                  # scalar float
 """
 
+import os
+import shutil
+
 import numpy as np
 import zarr
 
@@ -84,7 +87,11 @@ def tensor_to_numpy(tensor):
     numpy.ndarray
         A CPU-based NumPy representation of the input.
     """
-    pass
+    if isinstance(tensor, np.ndarray):
+        return tensor
+    if hasattr(tensor, "detach") and hasattr(tensor, "cpu"):
+        return tensor.detach().cpu().numpy()
+    return np.asarray(tensor)
 
 
 # ============================================================
