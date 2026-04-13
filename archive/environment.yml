@@ -8,7 +8,7 @@ channels:
 
 dependencies:
   - python=3.10
-  - setuptools=59.5.0   # pinned: newer versions break openfold's CUDA extension build
+  - setuptools=59.5.0
   - pip
 
   # Core scientific stack
@@ -29,23 +29,23 @@ dependencies:
   - ipykernel
 
   # PyTorch with CUDA 12.4
-  # CPU-only alternative — comment out the three lines below and uncomment these:
-  # - pytorch
-  # - torchvision
-  # - cpuonly
+  # CPU-only alternative: comment out the three lines below and uncomment these:
+  #   - pytorch
+  #   - torchvision
+  #   - cpuonly
   - pytorch::pytorch=2.5
   - pytorch::torchvision
   - pytorch::pytorch-cuda=12.4
 
-  # OpenFold / Vizfold runtime dependencies
-  # cuda provides nvcc + headers required to compile attn_core_inplace_cuda via setup.py
+  # OpenFold / VizFold runtime dependencies
+  # Note: cuda package provides nvcc + headers for compiling attn_core_inplace_cuda via setup.py
+  # Note: gcc=12.4 is Linux-only; on Windows use MSVC (Visual Studio Build Tools with C++ workload)
   - cuda
   - openmm
   - pdbfixer
   - pytorch-lightning
   - ml-collections
   - mkl
-  - gcc=12.4
 
   # Zarr archive stack
   - zarr=2.16
@@ -56,5 +56,9 @@ dependencies:
       # OpenFold extras
       - dm-tree==0.1.6
       - modelcif==0.7
-      # Install openfold itself in editable mode from the repo root
-      - -e ..
+      # NOTE: do NOT put "-e .." here.
+      # setup.py imports torch at the top level, so pip's isolated build
+      # subprocess fails with ModuleNotFoundError before torch is installed.
+      # After activating this env, install openfold manually from the repo root:
+      #   cd ..
+      #   pip install -e .
