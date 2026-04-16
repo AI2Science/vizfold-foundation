@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import numpy as np
@@ -222,6 +223,211 @@ def visualize_attention_rollout(attention_dir, seq_len, attention_type="msa_row"
     )
 
 
+def create_interactive_rollout_html(averaged_layers, seq_len, attention_type="msa_row", layer_indices=None, output_html="interactive_rollout.html", residue_idx=None, threshold=None, default_start=None, default_end=None):
+    if layer_indices is None:
+        layer_indices = [layer_data["layer"] for layer_data in averaged_layers]
+
+    if default_start is None:
+        default_start = min(layer_indices)
+    if default_end is None:
+        default_end = max(layer_indices)
+
+    attention_label = attention_type.upper()
+    residue_part = f" (residue {residue_idx})" if residue_idx is not None else ""
+    layer_data_json = json.dumps([
+        {"layer": layer_data["layer"], "matrix": layer_data["matrix"]}
+        for layer_data in averaged_layers
+    ])
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"utf-8\" />
+    <title>{attention_label} Attention Rollout</title>
+    <script src=\"https://cdn.plot.ly/plotly-latest.min.js\"></script>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 24px; }}
+        .controls {{ margin-bottom: 16px; }}
+        label {{ margin-right: 12px; }}
+        input {{ width: 80px; margin-left: 4px; }}
+        button {{ margin-left: 12px; padding: 8px 14px; }}
+        #status {{ margin-top: 12px; color: #333; }}
+    </style>
+</head>
+<body>
+    <h1>{attention_label} Attention Rollout</h1>
+    <p>Interactive layer-range selector for {attention_label} rollout{residue_part}.</p>
+    <div class=\"controls\">
+        <label>Start layer <input id=\"layer_start\" type=\"number\" min=\"{min(layer_indices)}\" max=\"{max(layer_indices)}\" value=\"{default_start}\" /></label>
+        <label>End layer <input id=\"layer_end\" type=\"number\" min=\"{min(layer_indices)}\" max=\"{max(layer_indices)}\" value=\"{default_end}\" /></label>
+        <label>Threshold <input id=\"threshold\" type=\"number\" step=\"0.0001\" value=\"{threshold if threshold is not None else ''}\" placeholder=\"none\" /></label>
+        <button id=\"compute_button\">Compute Rollout</button>
+    </div>
+    <div id=\"status\">Loaded {len(layer_indices)} layers.</div>
+    <div id=\"heatmap\"></div>
+
+    <script>
+        const attentionLayers = {layer_data_json};
+
+        function addIdentity(matrix) {{
+            const n = matrix.length;
+            const out = new Array(n);
+            for (let i = 0; i < n; i++) {{
+                out[i] = new Array(n);
+                for (let j = 0; j < n; j++) {{
+                    out[i][j] = matrix[i][j] + (i === j ? 1.0 : 0.0);
+                }}
+            }}
+            return out;
+        }}
+
+        function normalize(matrix) {{
+            const n = matrix.length;
+            const out = new Array(n);
+            for (let i = 0; i < n; i++) {{
+                out[i] = new Array(n);
+                let rowSum = 0.0;
+                for (let j = 0; j < n; j++) {{
+                    rowSum += matrix[i][j];
+                }}
+                const denom = rowSum === 0 ? 1.0 : rowSum;
+                for (let j = 0; j < n; j++) {{
+                    out[i][j] = matrix[i][j] / denom;
+                }}
+            }}
+            return out;
+        }}
+
+        function matMul(A, B) {{
+            const n = A.length;
+            const out = new Array(n);
+            for (let i = 0; i < n; i++) {{
+                out[i] = new Array(n).fill(0.0);
+            }}
+            for (let i = 0; i < n; i++) {{
+                for (let k = 0; k < n; k++) {{
+                    const a = A[i][k];
+                    if (a === 0) continue;
+                    const rowB = B[k];
+                    const outRow = out[i];
+                    for (let j = 0; j < n; j++) {{
+                        outRow[j] += a * rowB[j];
+                    }}
+                }}
+            }}
+            return out;
+        }}
+
+        function applyThreshold(matrix, threshold) {{
+            if (isNaN(threshold)) {{
+                return matrix;
+            }}
+            const n = matrix.length;
+            const out = new Array(n);
+            for (let i = 0; i < n; i++) {{
+                out[i] = new Array(n);
+                for (let j = 0; j < n; j++) {{
+                    out[i][j] = matrix[i][j] >= threshold ? matrix[i][j] : NaN;
+                }}
+            }}
+            return out;
+        }}
+
+        function computeRollout() {{
+            const start = parseInt(document.getElementById('layer_start').value, 10);
+            const end = parseInt(document.getElementById('layer_end').value, 10);
+            const threshold = parseFloat(document.getElementById('threshold').value);
+            const selected = attentionLayers.filter(layerData => layerData.layer >= start && layerData.layer <= end);
+
+            const status = document.getElementById('status');
+            if (selected.length === 0) {{
+                status.textContent = `No layers found in range ${start}-${end}.`;
+                return;
+            }}
+
+            status.textContent = `Computing rollout for layers ${start}-${end} ...`;
+            let rollout = normalize(addIdentity(selected[0].matrix));
+            for (let i = 1; i < selected.length; i++) {{
+                const layer = normalize(addIdentity(selected[i].matrix));
+                rollout = matMul(layer, rollout);
+            }}
+
+            const thresholded = applyThreshold(rollout, threshold);
+            const title = `{attention_label} Attention Rollout (layers ${start}-${end})`;
+            const data = [{{
+                z: thresholded,
+                type: 'heatmap',
+                colorscale: 'Blues',
+                colorbar: {{title: 'Rollout'}},
+                hoverongaps: false
+            }}];
+            const layout = {{
+                title: title,
+                xaxis: {{title: 'Residue'}},
+                yaxis: {{title: 'Residue'}},
+                width: 900,
+                height: 900,
+            }};
+
+            Plotly.react('heatmap', data, layout);
+            status.textContent = `Rendered rollout for layers ${start}-${end}.`;
+        }}
+
+        document.getElementById('compute_button').addEventListener('click', computeRollout);
+        window.addEventListener('load', computeRollout);
+    </script>
+</body>
+</html>
+"""
+
+    with open(output_html, 'w', encoding='utf-8') as f:
+        f.write(html)
+
+    print(f"Saved interactive rollout HTML to: {output_html}")
+    return output_html
+
+
+def visualize_attention_rollout_interactive(attention_dir, seq_len, attention_type="msa_row", residue_idx=None, output_dir="./outputs/attention_heatmaps", layer_start=None, layer_end=None, threshold=None):
+    os.makedirs(output_dir, exist_ok=True)
+
+    available_layers = discover_attention_layers(attention_dir, attention_type, residue_idx)
+    if len(available_layers) == 0:
+        raise ValueError(f"No attention files found in {attention_dir} for {attention_type}")
+
+    if layer_start is None:
+        layer_start = available_layers[0]
+    if layer_end is None:
+        layer_end = available_layers[-1]
+
+    layer_indices = [L for L in available_layers if layer_start <= L <= layer_end]
+    if len(layer_indices) == 0:
+        raise ValueError(f"No layers found in range {layer_start}-{layer_end}")
+
+    averaged_layers = []
+    for layer_idx in layer_indices:
+        attn = load_attention_array(attention_dir, seq_len, layer_idx, attention_type, residue_idx)
+        averaged = np.mean(attn, axis=0)
+        averaged_layers.append({"layer": layer_idx, "matrix": averaged.tolist()})
+
+    output_suffix = f"layers{layer_start}-{layer_end}"
+    if attention_type == "msa_row":
+        output_html = os.path.join(output_dir, f"msa_row_interactive_rollout_{output_suffix}_heatmap.html")
+    else:
+        output_html = os.path.join(output_dir, f"triangle_start_interactive_rollout_{output_suffix}_res{residue_idx}_heatmap.html")
+
+    return create_interactive_rollout_html(
+        averaged_layers,
+        seq_len,
+        attention_type,
+        layer_indices=layer_indices,
+        output_html=output_html,
+        residue_idx=residue_idx,
+        threshold=threshold,
+        default_start=layer_start,
+        default_end=layer_end,
+    )
+
+
 def create_heatmap_grid(attention_file, seq_len, layer_idx=47, attention_type="msa_row", output_html="heatmap_grid.html", threshold=None):
     heads = load_all_heads(attention_file)
     num_heads = len(heads)
@@ -359,6 +565,8 @@ def main():
                         help="Layer index to visualize for per-head heatmaps.")
     parser.add_argument("--rollout", action="store_true", default=False,
                         help="Compute attention rollout instead of per-head heatmap grids.")
+    parser.add_argument("--interactive_rollout", action="store_true", default=False,
+                        help="Generate standalone HTML with layer-range selection UI for rollout.")
     parser.add_argument("--rollout_layer_start", type=int, default=None,
                         help="Start layer index for rollout aggregation.")
     parser.add_argument("--rollout_layer_end", type=int, default=None,
@@ -376,16 +584,28 @@ def main():
         parser.error("--residue_idx is required when attention_type is 'triangle_start'")
 
     if args.rollout:
-        visualize_attention_rollout(
-            attention_dir=args.attention_dir,
-            seq_len=args.seq_len,
-            attention_type=args.attention_type,
-            residue_idx=args.residue_idx,
-            output_dir=args.output_dir,
-            layer_start=args.rollout_layer_start,
-            layer_end=args.rollout_layer_end,
-            threshold=args.threshold,
-        )
+        if args.interactive_rollout:
+            visualize_attention_rollout_interactive(
+                attention_dir=args.attention_dir,
+                seq_len=args.seq_len,
+                attention_type=args.attention_type,
+                residue_idx=args.residue_idx,
+                output_dir=args.output_dir,
+                layer_start=args.rollout_layer_start,
+                layer_end=args.rollout_layer_end,
+                threshold=args.threshold,
+            )
+        else:
+            visualize_attention_rollout(
+                attention_dir=args.attention_dir,
+                seq_len=args.seq_len,
+                attention_type=args.attention_type,
+                residue_idx=args.residue_idx,
+                output_dir=args.output_dir,
+                layer_start=args.rollout_layer_start,
+                layer_end=args.rollout_layer_end,
+                threshold=args.threshold,
+            )
     else:
         if args.layer_idx is None:
             parser.error("--layer_idx is required when not using --rollout")
