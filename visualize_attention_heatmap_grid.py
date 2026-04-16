@@ -1,4 +1,5 @@
 import os
+import re
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -29,6 +30,163 @@ def reconstruct_matrix(connections, seq_len):
         if res1 < seq_len and res2 < seq_len:
             matrix[res1, res2] = weight
     return matrix
+
+
+def load_dense_attention(attention_file):
+    if not os.path.exists(attention_file):
+        raise FileNotFoundError(attention_file)
+
+    data = np.load(attention_file)
+    if isinstance(data, np.ndarray):
+        return data
+
+    if "attn" in data:
+        return data["attn"]
+
+    if len(data.files) == 1:
+        return data[data.files[0]]
+
+    raise ValueError(f"Unable to parse attention contents from {attention_file}")
+
+
+def load_attention_from_text(attention_file, seq_len):
+    heads = load_all_heads(attention_file)
+    matrices = [reconstruct_matrix(heads[head_idx], seq_len) for head_idx in sorted(heads.keys())]
+    if len(matrices) == 0:
+        raise ValueError(f"No attention heads found in {attention_file}")
+    return np.stack(matrices, axis=0)
+
+
+def load_attention_array(attention_dir, seq_len, layer_idx, attention_type="msa_row", residue_idx=None):
+    if attention_type == "msa_row":
+        base_name = f"msa_row_attn_layer{layer_idx}"
+    elif attention_type == "triangle_start":
+        if residue_idx is None:
+            raise ValueError("residue_idx required for triangle_start attention")
+        base_name = f"triangle_start_attn_layer{layer_idx}_residue_idx_{residue_idx}"
+    else:
+        raise ValueError(f"Unknown attention_type: {attention_type}")
+
+    npz_file = os.path.join(attention_dir, f"{base_name}.npz")
+    txt_file = os.path.join(attention_dir, f"{base_name}.txt")
+
+    if os.path.exists(npz_file):
+        return load_dense_attention(npz_file)
+
+    if os.path.exists(txt_file):
+        return load_attention_from_text(txt_file, seq_len)
+
+    raise FileNotFoundError(f"Neither {npz_file} nor {txt_file} exists")
+
+
+def discover_attention_layers(attention_dir, attention_type="msa_row", residue_idx=None):
+    layer_indices = set()
+    if not os.path.isdir(attention_dir):
+        return []
+
+    if attention_type == "msa_row":
+        pattern = re.compile(r"^msa_row_attn_layer(\d+)\.(?:npz|txt)$")
+    else:
+        if residue_idx is None:
+            return []
+        pattern = re.compile(rf"^triangle_start_attn_layer(\d+)_residue_idx_{residue_idx}\.(?:npz|txt)$")
+
+    for fname in os.listdir(attention_dir):
+        match = pattern.match(fname)
+        if match:
+            layer_indices.add(int(match.group(1)))
+
+    return sorted(layer_indices)
+
+
+def compute_attention_rollout(attention_arrays, add_identity=True, eps=1e-12):
+    if len(attention_arrays) == 0:
+        raise ValueError("No attention arrays available for rollout computation")
+
+    averaged_layers = [np.mean(attn, axis=0) for attn in attention_arrays]
+
+    if add_identity:
+        averaged_layers = [layer + np.eye(layer.shape[-1]) for layer in averaged_layers]
+
+    normalized_layers = [layer / (layer.sum(axis=-1, keepdims=True) + eps) for layer in averaged_layers]
+
+    rollout = normalized_layers[0]
+    for layer in normalized_layers[1:]:
+        rollout = layer @ rollout
+
+    return rollout
+
+
+def create_rollout_heatmap(rollout_matrix, seq_len, attention_type="msa_row", layer_start=0, layer_end=None, output_html="rollout_heatmap.html", threshold=None):
+    matrix = rollout_matrix.copy()
+    if threshold is not None:
+        matrix[matrix < threshold] = np.nan
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=matrix,
+            colorscale='Blues',
+            colorbar=dict(title='Rollout'),
+        )
+    )
+
+    title_range = f"layers {layer_start}-{layer_end}" if layer_end is not None else f"layers {layer_start}-end"
+    title_text = f"{attention_type.upper()} Attention Rollout ({title_range})"
+    if threshold is not None:
+        title_text += f" (threshold > {threshold})"
+
+    fig.update_layout(
+        title_text=title_text,
+        title_x=0.5,
+        xaxis_title="Residue",
+        yaxis_title="Residue",
+        width=900,
+        height=900,
+    )
+
+    fig.write_html(output_html)
+    print(f"Saved rollout heatmap to: {output_html}")
+    return fig
+
+
+def visualize_attention_rollout(attention_dir, seq_len, attention_type="msa_row", residue_idx=None, output_dir="./outputs/attention_heatmaps", layer_start=None, layer_end=None, threshold=None, add_identity=True):
+    os.makedirs(output_dir, exist_ok=True)
+
+    available_layers = discover_attention_layers(attention_dir, attention_type, residue_idx)
+    if len(available_layers) == 0:
+        raise ValueError(f"No attention files found in {attention_dir} for {attention_type}")
+
+    if layer_start is None:
+        layer_start = available_layers[0]
+    if layer_end is None:
+        layer_end = available_layers[-1]
+
+    layer_indices = [L for L in available_layers if layer_start <= L <= layer_end]
+    if len(layer_indices) == 0:
+        raise ValueError(f"No layers found in range {layer_start}-{layer_end}")
+
+    attention_arrays = [
+        load_attention_array(attention_dir, seq_len, layer_idx, attention_type, residue_idx)
+        for layer_idx in layer_indices
+    ]
+
+    rollout_matrix = compute_attention_rollout(attention_arrays, add_identity=add_identity)
+
+    output_suffix = f"layers{layer_start}-{layer_end}"
+    if attention_type == "msa_row":
+        output_html = os.path.join(output_dir, f"msa_row_rollout_{output_suffix}_heatmap.html")
+    else:
+        output_html = os.path.join(output_dir, f"triangle_start_rollout_{output_suffix}_res{residue_idx}_heatmap.html")
+
+    return create_rollout_heatmap(
+        rollout_matrix,
+        seq_len,
+        attention_type,
+        layer_start,
+        layer_end,
+        output_html,
+        threshold,
+    )
 
 
 def create_heatmap_grid(attention_file, seq_len, layer_idx=47, attention_type="msa_row", output_html="heatmap_grid.html", threshold=None):
@@ -164,8 +322,14 @@ def main():
                         help="Directory to save the output HTML files.")
     parser.add_argument("--seq_len", type=int, required=True, 
                         help="Sequence length.")
-    parser.add_argument("--layer_idx", type=int, required=True, 
-                        help="Layer index to visualize.")
+    parser.add_argument("--layer_idx", type=int, default=None, 
+                        help="Layer index to visualize for per-head heatmaps.")
+    parser.add_argument("--rollout", action="store_true", default=False,
+                        help="Compute attention rollout instead of per-head heatmap grids.")
+    parser.add_argument("--rollout_layer_start", type=int, default=None,
+                        help="Start layer index for rollout aggregation.")
+    parser.add_argument("--rollout_layer_end", type=int, default=None,
+                        help="End layer index for rollout aggregation.")
     parser.add_argument("--attention_type", type=str, required=True, choices=["msa_row", "triangle_start"],
                         help="Type of attention to visualize.")
     parser.add_argument("--residue_idx", type=int, default=None,
@@ -178,15 +342,30 @@ def main():
     if args.attention_type == "triangle_start" and args.residue_idx is None:
         parser.error("--residue_idx is required when attention_type is 'triangle_start'")
 
-    visualize_layer_attention(
-        attention_dir=args.attention_dir,
-        seq_len=args.seq_len,
-        layer_idx=args.layer_idx,
-        attention_type=args.attention_type,
-        residue_idx=args.residue_idx,
-        output_dir=args.output_dir,
-        threshold=args.threshold
-    )
+    if args.rollout:
+        visualize_attention_rollout(
+            attention_dir=args.attention_dir,
+            seq_len=args.seq_len,
+            attention_type=args.attention_type,
+            residue_idx=args.residue_idx,
+            output_dir=args.output_dir,
+            layer_start=args.rollout_layer_start,
+            layer_end=args.rollout_layer_end,
+            threshold=args.threshold,
+        )
+    else:
+        if args.layer_idx is None:
+            parser.error("--layer_idx is required when not using --rollout")
+
+        visualize_layer_attention(
+            attention_dir=args.attention_dir,
+            seq_len=args.seq_len,
+            layer_idx=args.layer_idx,
+            attention_type=args.attention_type,
+            residue_idx=args.residue_idx,
+            output_dir=args.output_dir,
+            threshold=args.threshold
+        )
 
 if __name__ == "__main__":
     main()

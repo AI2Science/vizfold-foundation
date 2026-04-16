@@ -301,6 +301,7 @@ def main(args):
     config.num_recycles_save = args.num_recycles_save
     attention_config = {
                 "demo_attn": args.demo_attn,
+                "save_full_attn": args.save_full_attn,
                 "triangle_residue_idx": args.triangle_residue_idx,
         }
     config.attention_config = attention_config
@@ -522,6 +523,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--demo_attn", action='store_true', default=False
+    )
+    parser.add_argument(
+        "--save_full_attn", action='store_true', default=False,
+        help="Save dense attention arrays (numpy .npz) alongside top-K attention files for rollout visualization."
     )
     parser.add_argument(
         "--triangle_residue_idx", default=None, type=int  # for demo visualizations we need to select a residue idx
