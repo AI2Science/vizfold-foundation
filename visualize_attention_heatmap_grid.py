@@ -4,6 +4,11 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 
 def load_all_heads(connections_file):
     heads = {}
@@ -99,10 +104,35 @@ def discover_attention_layers(attention_dir, attention_type="msa_row", residue_i
     return sorted(layer_indices)
 
 
-def compute_attention_rollout(attention_arrays, add_identity=True, eps=1e-12):
+def compute_attention_rollout(attention_arrays, add_identity=True, eps=1e-12, use_gpu=True):
     if len(attention_arrays) == 0:
         raise ValueError("No attention arrays available for rollout computation")
 
+    if use_gpu and torch is not None and torch.cuda.is_available():
+        device = torch.device("cuda")
+        layers = []
+        for attn in attention_arrays:
+            if isinstance(attn, np.ndarray):
+                attn = torch.from_numpy(attn)
+            elif not isinstance(attn, torch.Tensor):
+                attn = torch.tensor(attn)
+            layers.append(attn.to(device=device, dtype=torch.float32))
+
+        averaged_layers = [layer.mean(dim=0) for layer in layers]
+
+        if add_identity:
+            averaged_layers = [layer + torch.eye(layer.shape[-1], device=device) for layer in averaged_layers]
+
+        normalized_layers = [layer / (layer.sum(dim=-1, keepdim=True) + eps) for layer in averaged_layers]
+
+        rollout = normalized_layers[0]
+        for layer in normalized_layers[1:]:
+            rollout = layer.matmul(rollout)
+
+        rollout = rollout.detach().cpu()
+        return rollout.numpy()
+
+    # Fallback to NumPy if PyTorch/CUDA is unavailable.
     averaged_layers = [np.mean(attn, axis=0) for attn in attention_arrays]
 
     if add_identity:
@@ -118,6 +148,9 @@ def compute_attention_rollout(attention_arrays, add_identity=True, eps=1e-12):
 
 
 def create_rollout_heatmap(rollout_matrix, seq_len, attention_type="msa_row", layer_start=0, layer_end=None, output_html="rollout_heatmap.html", threshold=None):
+    if hasattr(rollout_matrix, "cpu") and not isinstance(rollout_matrix, np.ndarray):
+        rollout_matrix = rollout_matrix.detach().cpu().numpy()
+
     matrix = rollout_matrix.copy()
     if threshold is not None:
         matrix[matrix < threshold] = np.nan
@@ -149,7 +182,7 @@ def create_rollout_heatmap(rollout_matrix, seq_len, attention_type="msa_row", la
     return fig
 
 
-def visualize_attention_rollout(attention_dir, seq_len, attention_type="msa_row", residue_idx=None, output_dir="./outputs/attention_heatmaps", layer_start=None, layer_end=None, threshold=None, add_identity=True):
+def visualize_attention_rollout(attention_dir, seq_len, attention_type="msa_row", residue_idx=None, output_dir="./outputs/attention_heatmaps", layer_start=None, layer_end=None, threshold=None, add_identity=True, use_gpu=True):
     os.makedirs(output_dir, exist_ok=True)
 
     available_layers = discover_attention_layers(attention_dir, attention_type, residue_idx)
@@ -170,7 +203,7 @@ def visualize_attention_rollout(attention_dir, seq_len, attention_type="msa_row"
         for layer_idx in layer_indices
     ]
 
-    rollout_matrix = compute_attention_rollout(attention_arrays, add_identity=add_identity)
+    rollout_matrix = compute_attention_rollout(attention_arrays, add_identity=add_identity, use_gpu=use_gpu)
 
     output_suffix = f"layers{layer_start}-{layer_end}"
     if attention_type == "msa_row":
