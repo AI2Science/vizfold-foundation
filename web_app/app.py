@@ -7,6 +7,7 @@ import shutil
 import threading
 import sys
 import multiprocessing
+import numpy as np
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -14,6 +15,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+from visualize_attention_heatmap_grid import load_attention_array, discover_attention_layers, compute_attention_rollout
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = './web_tmp_dir'
@@ -122,13 +125,13 @@ def detect_available_layers(attn_map_dir, residue_idx):
     layers_tri = set()
     if os.path.isdir(attn_map_dir):
         for fname in os.listdir(attn_map_dir):
-            if fname.startswith('msa_row_attn_layer') and fname.endswith('.txt'):
+            if fname.startswith('msa_row_attn_layer') and (fname.endswith('.txt') or fname.endswith('.npz')):
                 try:
-                    L = int(fname.replace('msa_row_attn_layer', '').replace('.txt', ''))
+                    L = int(fname.replace('msa_row_attn_layer', '').replace('.txt', '').replace('.npz', ''))
                     layers_msa.add(L)
                 except ValueError:
                     pass
-            if fname.startswith('triangle_start_attn_layer') and f"residue_idx_{residue_idx}" in fname and fname.endswith('.txt'):
+            if fname.startswith('triangle_start_attn_layer') and f"residue_idx_{residue_idx}" in fname and (fname.endswith('.txt') or fname.endswith('.npz')):
                 try:
                     core = fname.split('triangle_start_attn_layer')[1]
                     L = int(core.split('_')[0])
@@ -136,6 +139,75 @@ def detect_available_layers(attn_map_dir, residue_idx):
                 except Exception:
                     pass
     return sorted(layers_msa), sorted(layers_tri)
+
+
+@app.route('/viz/generate', methods=['POST'])
+def generate_viz():
+    data = request.get_json(force=True)
+    protein_id = data.get('protein_id')
+    residue_idx = data.get('residue_idx')
+    if not protein_id or residue_idx is None:
+        return jsonify({'error': 'protein_id and residue_idx required'}), 400
+
+    attn_map_dir = get_paths_for_protein(protein_id, residue_idx)
+    if not os.path.isdir(attn_map_dir):
+        return jsonify({'error': 'attention map directory not found'}), 404
+
+    # This endpoint currently acts as a readiness trigger for frontend polling.
+    return jsonify({'status': 'ok', 'message': 'Attention visualization data are available'}), 200
+
+
+@app.route('/viz/rollout')
+def rollout_viz():
+    protein_id = request.args.get('protein_id')
+    residue_idx = request.args.get('residue_idx', type=int)
+    attention_type = request.args.get('attention_type', default='msa_row')
+    layer_start = request.args.get('layer_start', type=int)
+    layer_end = request.args.get('layer_end', type=int)
+    seq_len = request.args.get('seq_len', type=int)
+    threshold = request.args.get('threshold', type=float)
+
+    if not protein_id or residue_idx is None or seq_len is None:
+        return jsonify({'error': 'protein_id, residue_idx, and seq_len are required'}), 400
+
+    attn_map_dir = get_paths_for_protein(protein_id, residue_idx)
+    if not os.path.isdir(attn_map_dir):
+        return jsonify({'error': 'attention map directory not found'}), 404
+
+    layers = discover_attention_layers(attn_map_dir, attention_type, residue_idx)
+    if len(layers) == 0:
+        return jsonify({'error': 'no attention layers available'}), 404
+
+    if layer_start is None:
+        layer_start = layers[0]
+    if layer_end is None:
+        layer_end = layers[-1]
+
+    selected_layers = [L for L in layers if layer_start <= L <= layer_end]
+    if len(selected_layers) == 0:
+        return jsonify({'error': f'no layers found in range {layer_start}-{layer_end}'}), 400
+
+    try:
+        attention_arrays = [
+            load_attention_array(attn_map_dir, seq_len, layer_idx, attention_type, residue_idx)
+            for layer_idx in selected_layers
+        ]
+        rollout_matrix = compute_attention_rollout(attention_arrays, add_identity=True, eps=1e-12, use_gpu=True)
+    except Exception as e:
+        return jsonify({'error': f'rollout computation failed: {str(e)}'}), 500
+
+    if threshold is not None:
+        rollout_matrix = np.where(rollout_matrix >= threshold, rollout_matrix, np.nan)
+
+    return jsonify({
+        'protein_id': protein_id,
+        'residue_idx': residue_idx,
+        'attention_type': attention_type,
+        'layer_start': layer_start,
+        'layer_end': layer_end,
+        'seq_len': seq_len,
+        'rollout_matrix': rollout_matrix.tolist()
+    })
 
 
 @app.route('/cancel_prediction', methods=['POST'])
@@ -260,7 +332,8 @@ def process():
         '--attn_map_dir', attn_map_dir,
         '--num_recycles_save', '1',
         '--triangle_residue_idx', str(residue_idx),
-        '--demo_attn'
+        '--demo_attn',
+        '--save_full_attn'
     ]
 
     if (os.path.exists(os.path.abspath(f'../examples/monomer/fasta_dir_{prot_old}'))):

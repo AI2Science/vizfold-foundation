@@ -55,15 +55,23 @@ def load_dense_attention(attention_file):
     raise ValueError(f"Unable to parse attention contents from {attention_file}")
 
 
-def load_attention_from_text(attention_file, seq_len):
+def load_attention_from_text(attention_file, seq_len=None):
     heads = load_all_heads(attention_file)
-    matrices = [reconstruct_matrix(heads[head_idx], seq_len) for head_idx in sorted(heads.keys())]
-    if len(matrices) == 0:
+    if len(heads) == 0:
         raise ValueError(f"No attention heads found in {attention_file}")
+
+    if seq_len is None:
+        max_idx = 0
+        for connections in heads.values():
+            for res1, res2, _ in connections:
+                max_idx = max(max_idx, int(res1), int(res2))
+        seq_len = max_idx + 1
+
+    matrices = [reconstruct_matrix(heads[head_idx], seq_len) for head_idx in sorted(heads.keys())]
     return np.stack(matrices, axis=0)
 
 
-def load_attention_array(attention_dir, seq_len, layer_idx, attention_type="msa_row", residue_idx=None):
+def load_attention_array(attention_dir, seq_len=None, layer_idx=0, attention_type="msa_row", residue_idx=None):
     if attention_type == "msa_row":
         base_name = f"msa_row_attn_layer{layer_idx}"
     elif attention_type == "triangle_start":

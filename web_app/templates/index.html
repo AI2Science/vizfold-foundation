@@ -208,6 +208,26 @@
                         </div>
                     </div>
                 </div>
+                <div class="row align-items-center g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label mb-0" for="rolloutStart">Rollout start</label>
+                        <input type="number" class="form-control form-control-sm" id="rolloutStart" min="0" value="0" disabled>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label mb-0" for="rolloutEnd">Rollout end</label>
+                        <input type="number" class="form-control form-control-sm" id="rolloutEnd" min="0" value="0" disabled>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label mb-0" for="rolloutThreshold">Threshold</label>
+                        <input type="number" class="form-control form-control-sm" id="rolloutThreshold" step="0.0001" placeholder="Optional" disabled>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-success w-100" id="computeRolloutButton" disabled>Compute Rollout</button>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col"><span id="rolloutStatus" class="text-muted"></span></div>
+                </div>
                 <div id="attn-loading" class="text-center" style="display: none;">
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
@@ -769,6 +789,11 @@
         setupArcInteractions();
         setupHeatmapInteractions();
 
+        const rolloutButton = document.getElementById('computeRolloutButton');
+        if (rolloutButton) {
+            rolloutButton.addEventListener('click', computeRolloutBackend);
+        }
+
         const noLayerChk = document.getElementById('noLayer3D');
         if (noLayerChk) {
             noLayerChk.onchange = () => {
@@ -797,6 +822,7 @@
             range.disabled = true;
             range.min = 0; range.max = 0; range.value = 0;
             document.getElementById('layerValue').textContent = '-';
+            updateRolloutControls();
             return;
         }
         layers.sort((a,b)=>a-b);
@@ -807,6 +833,7 @@
             range.value = layers[0];
         }
         document.getElementById('layerValue').textContent = range.value;
+        updateRolloutControls();
     }
 
     function getCurrentAssets() {
@@ -1096,7 +1123,116 @@
         // axes labels are omitted for simplicity
     }
 
-    function redrawHeatmap() {
+    function renderRolloutHeatmap(matrix, seqLen) {
+        const canvas = document.getElementById('heatmapCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        let wmin = Infinity, wmax = -Infinity;
+        for (let y = 0; y < seqLen; y++) {
+            for (let x = 0; x < seqLen; x++) {
+                const v = Number(matrix[y][x]);
+                if (!Number.isFinite(v)) continue;
+                wmin = Math.min(wmin, v);
+                wmax = Math.max(wmax, v);
+            }
+        }
+        if (!isFinite(wmin) || !isFinite(wmax)) { wmin = 0; wmax = 1; }
+        const norm = (v) => (wmax !== wmin) ? (v - wmin) / (wmax - wmin) : 0.5;
+        const img = ctx.createImageData(seqLen, seqLen);
+        for (let y = 0; y < seqLen; y++) {
+            for (let x = 0; x < seqLen; x++) {
+                const raw = Number(matrix[y][x]);
+                const v = Number.isFinite(raw) ? norm(raw) : 0;
+                const i = (y*seqLen + x)*4;
+                const r = 230 - Math.floor(180*v);
+                const g = 240 - Math.floor(200*v);
+                const b = 255;
+                img.data[i] = r;
+                img.data[i+1] = g;
+                img.data[i+2] = b;
+                img.data[i+3] = 255;
+            }
+        }
+        const off = document.createElement('canvas');
+        off.width = seqLen; off.height = seqLen;
+        off.getContext('2d').putImageData(img,0,0);
+        lastHeatSource = off;
+        lastHeatSeqLen = seqLen;
+        if (heatView.w === null || heatView.h === null) { heatView = { x: 0, y: 0, w: seqLen, h: seqLen }; }
+        redrawHeatmap();
+    }
+
+    function computeRolloutBackend() {
+        const statusEl = document.getElementById('rolloutStatus');
+        if (!currentProteinMeta) {
+            statusEl.textContent = 'Select or predict a protein first.';
+            return;
+        }
+        const start = parseInt(document.getElementById('rolloutStart').value, 10);
+        const end = parseInt(document.getElementById('rolloutEnd').value, 10);
+        const thresholdValue = document.getElementById('rolloutThreshold').value;
+        const threshold = thresholdValue === '' ? null : parseFloat(thresholdValue);
+        const seqLen = getSequence().length;
+        if (!seqLen) {
+            statusEl.textContent = 'Sequence length is required for rollout.';
+            return;
+        }
+        statusEl.textContent = `Computing rollout ${start}-${end} on server...`;
+        setAttnLoading(true);
+        fetch(`/viz/rollout?${new URLSearchParams({
+            protein_id: currentProteinMeta.protein_id,
+            residue_idx: currentProteinMeta.residue_idx,
+            attention_type: attnType,
+            layer_start: String(start),
+            layer_end: String(end),
+            seq_len: String(seqLen),
+            threshold: threshold !== null ? String(threshold) : ''
+        })}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusEl.textContent = `Rollout failed: ${data.error}`;
+                    console.warn(data.error);
+                } else {
+                    renderRolloutHeatmap(data.rollout_matrix, data.seq_len);
+                    statusEl.textContent = `Rendered rollout for layers ${data.layer_start}-${data.layer_end}.`;
+                }
+            })
+            .catch(error => {
+                statusEl.textContent = `Rollout error: ${error.message}`;
+                console.error(error);
+            })
+            .finally(() => setAttnLoading(false));
+    }
+
+    function updateRolloutControls() {
+        const startInput = document.getElementById('rolloutStart');
+        const endInput = document.getElementById('rolloutEnd');
+        const button = document.getElementById('computeRolloutButton');
+        const layers = (attnType === 'msa_row') ? (attnData?.msa_row?.layers || []) : (attnData?.triangle_start?.layers || []);
+        if (!startInput || !endInput || !button) return;
+        if (!layers.length) {
+            startInput.disabled = true;
+            endInput.disabled = true;
+            button.disabled = true;
+            return;
+        }
+        const minLayer = layers[0];
+        const maxLayer = layers[layers.length - 1];
+        startInput.disabled = false;
+        endInput.disabled = false;
+        button.disabled = false;
+        startInput.min = minLayer;
+        startInput.max = maxLayer;
+        endInput.min = minLayer;
+        endInput.max = maxLayer;
+        if (parseInt(startInput.value, 10) < minLayer || parseInt(startInput.value, 10) > maxLayer) {
+            startInput.value = minLayer;
+        }
+        if (parseInt(endInput.value, 10) < minLayer || parseInt(endInput.value, 10) > maxLayer) {
+            endInput.value = maxLayer;
+        }
+    }
         const canvas = document.getElementById('heatmapCanvas');
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0,0,canvas.width, canvas.height);
