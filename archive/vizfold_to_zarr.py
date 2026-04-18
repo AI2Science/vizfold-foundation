@@ -543,7 +543,12 @@ def load_single_representation(archive_path: str, layer_index: int) -> np.ndarra
     KeyError
         If the requested layer does not exist in the archive.
     """
-    pass
+    root = zarr.open_group(archive_path, mode="r")
+    single = root["representations"]["single"]
+    layer_key = f"layer_{layer_index:02d}"
+    if layer_key not in single:
+        raise KeyError(f"Layer not found: representations/single/{layer_key}")
+    return np.asarray(single[layer_key])
 
 
 # ============================================================
@@ -575,7 +580,12 @@ def load_pair_representation(archive_path: str, layer_index: int) -> np.ndarray:
     KeyError
         If the requested layer does not exist in the archive.
     """
-    pass
+    root = zarr.open_group(archive_path, mode="r")
+    pair = root["representations"]["pair"]
+    layer_key = f"layer_{layer_index:02d}"
+    if layer_key not in pair:
+        raise KeyError(f"Layer not found: representations/pair/{layer_key}")
+    return np.asarray(pair[layer_key])
 
 
 # ============================================================
