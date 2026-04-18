@@ -297,7 +297,35 @@ def store_single_representation(
     -------
     None
     """
-    pass
+    single_array = tensor_to_numpy(single_array)
+
+    # Validate shape
+    if single_array.ndim != 2:
+        raise ValueError(
+            f"Expected (num_residues, single_dim), got {single_array.shape}"
+        )
+
+    num_residues, single_dim = single_array.shape
+
+    root = zarr.open_group(archive_path, mode="a")
+    group = root["representations"]["single"]
+
+    layer_key = _layer_key(layer_index)
+
+    if layer_key in group:
+        if not overwrite:
+            raise FileExistsError(f"{layer_key} already exists")
+        del group[layer_key]
+
+    # Default chunking: per-residue
+    if chunks is None:
+        chunks = (1, single_dim)
+
+    group.create_dataset(
+        layer_key,
+        data=single_array,
+        chunks=chunks,
+    )
 
 
 # ============================================================
@@ -345,8 +373,40 @@ def store_pair_representation(
     -------
     None
     """
-    pass
+    pair_array = tensor_to_numpy(pair_array)
 
+    # Validate shape
+    if pair_array.ndim != 3:
+        raise ValueError(
+            f"Expected (num_residues, num_residues, pair_dim), got {pair_array.shape}"
+        )
+
+    n_i, n_j, pair_dim = pair_array.shape
+
+    if n_i != n_j:
+        raise ValueError(
+            f"Pair representation must be square, got {pair_array.shape}"
+        )
+
+    root = zarr.open_group(archive_path, mode="a")
+    group = root["representations"]["pair"]
+
+    layer_key = _layer_key(layer_index)
+
+    if layer_key in group:
+        if not overwrite:
+            raise FileExistsError(f"{layer_key} already exists")
+        del group[layer_key]
+
+    # Default chunking: one row of pair matrix
+    if chunks is None:
+        chunks = (1, n_i, pair_dim)
+
+    group.create_dataset(
+        layer_key,
+        data=pair_array,
+        chunks=chunks,
+    )
 
 # ============================================================
 # METHOD 6
