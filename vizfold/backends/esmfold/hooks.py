@@ -293,6 +293,28 @@ class ESMFoldTraceCollector:
                 self.trunk_blocks[f"block_{block_idx:03d}_pair"] = pair_state.squeeze(0).detach().cpu()
         return hook
 
+    def _make_trunk_hook(self) -> Callable:
+        """Hook that captures s_s and s_z at every recycling iteration."""
+        def hook(module: nn.Module, inp: Any, out: Any) -> None:
+            s_s, s_z = None, None
+
+            # Handle HF returning a tuple (usually s_s is index 0 and s_z is index 1)
+            if isinstance(out, tuple) and len(out) >= 2:
+                s_s, s_z = out[0], out[1]
+            # Handle HF returning a dataclass or object
+            elif hasattr(out, 's_s') and hasattr(out, 's_z'):
+                s_s, s_z = out.s_s, out.s_z
+            # Handle dictionaries
+            elif isinstance(out, dict):
+                s_s, s_z = out.get('s_s'), out.get('s_z')
+
+            if s_s is not None and s_z is not None:
+                # Squeeze out the batch dimension and move to CPU to prevent RAM crashes
+                # s_s shape: [N, 1024] | s_z shape: [N, N, 128]
+                self.recycled_s_s.append(s_s.squeeze(0).cpu().detach())
+                self.recycled_s_z.append(s_z.squeeze(0).cpu().detach())
+        return hook
+
 
 class StructureModuleTraceCollector:
     """

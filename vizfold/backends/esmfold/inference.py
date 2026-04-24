@@ -269,10 +269,35 @@ class ESMFoldRunner(BackendBase):
         if trace_mode != "none":
             collector.remove_hooks()
 
+            # Archive the recycled s_s and s_z tensors we caught
+            if want_act and len(collector.recycled_s_s) > 0:
+                num_iters = len(collector.recycled_s_s)
+                log(f"[{self.model_name}] [{trace_mode}] Captured {num_iters} trunk recycling iterations.")
+                for i in range(num_iters):
+                    collector.activations[f"recycle_{i}_s_s"] = collector.recycled_s_s[i]
+                    collector.activations[f"recycle_{i}_s_z"] = collector.recycled_s_z[i]
+
+            # out.s_s: folding trunk single representations [B, N, 1024].
+            # These are the per-residue embeddings produced by ESMFold's
+            # structure module, complementing the ESM-2 encoder traces.
+            if hasattr(out, 's_s') and out.s_s is not None:
+                single_reps = out.s_s.squeeze(0).cpu()
+                log(f"[{self.model_name}] [{trace_mode}] Extracted folding trunk s_s: {single_reps.shape}")
+            else:
+                log(f"[{self.model_name}] [{trace_mode}] out.s_s not found — folding trunk single representations missing.")
+
         if sm_collector is not None:
             sm_collector.remove_hooks()
             log(f"Structure module traces: {len(sm_collector.ipa_attention)} IPA blocks, "
                 f"{len(sm_collector.backbone_positions)} recycle iterations.")
+        # Check if the output object contains the single representations
+        if hasattr(out, 's_s') and out.s_s is not None:
+            # Move to CPU and remove the batch dimension -> [seq_len, hidden_dim]
+            single_reps = out.s_s.squeeze(0).cpu()
+
+            log(f"Extracted folding trunk s_s activations: {single_reps.shape}")
+        else:
+            log("Warning: out.s_s not found. Folding trunk single representations missing.")
 
         log(f"Forward pass complete. Captured {len(collector.attention)} attention layers, "
             f"{len(collector.activations)} activation layers.")

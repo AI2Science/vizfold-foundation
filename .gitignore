@@ -19,3 +19,13 @@ cutlass/
 *.sto
 *.a3m
 *.hhr
+
+# Backend Generated Files
+test_output/
+__pycache__/
+*.pt
+*.pdb
+
+# Frontend Dependencies
+frontend/node_modules/
+frontend/dist/
