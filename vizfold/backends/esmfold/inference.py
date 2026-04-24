@@ -290,14 +290,6 @@ class ESMFoldRunner(BackendBase):
             sm_collector.remove_hooks()
             log(f"Structure module traces: {len(sm_collector.ipa_attention)} IPA blocks, "
                 f"{len(sm_collector.backbone_positions)} recycle iterations.")
-        # Check if the output object contains the single representations
-        if hasattr(out, 's_s') and out.s_s is not None:
-            # Move to CPU and remove the batch dimension -> [seq_len, hidden_dim]
-            single_reps = out.s_s.squeeze(0).cpu()
-
-            log(f"Extracted folding trunk s_s activations: {single_reps.shape}")
-        else:
-            log("Warning: out.s_s not found. Folding trunk single representations missing.")
 
         log(f"Forward pass complete. Captured {len(collector.attention)} attention layers, "
             f"{len(collector.activations)} activation layers.")
