@@ -33,6 +33,9 @@ dependencies:
   - bioconda::kalign2
   - pytorch::pytorch=2.5
   - pytorch::pytorch-cuda=12.4
+  - zarr=2.16
+  - numcodecs
+  - fsspec
   - pip:
       - deepspeed==0.14.5
       - dm-tree==0.1.6
