@@ -458,7 +458,31 @@ def store_triangle_attention(
     -------
     None
     """
-    pass
+    
+
+    attention_array = tensor_to_numpy(attention_array)
+    
+    if attention_array.ndim != 3:
+        raise ValueError("Expected ({}, {}, {} got {})".format(num_residues, num_residues, num_heads, attention_array.shape))
+    n_i, n_j, num_heads = attention_array.shape
+    
+    if n_i != n_j:
+        raise ValueError(f"Triangle attention must be square in first two dims, got {attention_array.shape}")
+    
+    path_info = archive_path
+    root = zarr.open_group(path_info, mode="a")
+    group = root["attention"]["triangle_start"]
+    layer_key = _layer_key(layer_index)
+    
+    if layer_key in group:
+        if not overwrite:
+            raise FileExistsError("{} already exists".format(layer_key))
+        del group[layer_key]
+    
+    if chunks is None:
+        chunks = (n_i, n_j, 1)
+    
+    group.create_dataset(layer_key, data=attention_array, chunks=chunks)
 
 
 # ============================================================
@@ -511,8 +535,35 @@ def store_structure(
     -------
     None
     """
-    pass
-
+    
+    atom_positions = tensor_to_numpy(atom_positions)
+    atom_mask = tensor_to_numpy(atom_mask)
+    
+    if atom_positions.ndim != 2:
+        raise ValueError(f"Expected atom_positions shape (num_atoms, 3), got {atom_positions.shape}")
+    
+    if atom_positions.shape[1] != 3:
+         raise ValueError("Expected atom_positions shape (num_atoms, 3), got {})".format(atom_positions.shape))
+    
+    num_atoms = atom_positions.shape[0]
+    
+    if atom_mask.ndim != 1:
+        raise ValueError(f"Expected atom_mask shape ({num_atoms},), got {atom_mask.shape}")
+    if atom_mask.shape[0] != num_atoms:
+        raise ValueError(f"Expected atom_mask shape ({num_atoms},), got {atom_mask.shape}")
+    
+    root = zarr.open_group(archive_path, mode="a")
+    group = root.require_group("structure")
+    
+    dataArray = ["atom_positions", "atom_mask", "ptm"]
+    
+    for i in dataArray:
+        if i in group and overwrite:
+            del group[i]
+    
+    group.create_dataset("atom_positions", data=atom_positions)
+    group.create_dataset("atom_mask", data=atom_mask)
+    group["ptm"] = np.array(float(ptm))
 
 # ============================================================
 # METHOD 8
