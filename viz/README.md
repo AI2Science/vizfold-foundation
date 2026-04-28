@@ -198,6 +198,64 @@ Behavior delegated to `representation_tensor_utils`:
 ![pair grid example](examples/from_representation_pair_grid.png)
 ![single overlay example](examples/from_representation_lines.png)
 
+## End-to-end: `EvoformerRunArtifact` → figure
+
+The instrumentation in
+[`openfold/utils/evoformer_instrumentation.py`](../openfold/utils/evoformer_instrumentation.py)
+captures intermediate `m` / `pair` tensors and sparse top-K attention text
+files during a model run. The wrapper around those outputs is
+[`EvoformerRunArtifact`](../openfold/utils/evoformer_run_artifact.py).
+The bridge in `viz/integrations.py` reads from that artifact directly:
+
+```python
+from openfold.utils.evoformer_run_artifact import EvoformerRunArtifact
+from viz import (
+    attention_heatmap_from_artifact,
+    representation_heatmap_from_artifact,
+    representation_line_from_artifact,
+    figure_from_artifact,
+)
+
+art = EvoformerRunArtifact(
+    run_dir="outputs/run_6KWC",
+    attention_dir="outputs/attention_files_6KWC_demo_tri_18",
+    reps_path="outputs/run_6KWC/reps.pt",
+)
+
+# attention path: text file -> N x N matrix -> heatmap
+attention_heatmap_from_artifact(
+    art, "msa_row_attn", layer=24, mean_across_heads=True,
+    save_path="outputs/heatmap_msa_row_layer24.png",
+)
+
+# representation path: reps.pt[layer_LL.pair] -> prepare_heatmap_data -> plot_heatmap
+representation_heatmap_from_artifact(
+    art, "pair", layer=47, channel=12, normalize="minmax",
+)
+
+# residue-indexed line: reps.pt[layer_LL.msa] -> prepare_lineplot_data -> plot_line
+representation_line_from_artifact(art, "msa", layer=47, channel=4)
+
+# unified dispatcher: pick attn_kind= XOR rep_kind=
+figure_from_artifact(art, attn_kind="triangle_start_attn", layer=47, residue_idx=18)
+figure_from_artifact(art, rep_kind="pair", layer=47, aggregate="l2")
+```
+
+| Bridge function | Source on disk | Then renders with |
+|---|---|---|
+| `attention_heatmap_from_artifact` | `attention_dir/{kind}_layer{L}*.txt` | `plot_heatmap` |
+| `representation_heatmap_from_artifact` | `reps.pt[layer_{LL:02d}.{kind}]` | `heatmap_from_representation` |
+| `representation_line_from_artifact` | `reps.pt[layer_{LL:02d}.{kind}]` | `line_from_representation` |
+| `representation_tensor_from_artifact` | `reps.pt[...]` | (raw numpy, for custom plots) |
+| `figure_from_artifact` | dispatches to one of the above | — |
+
+The artifact bridge requires `torch` (for loading `reps.pt`); the rest of
+`viz` does not. End-to-end correctness is covered by
+[`tests/test_viz_artifact_bridge.py`](../tests/test_viz_artifact_bridge.py),
+which builds a synthetic on-disk artifact and checks that what gets painted
+on the Figure matches `artifact.get_attention_matrix(...)` and
+`prepare_*` bit for bit.
+
 ## Conventions
 
 - All functions return a `Figure` and never call `plt.show()`.
