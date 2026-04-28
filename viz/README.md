@@ -226,3 +226,35 @@ extraction step, the bridge functions consume them directly through
 
 [`notebooks/viz_plot_demo.ipynb`](../notebooks/viz_plot_demo.ipynb) exercises
 every plot function and writes the example PNGs above.
+
+## Wiring into the Flask UI
+
+[`web_interface.py`](../web_interface.py) serves PNGs from
+`outputs/attention_images_<PROT>_demo_tri_<R>/` named:
+
+```
+heatmap_msa_row_layer{N}.png
+heatmap_triangle_start_layer{N}.png
+```
+
+`viz/render_for_ui.py` is the script that **populates** this directory by
+calling `plot_heatmap` for every (attention type, layer) pair. The
+attention-map source is auto-detected:
+
+```bash
+# Real attention maps from a save_attention_topk run:
+python -m viz.render_for_ui --mode real \
+    --attn-dir outputs/attention_files_6KWC_demo_tri_18
+
+# Synthetic placeholders (so the UI works before any model run):
+python -m viz.render_for_ui --mode demo --n-res 96
+
+# Auto-detect: real if files exist, otherwise demo.
+python -m viz.render_for_ui
+```
+
+The script writes 96 PNGs (48 layers × 2 attention types). Real mode
+parses the sparse top-K text files written by `save_attention_topk`,
+reconstructs an `N x N` matrix per layer (mean over heads), and renders
+through `plot_heatmap`. No changes to `web_interface.py` are required
+for either mode — only the contents of the image directory differ.
