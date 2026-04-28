@@ -1,11 +1,16 @@
-from flask import Flask, render_template_string, send_file, request
 import os
+
+from flask import Flask, abort, render_template_string, request, send_file
 
 app = Flask(__name__)
 
-IMAGE_DIR = "./outputs/attention_images_6KWC_demo_tri_18"
-PROT = "6KWC"
-TRI_RESIDUE_IDX = 18
+IMAGE_DIR = os.environ.get(
+    "VIZFOLD_IMAGE_DIR",
+    "./outputs/attention_images_6KWC_demo_tri_18",
+)
+PROT = os.environ.get("VIZFOLD_PROT", "6KWC")
+TRI_RESIDUE_IDX = int(os.environ.get("VIZFOLD_TRI_IDX", "18"))
+NUM_LAYERS = int(os.environ.get("VIZFOLD_NUM_LAYERS", "48"))
 
 HTML = """
 <!DOCTYPE html>
@@ -23,7 +28,7 @@ HTML = """
     </style>
 </head>
 <body>
-    <h1>VizFold — OpenFold Attention Visualizer</h1>
+    <h1>VizFold — OpenFold Attention Visualizer ({{ prot }})</h1>
     <div class="controls">
         <form method="GET" action="/">
             <label><b>Attention Type:</b></label>
@@ -54,8 +59,13 @@ HTML = """
 @app.route("/")
 def index():
     attn_type = request.args.get("attn_type", "msa_row")
-    layer = int(request.args.get("layer", 0))
-    layers = list(range(48))
+    if attn_type not in ("msa_row", "triangle_start"):
+        attn_type = "msa_row"
+    try:
+        layer = max(0, min(int(request.args.get("layer", 0)), NUM_LAYERS - 1))
+    except (ValueError, TypeError):
+        layer = 0
+    layers = list(range(NUM_LAYERS))
 
     if attn_type == "msa_row":
         fname = f"heatmap_msa_row_layer{layer}.png"
@@ -66,19 +76,28 @@ def index():
     if not os.path.exists(image_path):
         image_path = None
 
-    return render_template_string(HTML,
+    return render_template_string(
+        HTML,
         attn_type=attn_type,
         layer=layer,
         layers=layers,
-        image_path=image_path
+        image_path=image_path,
+        prot=PROT,
     )
 
 @app.route("/image")
 def serve_image():
-    path = request.args.get("path")
-    if path and os.path.exists(path):
-        return send_file(path, mimetype="image/png")
-    return "Image not found", 404
+    path = request.args.get("path", "")
+    if not path:
+        abort(400)
+    # Resolve both paths to prevent directory traversal attacks.
+    abs_image_dir = os.path.realpath(IMAGE_DIR)
+    abs_path = os.path.realpath(path)
+    if not abs_path.startswith(abs_image_dir + os.sep):
+        abort(403)
+    if not os.path.isfile(abs_path):
+        abort(404)
+    return send_file(abs_path, mimetype="image/png")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
