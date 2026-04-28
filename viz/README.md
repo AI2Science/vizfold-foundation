@@ -138,6 +138,66 @@ plot_histogram(
 
 ![histogram example](examples/histogram_demo.png)
 
+## End-to-end: raw OpenFold tensors → figure
+
+Once the model is producing real `pair`, `msa`, and `single` representations,
+the cleanest path is to call the bridge helpers in
+[`viz/integrations.py`](integrations.py). They wrap Priyavi's
+[`representation_tensor_utils`](../representation_tensor_utils.py) so the
+same call site works for any representation kind:
+
+```python
+from viz import (
+    heatmap_from_representation,
+    line_from_representation,
+    lines_from_representation,
+    pair_channel_grid,
+)
+
+# pair: shape (..., N, N, C_z)  -> residue × residue heatmap of one channel
+heatmap_from_representation(
+    z, kind="pair", channel=12,
+    save_path="outputs/pair_ch12.png",
+)
+
+# single: shape (N, C_s)        -> per-residue line for one channel
+line_from_representation(
+    s, kind="single", channel=4, ylabel="activation",
+)
+
+# single: shape (N, C_s)        -> overlay several channels
+lines_from_representation(
+    s, kind="single", channels=[0, 4, 8, 11],
+    save_path="outputs/single_overlay.png",
+)
+
+# pair: render the first 8 channels in a 4-column grid
+pair_channel_grid(
+    z, channels=list(range(8)), ncols=4,
+    suptitle="pair representation: 8 channels",
+    save_path="outputs/pair_grid.png",
+)
+```
+
+Behavior delegated to `representation_tensor_utils`:
+
+- Validation / shape checks (`pair` is square, leading batch dims squeezed).
+- Channel selection vs. `mean`/`max`/`l2` aggregation across the channel axis.
+- `minmax` / `zscore` / `none` normalization for display.
+- For `kind="msa"` line plots: depth-averaged per residue.
+- For `kind="pair"` line plots: diagonal slice at the chosen channel.
+
+| Bridge function | Calls upstream | Then plots with |
+|---|---|---|
+| `heatmap_from_representation` | `prepare_heatmap_data` | `plot_heatmap` |
+| `line_from_representation` | `prepare_lineplot_data` | `plot_line` |
+| `lines_from_representation` | `prepare_lineplot_data` (per channel) | `plot_lines` |
+| `pair_channel_grid` | `prepare_heatmap_data` (per channel) | `plot_heatmap_grid` |
+
+![pair channel example](examples/from_representation_pair.png)
+![pair grid example](examples/from_representation_pair_grid.png)
+![single overlay example](examples/from_representation_lines.png)
+
 ## Conventions
 
 - All functions return a `Figure` and never call `plt.show()`.
@@ -147,9 +207,12 @@ plot_histogram(
 
 ## Synthetic tensors (`viz._fakes`)
 
-While the extraction layer is still in progress, [`viz/_fakes.py`](_fakes.py)
-provides shape-matching synthetic tensors so the plot functions can be
-exercised end-to-end. Swap these for real tensors once Priyavi's hooks land:
+While the model-side extraction layer is still in progress,
+[`viz/_fakes.py`](_fakes.py) provides shape-matching synthetic tensors so the
+plot functions (and the `*_from_representation` bridge above) can be
+exercised end-to-end. Once real `m` / `z` / `s` tensors arrive from the
+extraction step, the bridge functions consume them directly through
+`representation_tensor_utils` -- no code change here.
 
 | Helper | Shape | Stand-in for |
 |---|---|---|

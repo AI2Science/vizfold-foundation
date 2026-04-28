@@ -8,11 +8,24 @@ Public API:
     plot_layer_trajectory:  one channel's value across layers (line per residue).
     plot_histogram:         value distribution of a tensor slice.
 
-Both kinds of functions accept plain numpy arrays and return a matplotlib
+End-to-end helpers (raw OpenFold tensor -> Figure, via Priyavi's
+``representation_tensor_utils``):
+    heatmap_from_representation
+    line_from_representation
+    lines_from_representation
+    pair_channel_grid
+
+All plot functions accept plain numpy arrays and return a matplotlib
 ``Figure``, so they can be embedded in notebooks, web frontends, or saved to
 disk via the ``save_path`` keyword argument.
 """
 
+from viz.integrations import (
+    heatmap_from_representation,
+    line_from_representation,
+    lines_from_representation,
+    pair_channel_grid,
+)
 from viz.plots.distribution import plot_histogram
 from viz.plots.heatmap import plot_heatmap, plot_heatmap_grid
 from viz.plots.lineplot import plot_layer_trajectory, plot_line, plot_lines
@@ -24,4 +37,8 @@ __all__ = [
     "plot_lines",
     "plot_layer_trajectory",
     "plot_histogram",
+    "heatmap_from_representation",
+    "line_from_representation",
+    "lines_from_representation",
+    "pair_channel_grid",
 ]
