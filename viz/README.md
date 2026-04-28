@@ -6,7 +6,7 @@ visualizations - including image and line plots."*
 
 Every function takes plain numpy arrays in and returns a
 `matplotlib.figure.Figure`, so the same code can be embedded in notebooks,
-served by the Flask UI in [`web_interface.py`](../web_interface.py), or
+served by the Flask UI in [`web_interface.py`](web_interface.py), or
 composed with the existing `visualize_attention_*` helpers without changes.
 
 ## Public API
@@ -261,7 +261,25 @@ on the Figure matches `artifact.get_attention_matrix(...)` and
 - All functions return a `Figure` and never call `plt.show()`.
 - Pass `save_path=...` to persist a PNG (parent dirs created on demand).
 - Axes default to residue indexing (`residue i`, `residue j`, `residue`).
-- Wrong-rank inputs raise `ValueError` early.
+- Wrong-rank inputs raise `ValueError` early with a message that includes the actual shape and what was expected.
+- `plot_lines` receiving a 1-D array raises `ValueError` directing the caller to use `plot_line()` instead.
+
+### Flask UI configuration
+
+`web_interface.py` reads its defaults from environment variables so it can be pointed at any run without editing the source:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `VIZFOLD_IMAGE_DIR` | `./outputs/attention_images_6KWC_demo_tri_18` | Directory of heatmap PNGs to serve |
+| `VIZFOLD_PROT` | `6KWC` | Protein name shown in the page heading |
+| `VIZFOLD_TRI_IDX` | `18` | Triangle-attention query residue index |
+| `VIZFOLD_NUM_LAYERS` | `48` | Number of layers in the layer dropdown |
+
+```bash
+VIZFOLD_IMAGE_DIR=outputs/attention_images_7ABC_demo_tri_22 \
+VIZFOLD_PROT=7ABC VIZFOLD_TRI_IDX=22 \
+    python viz/web_interface.py
+```
 
 ## Synthetic tensors (`viz._fakes`)
 
@@ -287,7 +305,7 @@ every plot function and writes the example PNGs above.
 
 ## Wiring into the Flask UI
 
-[`web_interface.py`](../web_interface.py) serves PNGs from
+[`web_interface.py`](web_interface.py) serves PNGs from
 `outputs/attention_images_<PROT>_demo_tri_<R>/` named:
 
 ```
