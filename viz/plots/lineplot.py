@@ -88,10 +88,14 @@ def plot_line(
 def _stack_series(series: Union[np.ndarray, Sequence[np.ndarray]]) -> np.ndarray:
     """Coerce ``(K, N)`` array or list of 1-D arrays into a single 2-D array."""
     if isinstance(series, np.ndarray):
+        if series.ndim == 1:
+            raise ValueError(
+                f"plot_lines expects a 2-D array (n_lines, N); got a 1-D array "
+                f"of shape {series.shape!r}. Wrap it in a list or use plot_line()."
+            )
         if series.ndim != 2:
             raise ValueError(
-                f"plot_lines expects a 2-D array (n_lines, N) when given an "
-                f"ndarray; got shape {series.shape!r}"
+                f"plot_lines expects a 2-D array (n_lines, N); got shape {series.shape!r}"
             )
         return series
 
@@ -167,7 +171,7 @@ def plot_lines(
                 ax.axvline(r_int, color="red", linewidth=0.8, alpha=0.7)
 
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
-    if labels is not None or n_lines <= 12:
+    if n_lines > 1 or labels is not None:
         ax.legend(fontsize=8, loc="best", ncol=min(4, max(1, n_lines // 2)))
     return save_or_return(fig, save_path)
 

@@ -325,9 +325,11 @@ def representation_tensor_from_artifact(
         return convert_to_numpy(reps[rep_kind], dtype=np.float64)
 
     available = sorted(reps.keys())
+    layer_key = f"layer_{int(layer):02d}.{rep_kind}" if layer is not None else None
+    searched = f"'{layer_key}' and " if layer_key else ""
     raise KeyError(
-        f"Neither 'layer_{int(layer):02d}.{rep_kind}' nor '{rep_kind}' "
-        f"found in artifact.reps. Available keys: {available[:8]}"
+        f"Neither {searched}'{rep_kind}' found in artifact.reps. "
+        f"Available keys: {available[:8]}"
         + ("..." if len(available) > 8 else "")
     )
 
@@ -464,6 +466,8 @@ def figure_from_artifact(
             channel=channel,
             layer=layer,
             title=title,
+            ylabel=plot_kwargs.pop("ylabel", "value"),
+            highlight_residues=plot_kwargs.pop("highlight_residues", None),
             save_path=save_path,
             **plot_kwargs,
         )

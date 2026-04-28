@@ -88,8 +88,18 @@ def _parse_topk_text(path: str) -> Dict[int, List[Tuple[int, int, float]]]:
                 continue
             if current is None:
                 raise ValueError(f"value line before any 'Layer' header in {path!r}")
-            r1, r2, w = line.split()
-            heads[int(current)].append((int(r1), int(r2), float(w)))
+            parts = line.split()
+            if len(parts) != 3:
+                raise ValueError(
+                    f"expected 'res1 res2 weight' in {path!r}, got {line!r}"
+                )
+            try:
+                r1, r2, w = int(parts[0]), int(parts[1]), float(parts[2])
+            except ValueError as exc:
+                raise ValueError(
+                    f"malformed data line in {path!r}: {line!r}"
+                ) from exc
+            heads[int(current)].append((r1, r2, w))
     return heads
 
 
@@ -101,10 +111,18 @@ def _matrix_from_heads(
     if not heads:
         return np.zeros((n_res, n_res), dtype=np.float32)
     acc = np.zeros((len(heads), n_res, n_res), dtype=np.float32)
+    skipped = 0
     for hi, (_, conns) in enumerate(sorted(heads.items())):
         for r1, r2, w in conns:
             if 0 <= r1 < n_res and 0 <= r2 < n_res:
                 acc[hi, r1, r2] = w
+            else:
+                skipped += 1
+    if skipped:
+        print(
+            f"[render_for_ui] warning: dropped {skipped} out-of-bounds entries "
+            f"(n_res={n_res})"
+        )
     return acc.mean(axis=0)
 
 

@@ -42,9 +42,10 @@ def plot_histogram(
     arr = arr[np.isfinite(arr)]
     if arr.size == 0:
         raise ValueError("plot_histogram received no finite values")
+    bins = max(1, int(bins))
 
     fig, ax = new_figure(figsize=(7.0, 3.5))
-    ax.hist(arr, bins=int(bins), color=color, alpha=0.85, edgecolor="white", linewidth=0.4)
+    ax.hist(arr, bins=bins, color=color, alpha=0.85, edgecolor="white", linewidth=0.4)
     ax.set_xlabel(xlabel, fontsize=10)
     ax.set_ylabel(ylabel, fontsize=10)
     if title is not None:

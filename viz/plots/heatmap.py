@@ -109,6 +109,8 @@ def _coerce_matrix_stack(
     """Normalize ``(K, R, C)`` arrays or lists of 2-D arrays to a list of 2-D arrays."""
     if isinstance(matrices, np.ndarray):
         if matrices.ndim == 3:
+            if matrices.shape[0] == 0:
+                raise ValueError("plot_heatmap_grid received a (0, R, C) array")
             return [matrices[i] for i in range(matrices.shape[0])]
         if matrices.ndim == 2:
             return [matrices]

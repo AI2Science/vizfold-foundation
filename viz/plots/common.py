@@ -44,7 +44,7 @@ def normalize(
     lo = float(np.nanmin(arr)) if vmin is None else float(vmin)
     hi = float(np.nanmax(arr)) if vmax is None else float(vmax)
     if lo == hi:
-        hi = lo + 1e-9
+        hi = lo + max(1e-9, abs(lo) * 1e-6)
     return lo, hi
 
 
