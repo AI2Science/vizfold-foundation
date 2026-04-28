@@ -1,0 +1,8 @@
+# viz/ runtime dependencies
+# Third-party packages required to import and use this module.
+# Internal packages (representation_tensor_utils, openfold, visualize_attention_*)
+# are provided by the parent repository and are not listed here.
+
+matplotlib>=3.7
+numpy>=1.24
+flask>=2.3
