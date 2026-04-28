@@ -6,19 +6,27 @@ This directory contains the standardized CLI wrappers for the VizFold pipeline. 
 
 | Script | Stage | Purpose |
 |---|---|---|
+| `vizfold_cli_fasta_to_clusterfile.py` | 0 — Pre-process (optional) | Cluster FASTA sequences using mmseqs2 (PDB-style settings) |
 | [`vizfold_cli_precompute_align.py`](#precompute-alignments-cli) | 1 — Align | Batch MSA alignment precomputation |
+| `vizfold_cli_align_fasta.py` | 1.5 — Post-align (optional) | Extract representative sequences from alignment dirs or alignment-DBs |
 | [`vizfold_cli_inference.py`](#openfold-inference-cli) | 2 — Infer | Pre-trained OpenFold structure prediction |
 | [`vizfold_cli_viz.py`](#visualization-cli) | 3 — Visualize | Attention map and 3D structure visualization |
+
 
 ---
 
 ## Full Pipeline Overview
 
-The three CLIs chain together: alignments from Stage 1 feed into Stage 2 via `--use_precomputed_alignments`, and attention maps from Stage 2 feed into Stage 3 via `--attn_map_dir` / `--visualize_only`.
+The VizFold workflow consists of three primary stages, with two optional utility stages that can be used before or after alignment generation.
 
 ### End-to-End Example (protein 6KWC on PACE)
 
 ```bash
+# Stage 0 — optional preprocessing (FASTA clustering)
+python cli/vizfold_cli_fasta_to_clusterfile.py \
+    sequences.fasta clusters.txt /path/to/mmseqs \
+    --seq-id 0.4
+
 # Stage 1 — precompute MSA alignments
 python cli/vizfold_cli_precompute_align.py \
     --input_dir examples/monomer/fasta_dir_6KWC/ \
@@ -27,6 +35,11 @@ python cli/vizfold_cli_precompute_align.py \
     --mgnify_database_path /data/mgnify/mgy_clusters_2022_05.fa \
     --bfd_database_path /data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt \
     --num_threads 4 --cpus_per_task 8
+
+# Stage 1.5 — optional post-alignment utility (extract FASTA from alignments)
+python cli/vizfold_cli_align_fasta.py \
+    outputs/6KWC_sequences_from_alignments.fasta \
+    --alignment-dir outputs/6KWC_alignments/
 
 # Stage 2 — run OpenFold inference with precomputed alignments
 python cli/vizfold_cli_inference.py \
@@ -451,6 +464,103 @@ All outputs are written under `--output_dir`:
 | `attention_images_<tag>/tri_start_attention_plots/` | Triangle start attention 3D + arc diagrams |
 | `attention_images_<tag>/combined/` | Combined panel images |
 | `vizfold_viz_manifest.json` | Run settings for reproducibility |
+---
+
+## Additional Utility CLIs
+
+In addition to the three primary VizFold pipeline stages (alignment → inference → visualization), VizFold includes two auxiliary CLI tools for working with FASTA files and alignment directories. These tools are optional but useful for dataset preparation, large-scale analysis, and reproducible workflows.
+
+---
+
+## FASTA Clustering CLI
+
+**Script:** `vizfold_cli_fasta_to_clusterfile.py`  
+**Stage:** 0 — Pre-process (optional)  
+**Purpose:** Cluster protein sequences using mmseqs2 with PDB-style parameters.
+
+This tool clusters a FASTA file of `{PDB_ID}_{CHAIN_ID}` sequences using the same mmseqs2 settings used by the PDB for official sequence clusters. It produces a clean, reformatted cluster file where each line lists all chains belonging to a cluster.
+
+### When Should I Use This?
+
+Use this tool when you want to:
+
+- Reduce redundancy in a large FASTA dataset  
+- Group homologous chains before running large-scale inference  
+- Reproduce PDB-style sequence clusters for benchmarking or analysis  
+- Prepare clustered datasets for training or evaluation  
+
+This CLI is **not required** for the main VizFold pipeline, but it is extremely useful for dataset curation and large-scale workflows.
+
+### Quick Start
+
+```bash
+python cli/vizfold_cli_fasta_to_clusterfile.py \
+    sequences.fasta clusters.txt /path/to/mmseqs \
+    --seq-id 0.4
+```
+
+### Output
+
+- `clusters.txt` — each line contains a space-separated list of `{PDB_ID}_{CHAIN_ID}` belonging to the same cluster  
+- Temporary mmseqs2 files are cleaned automatically  
+
+---
+
+## Alignment-to-FASTA CLI
+
+**Script:** `vizfold_cli_align_fasta.py`  
+**Stage:** 1.5 — Post-align (optional)  
+**Purpose:** Extract representative sequences from alignment directories or alignment-DB index files and write them to a FASTA file.
+
+This tool converts either:
+
+- a directory of per-chain alignment folders (e.g., outputs from Stage 1), or  
+- a compressed alignment-DB index  
+
+into a single FASTA file containing one sequence per chain.
+
+### When Should I Use This?
+
+Use this tool when you want to:
+
+- Reconstruct FASTA files from alignment directories  
+- Extract sequences from alignment-DBs for dataset creation  
+- Prepare FASTA inputs for clustering or downstream analysis  
+- Inspect or validate the sequences used during alignment  
+
+This CLI is **not part of the core 3-stage VizFold pipeline**, but it is valuable for dataset inspection, preprocessing, and analysis workflows.
+
+### Quick Start (alignment directory)
+
+```bash
+python cli/vizfold_cli_align_fasta.py output.fasta \
+    --alignment-dir alignments/
+```
+
+### Quick Start (alignment-DB index)
+
+```bash
+python cli/vizfold_cli_align_fasta.py output.fasta \
+    --alignment-db-index alignment_index.json
+```
+
+### Output
+
+- `output.fasta` — one FASTA entry per chain, using the first available alignment file (`mgnify_hits.a3m`, `uniref90_hits.a3m`, or `bfd_uniclust_hits.a3m`)  
+
+---
+
+## How These Tools Fit Into the VizFold Pipeline
+
+These CLIs are **optional utilities** that complement the main VizFold workflow:
+
+- **Before Stage 1 (Precompute Alignments):**  
+  - `vizfold_cli_fasta_to_clusterfile.py` can cluster input sequences to reduce redundancy or group homologs.
+
+- **After Stage 1 (Alignment Generation):**  
+  - `vizfold_cli_align_fasta.py` can reconstruct FASTA files from alignment directories for dataset inspection or downstream processing.
+
+They are not required for the core alignment → inference → visualization pipeline, but they provide useful functionality for dataset preparation, large-scale analysis, and reproducible research workflows.
 
 ---
 
