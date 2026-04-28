@@ -30,6 +30,7 @@ from representation_tensor_utils import (
     prepare_lineplot_data,
     validate_representation,
 )
+from viz.plots.common import save_or_return
 from viz.plots.heatmap import plot_heatmap, plot_heatmap_grid
 from viz.plots.lineplot import plot_line, plot_lines
 
@@ -46,6 +47,22 @@ __all__ = [
 ]
 
 AttentionKind = Literal["msa_row_attn", "triangle_start_attn"]
+
+
+def _build_heatmap_title(
+    kind: str,
+    *,
+    layer: Optional[int] = None,
+    channel: Optional[int] = None,
+    aggregate: Optional[AggregateMethod] = None,
+) -> str:
+    """Return a canonical auto-title for representation heatmaps and line plots."""
+    layer_str = f" — layer {layer}" if layer is not None else ""
+    if channel is not None:
+        return f"{kind} representation{layer_str}, channel {channel}"
+    if aggregate is not None:
+        return f"{kind} representation{layer_str}, {aggregate}-aggregated"
+    return f"{kind} representation{layer_str}"
 
 
 def _default_heatmap_axis_labels(kind: RepresentationKind) -> tuple[str, str]:
@@ -85,12 +102,7 @@ def heatmap_from_representation(
     )
 
     if title is None:
-        if channel is not None:
-            title = f"{kind} representation, channel {channel}"
-        elif aggregate is not None:
-            title = f"{kind} representation, {aggregate}-aggregated"
-        else:
-            title = f"{kind} representation"
+        title = _build_heatmap_title(kind, channel=channel, aggregate=aggregate)
 
     auto_x, auto_y = _default_heatmap_axis_labels(kind)
     return plot_heatmap(
@@ -138,9 +150,7 @@ def line_from_representation(
         save_path=None,
     )
     fig.axes[0].set_xlim(int(xs[0]), int(xs[-1]) if len(xs) > 1 else int(xs[0]) + 1)
-    if save_path is not None:
-        fig.savefig(save_path, bbox_inches="tight", dpi=150)
-    return fig
+    return save_or_return(fig, save_path)
 
 
 def lines_from_representation(
@@ -168,7 +178,8 @@ def lines_from_representation(
         if xs_ref is None:
             xs_ref = xs
         series.append(ys)
-    assert xs_ref is not None
+    if xs_ref is None:
+        raise RuntimeError("prepare_lineplot_data returned no data")  # channels was non-empty; unreachable
 
     if title is None:
         title = f"{kind} representation, {len(channels)} channels"
@@ -352,13 +363,9 @@ def representation_heatmap_from_artifact(
     """
     tensor = representation_tensor_from_artifact(artifact, rep_kind, layer=layer)
     if title is None:
-        layer_str = f" — layer {layer}" if layer is not None else ""
-        if channel is not None:
-            title = f"{rep_kind} representation{layer_str}, channel {channel}"
-        elif aggregate is not None:
-            title = f"{rep_kind} representation{layer_str}, {aggregate}-aggregated"
-        else:
-            title = f"{rep_kind} representation{layer_str}"
+        title = _build_heatmap_title(
+            rep_kind, layer=layer, channel=channel, aggregate=aggregate
+        )
     return heatmap_from_representation(
         tensor,
         kind=rep_kind,
@@ -388,8 +395,7 @@ def representation_line_from_artifact(
     """
     tensor = representation_tensor_from_artifact(artifact, rep_kind, layer=layer)
     if title is None:
-        layer_str = f" — layer {layer}" if layer is not None else ""
-        title = f"{rep_kind} representation{layer_str}, channel {channel}"
+        title = _build_heatmap_title(rep_kind, layer=layer, channel=channel)
     return line_from_representation(
         tensor,
         kind=rep_kind,

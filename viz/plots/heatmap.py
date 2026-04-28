@@ -21,6 +21,7 @@ from matplotlib.figure import Figure
 from viz.plots.common import (
     add_colorbar,
     add_residue_axes,
+    draw_highlight_lines,
     new_figure,
     normalize,
     save_or_return,
@@ -91,14 +92,7 @@ def plot_heatmap(
     if title is not None:
         ax.set_title(title, fontsize=11)
 
-    if highlight_residues is not None:
-        for r in highlight_residues:
-            r_int = int(r)
-            if 0 <= r_int < n_cols:
-                ax.axvline(r_int, color="red", linewidth=0.8, alpha=0.7)
-            if 0 <= r_int < n_rows:
-                ax.axhline(r_int, color="red", linewidth=0.8, alpha=0.7)
-
+    draw_highlight_lines(ax, highlight_residues, n_cols=n_cols, n_rows=n_rows)
     add_colorbar(fig, im, label=colorbar_label)
     return save_or_return(fig, save_path)
 

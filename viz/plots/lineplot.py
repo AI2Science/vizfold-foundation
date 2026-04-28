@@ -15,7 +15,7 @@ from typing import Iterable, List, Optional, Sequence, Union
 import numpy as np
 from matplotlib.figure import Figure
 
-from viz.plots.common import add_residue_axes, new_figure, save_or_return
+from viz.plots.common import add_residue_axes, draw_highlight_lines, new_figure, save_or_return
 
 
 def plot_line(
@@ -75,12 +75,7 @@ def plot_line(
     if title is not None:
         ax.set_title(title, fontsize=11)
 
-    if highlight_residues is not None:
-        for r in highlight_residues:
-            r_int = int(r)
-            if 0 <= r_int < n:
-                ax.axvline(r_int, color="red", linewidth=0.8, alpha=0.7)
-
+    draw_highlight_lines(ax, highlight_residues, n_cols=n)
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
     return save_or_return(fig, save_path)
 
@@ -164,12 +159,7 @@ def plot_lines(
     if title is not None:
         ax.set_title(title, fontsize=11)
 
-    if highlight_residues is not None:
-        for r in highlight_residues:
-            r_int = int(r)
-            if 0 <= r_int < n:
-                ax.axvline(r_int, color="red", linewidth=0.8, alpha=0.7)
-
+    draw_highlight_lines(ax, highlight_residues, n_cols=n)
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
     if n_lines > 1 or labels is not None:
         ax.legend(fontsize=8, loc="best", ncol=min(4, max(1, n_lines // 2)))

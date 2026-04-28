@@ -56,6 +56,10 @@ HTML = """
 </html>
 """
 
+def _image_filename(attn_type: str, layer: int) -> str:
+    return f"heatmap_{attn_type}_layer{layer}.png"
+
+
 @app.route("/")
 def index():
     attn_type = request.args.get("attn_type", "msa_row")
@@ -67,12 +71,7 @@ def index():
         layer = 0
     layers = list(range(NUM_LAYERS))
 
-    if attn_type == "msa_row":
-        fname = f"heatmap_msa_row_layer{layer}.png"
-    else:
-        fname = f"heatmap_triangle_start_layer{layer}.png"
-
-    image_path = os.path.join(IMAGE_DIR, fname)
+    image_path = os.path.join(IMAGE_DIR, _image_filename(attn_type, layer))
     if not os.path.exists(image_path):
         image_path = None
 

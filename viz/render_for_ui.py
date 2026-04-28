@@ -64,6 +64,21 @@ def _heatmap_image_path(image_dir: str, attn_type: str, layer: int) -> str:
     return os.path.join(image_dir, f"heatmap_{attn_type}_layer{layer}.png")
 
 
+def _attn_title(
+    protein: str,
+    attn_type: str,
+    layer: int,
+    tri_idx: int,
+    *,
+    synthetic: bool = False,
+) -> str:
+    """Return the heatmap title for a given attention type and layer."""
+    label = "MSA Row" if attn_type == "msa_row" else "Triangle Start"
+    extra = f" (residue {tri_idx})" if attn_type == "triangle_start" else ""
+    suffix = "SYNTHETIC PLACEHOLDER, mean over heads" if synthetic else "mean over heads"
+    return f"{protein} {label} Attention — Layer {layer}{extra} ({suffix})"
+
+
 def _parse_topk_text(path: str) -> Dict[int, List[Tuple[int, int, float]]]:
     """Parse a ``save_attention_topk`` text file into per-head triples.
 
@@ -176,13 +191,9 @@ def render_real(
             heads = _parse_topk_text(txt)
             mat = _matrix_from_heads(heads, n_res=n_res)
             out = _heatmap_image_path(image_dir, attn_type, layer)
-            label = "MSA Row" if attn_type == "msa_row" else "Triangle Start"
-            extra = (
-                f" (residue {tri_idx})" if attn_type == "triangle_start" else ""
-            )
             fig = plot_heatmap(
                 mat,
-                title=f"{protein} {label} Attention — Layer {layer}{extra} (mean over heads)",
+                title=_attn_title(protein, attn_type, layer, tri_idx),
                 colorbar_label="attention weight",
                 save_path=out,
             )
@@ -217,16 +228,9 @@ def render_demo(
             )
             mat = heads.mean(axis=0)
             out = _heatmap_image_path(image_dir, attn_type, layer)
-            label = "MSA Row" if attn_type == "msa_row" else "Triangle Start"
-            extra = (
-                f" (residue {tri_idx})" if attn_type == "triangle_start" else ""
-            )
             fig = plot_heatmap(
                 mat,
-                title=(
-                    f"{protein} {label} Attention — Layer {layer}{extra} "
-                    f"(SYNTHETIC PLACEHOLDER, mean over heads)"
-                ),
+                title=_attn_title(protein, attn_type, layer, tri_idx, synthetic=True),
                 colorbar_label="attention weight",
                 save_path=out,
             )
@@ -265,45 +269,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = p.parse_args(argv)
 
     image_dir = args.image_dir
+    shared = dict(tri_idx=args.tri_idx, protein=args.protein)
+
+    def _run_real() -> List[str]:
+        return render_real(args.attn_dir, image_dir, n_res=args.n_res, **shared)
+
+    def _run_demo() -> List[str]:
+        return render_demo(image_dir, n_res=args.n_res or 96, seed=args.seed, **shared)
+
     if args.mode == "real":
-        written = render_real(
-            args.attn_dir,
-            image_dir,
-            n_res=args.n_res,
-            tri_idx=args.tri_idx,
-            protein=args.protein,
-        )
-        mode_used = "real"
+        written, mode_used = _run_real(), "real"
     elif args.mode == "demo":
-        written = render_demo(
-            image_dir,
-            n_res=args.n_res or 96,
-            seed=args.seed,
-            protein=args.protein,
-            tri_idx=args.tri_idx,
-        )
-        mode_used = "demo"
+        written, mode_used = _run_demo(), "demo"
     else:
         try:
-            written = render_real(
-                args.attn_dir,
-                image_dir,
-                n_res=args.n_res,
-                tri_idx=args.tri_idx,
-                protein=args.protein,
-            )
-            mode_used = "real"
+            written, mode_used = _run_real(), "real"
         except FileNotFoundError as e:
             print(f"[auto] {e}")
             print("[auto] falling back to demo (synthetic) mode.")
-            written = render_demo(
-                image_dir,
-                n_res=args.n_res or 96,
-                seed=args.seed,
-                protein=args.protein,
-                tri_idx=args.tri_idx,
-            )
-            mode_used = "demo"
+            written, mode_used = _run_demo(), "demo"
 
     print(f"[{mode_used}] wrote {len(written)} PNGs into {image_dir}")
     return 0

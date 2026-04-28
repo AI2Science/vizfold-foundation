@@ -7,7 +7,7 @@ helper is meant to be composed inside ``plot_heatmap`` / ``plot_line``.
 from __future__ import annotations
 
 import os
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -78,6 +78,29 @@ def add_residue_axes(
         y_ticks = _ticks(n_rows)
         ax.set_yticks(y_ticks)
         ax.set_yticklabels([str(t) for t in y_ticks], fontsize=8)
+
+
+def draw_highlight_lines(
+    ax: Axes,
+    highlight_residues: Optional[Iterable[int]],
+    *,
+    n_cols: int,
+    n_rows: Optional[int] = None,
+) -> None:
+    """Draw red reference lines for each residue index in *highlight_residues*.
+
+    Vertical lines are drawn when the index is within ``[0, n_cols)``.
+    Horizontal lines are drawn when ``n_rows`` is given and the index is within
+    ``[0, n_rows)`` — used by heatmaps to cross-hair a query residue.
+    """
+    if highlight_residues is None:
+        return
+    for r in highlight_residues:
+        r_int = int(r)
+        if 0 <= r_int < n_cols:
+            ax.axvline(r_int, color="red", linewidth=0.8, alpha=0.7)
+        if n_rows is not None and 0 <= r_int < n_rows:
+            ax.axhline(r_int, color="red", linewidth=0.8, alpha=0.7)
 
 
 def add_colorbar(fig: Figure, im: AxesImage, label: Optional[str] = None) -> None:
