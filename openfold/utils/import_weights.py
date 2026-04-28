@@ -123,7 +123,14 @@ def assign(translation_dict, orig_weights):
                 ref = [ref]
 
             try:
-                weights = list(map(param_type.transformation, weights))
+                if hasattr(param_type, "transformation"):
+                    transform = param_type.transformation
+                elif callable(param_type):
+                    transform = param_type
+                else:
+                    raise TypeError(f"Unsupported param_type: {type(param_type)} {param_type}")
+
+                weights = list(map(transform, weights))
                 for p, w in zip(ref, weights):
                     if param.swap:
                         index = p.shape[0] // 2
