@@ -13,10 +13,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
 
-from trace_reader import TraceReader, ZarrTraceReader
 from components.structure_viewer import render_structure
 from components.attention_heatmap import render_heatmap
 from components.arc_diagram import render_arc_diagram
+
+from trace_reader import TraceReader, ZarrTraceReader
+from visualization_adapter import (
+    flatten_attention_heads,
+    build_visualization_payload,
+)
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -139,7 +144,7 @@ with st.sidebar:
         )
 
         if head_sel == "Average":
-            connections = [c for cs in attn_data.values() for c in cs]
+            connections = flatten_attention_heads(attn_data)
             head_label = "All heads averaged"
         else:
             connections = attn_data.get(int(head_sel), [])
@@ -249,6 +254,38 @@ c1.metric("Residues", n_residues)
 c2.metric("Layer", layer_idx)
 c3.metric("Head", head_label)
 c4.metric("Connections", len(connections))
+
+viz_payload = build_visualization_payload(
+    fasta_seq=fasta_seq,
+    pdb_path=pdb_path,
+    connections=connections,
+    layer_idx=layer_idx,
+    head_label=head_label,
+)
+
+with st.expander("Visualization Integration Output", expanded=False):
+    st.write("Stored trace data has been converted into visualization-ready format.")
+    st.write("Format: `(source_residue, target_residue, attention_weight)`")
+
+    st.write("Layer:", viz_payload["layer_idx"])
+    st.write("Head:", viz_payload["head_label"])
+    st.write("Residues:", viz_payload["n_residues"])
+    st.write("Connections:", len(viz_payload["connections"]))
+
+    if viz_payload["connections"]:
+        st.dataframe(
+            [
+                {
+                    "source_residue": r1,
+                    "target_residue": r2,
+                    "attention_weight": weight,
+                }
+                for r1, r2, weight in viz_payload["connections"][:10]
+            ],
+            use_container_width=True,
+        )
+
+
 st.caption(f"Attention: **{attn_badge}** · top-{top_k} per head")
 
 if not connections:

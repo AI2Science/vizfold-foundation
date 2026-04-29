@@ -275,3 +275,20 @@ def _dense_to_topk_connections(matrix: np.ndarray, top_k: int) -> Connections:
     weights = (matrix[rows, cols] + matrix[cols, rows]) / 2.0
     idx = np.argsort(weights)[::-1][:top_k]
     return [(int(rows[i]), int(cols[i]), float(weights[i])) for i in idx]
+
+
+def flatten_attention_heads(attn_data):
+    """
+    Converts attention data from:
+        {head: [(res1, res2, weight), ...]}
+
+    into
+        [(res1, res2, weight), ...]
+
+    """
+    connections = []
+
+    for head_connections in attn_data.values():
+        connections.extend(head_connections)
+
+    return sorted(connections, key=lambda x: x[2], reverse=True)
