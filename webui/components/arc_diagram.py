@@ -44,6 +44,8 @@ def _build_figure(
 
     for r1, r2, w in connections:
         x1, x2 = r1 + 0.5, r2 + 0.5
+        # height is based on how far apart the two residues are
+        # so long range connections arch up higher which makes it easier to read
         height = abs(x2 - x1) / 2
         norm_w = (w - w_min) / w_range
         lw = 0.3 + norm_w * 2.0
@@ -51,6 +53,8 @@ def _build_figure(
         color = (0.15, 0.45 * (1 - norm_w * 0.5), intensity)
 
         xs = np.linspace(x1, x2, 80)
+        # sin goes from 0 up to 1 then back to 0 over [0, pi] which gives us
+        # a nice smooth arc shape between the two residue positions
         ys = height * np.sin(np.linspace(0, np.pi, 80))
         ax.plot(xs, ys, color=color, linewidth=lw, alpha=0.85, solid_capstyle="round")
 

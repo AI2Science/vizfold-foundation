@@ -41,7 +41,13 @@ st.markdown(
 # ── Zarr session-state cache ──────────────────────────────────────────────────
 
 def _get_zarr_reader(uploaded_file) -> ZarrTraceReader:
-    """Cache ZarrTraceReader in session state, keyed by file hash."""
+    """Load the zarr file and cache it so we don't re-open it on every rerun.
+
+    We can't use st.cache_resource here because the uploaded file object isn't
+    hashable by streamlit across reruns. So instead we md5 hash the raw bytes
+    and store the reader in session_state ourselves - only rebuilds if a new
+    file is uploaded.
+    """
     file_bytes = uploaded_file.read()
     file_hash = hashlib.md5(file_bytes).hexdigest()
     if st.session_state.get("_zarr_hash") != file_hash:

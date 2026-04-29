@@ -40,8 +40,9 @@ def render_structure(
     if scores.max() > 0:
         normed = scores / scores.max()
         for resi_0, t in enumerate(normed):
-            if t > 0.02:
+            if t > 0.02:  # don't bother coloring residues with basically no attention
                 color = _score_to_hex(float(t))
+                # pdb numbering starts at 1 but our array starts at 0 so we add 1
                 view.addStyle(
                     {"resi": resi_0 + 1},
                     {"cartoon": {"color": color}},
@@ -72,7 +73,12 @@ def _residue_scores(
 
 
 def _score_to_hex(t: float) -> str:
-    """Map t ∈ [0, 1] to a white→orange→red gradient."""
+    """Map t ∈ [0, 1] to a white→orange→red gradient.
+
+    Split into two phases so low attention residues are basically white
+    (which blends into the gray backbone) and high attention ones turn red.
+    First half goes white to orange, second half goes orange to red.
+    """
     if t < 0.5:
         s = t * 2
         r = int(255)

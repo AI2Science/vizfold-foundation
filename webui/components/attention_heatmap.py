@@ -61,6 +61,8 @@ def render_heatmap(
 def _build_matrix(
     connections: List[Tuple[int, int, float]], n: int
 ) -> np.ndarray:
+    # we write the weight to both [r1,r2] and [r2,r1] to make the heatmap symmetric
+    # otherwise half the matrix would just be empty which looks weird
     matrix = np.zeros((n, n))
     for r1, r2, w in connections:
         if r1 < n and r2 < n:

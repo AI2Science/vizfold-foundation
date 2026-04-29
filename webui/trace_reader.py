@@ -133,6 +133,11 @@ class TraceReader:
 
     @staticmethod
     def _parse_heads_file(path: str, top_k: Optional[int]) -> AttentionMap:
+        # the file looks like this (this is the format the OpenFold pipeline saves):
+        #   Layer <N>, Head <H>
+        #   <res1> <res2> <weight>
+        #   ...
+        # we re-sort even though the file should already be sorted, just to be safe
         heads: AttentionMap = {}
         current: Optional[int] = None
         with open(path) as f:
@@ -240,6 +245,8 @@ class ZarrTraceReader:
         shape = arr.shape  # type: ignore[union-attr]
 
         max_layer = self.n_layers(array_name) - 1
+        # zarr doesn't throw an error if you go out of bounds, it just wraps around
+        # which gives you wrong data silently - so we check manually here
         if layer_idx > max_layer:
             raise ValueError(
                 f"layer_idx {layer_idx} exceeds max layer {max_layer} "
@@ -296,6 +303,9 @@ class ZarrTraceReader:
 def _dense_to_topk_connections(matrix: np.ndarray, top_k: int) -> Connections:
     """Convert a dense N×N attention matrix to a sorted top-k connections list."""
     n = matrix.shape[0]
+    # only look at the upper triangle so we don't count each pair twice
+    # (i->j and j->i would both show up otherwise which would be wrong)
+    # average both directions since attention isn't always perfectly symmetric
     rows, cols = np.triu_indices(n, k=1)
     weights = (matrix[rows, cols] + matrix[cols, rows]) / 2.0
     idx = np.argsort(weights)[::-1][:top_k]
