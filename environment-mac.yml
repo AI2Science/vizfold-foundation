@@ -1,0 +1,34 @@
+# macOS (incl. Apple Silicon) — use this on osx-arm64 instead of environment.yml
+# environment.yml is for Linux + NVIDIA GPU (e.g. ICE cluster).
+name: openfold-env
+channels:
+  - conda-forge
+  - bioconda
+  - pytorch
+dependencies:
+  - python=3.10
+  - pip
+  - openmm
+  - pdbfixer
+  - pytorch-lightning
+  - biopython
+  - numpy
+  - pandas
+  - PyYAML
+  - requests
+  - scipy
+  - tqdm
+  - typing-extensions
+  - wandb
+  - modelcif==0.7
+  - awscli
+  - ml-collections
+  - aria2
+  - git
+  - pytorch::pytorch  # CPU/MPS on Mac (no CUDA)
+  - transformers>=4.36.0,<5.0.0
+  - pip:
+      - dm-tree==0.1.6
+      - einops  # required by fair-esm/ESMFold
+      - omegaconf  # required by fair-esm/ESMFold
+      - fair-esm  # ESMFold backend

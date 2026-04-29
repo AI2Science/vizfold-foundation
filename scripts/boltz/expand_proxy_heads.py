@@ -123,7 +123,7 @@ def main():
     txts = sorted([os.path.join(attn_dir, f) for f in os.listdir(attn_dir) if f.endswith(".txt")])
     if not txts:
         print("[WARN] no .txt files in", attn_dir)
-        return
+        return 0
 
     modified = 0
     for p in txts:
@@ -134,6 +134,8 @@ def main():
         print(f"[INFO] expanded single-head proxy traces to {args.heads} heads in {modified} file(s)")
     else:
         print("[INFO] no expansion needed (already multi-head)")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main() or 0)

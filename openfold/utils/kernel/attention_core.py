@@ -17,7 +17,11 @@ from operator import mul
 
 import torch
 
-attn_core_inplace_cuda = importlib.import_module("attn_core_inplace_cuda")
+try:
+    attn_core_inplace_cuda = importlib.import_module("attn_core_inplace_cuda")
+except ModuleNotFoundError:
+    # CUDA extension not built (e.g. macOS or CPU-only); use PyTorch softmax
+    attn_core_inplace_cuda = None
 
 
 SUPPORTED_DTYPES = [torch.float32, torch.bfloat16]
@@ -44,11 +48,14 @@ class AttentionCoreFunction(torch.autograd.Function):
         if(bias_2 is not None):
             attention_logits += bias_2
 
-        attn_core_inplace_cuda.forward_(
-            attention_logits, 
-            reduce(mul, attention_logits.shape[:-1]),
-            attention_logits.shape[-1],
-        )
+        if attn_core_inplace_cuda is not None:
+            attn_core_inplace_cuda.forward_(
+                attention_logits,
+                reduce(mul, attention_logits.shape[:-1]),
+                attention_logits.shape[-1],
+            )
+        else:
+            attention_logits = torch.nn.functional.softmax(attention_logits, dim=-1)
 
         o = torch.matmul(attention_logits, v) 
 
@@ -64,18 +71,20 @@ class AttentionCoreFunction(torch.autograd.Function):
         grad_q = grad_k = grad_v = grad_bias_1 = grad_bias_2 = None
        
         grad_v = torch.matmul(
-            attention_logits.transpose(-1, -2), 
+            attention_logits.transpose(-1, -2),
             grad_output
         )
 
-        attn_core_inplace_cuda.backward_(
-            attention_logits,
-            grad_output.contiguous(),
-            v.contiguous(), # v is implicitly transposed in the kernel
-            reduce(mul, attention_logits.shape[:-1]),
-            attention_logits.shape[-1],
-            grad_output.shape[-1],
-        )
+        if attn_core_inplace_cuda is not None:
+            attn_core_inplace_cuda.backward_(
+                attention_logits,
+                grad_output.contiguous(),
+                v.contiguous(), # v is implicitly transposed in the kernel
+                reduce(mul, attention_logits.shape[:-1]),
+                attention_logits.shape[-1],
+                grad_output.shape[-1],
+            )
+        # else: attention_logits is already softmax; backward through matmul uses it as-is
 
         if(ctx.bias_1_shape is not None):
             grad_bias_1 = torch.sum(

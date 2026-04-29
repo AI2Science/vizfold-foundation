@@ -404,8 +404,8 @@ def process():
     os.makedirs(boltz_out_dir, exist_ok=True)
 
     runner = runner or 'openfold'
-    if runner not in ('openfold', 'boltz'):
-        return jsonify({'error': f"Unknown runner '{runner}'. Choose 'openfold' or 'boltz'."}), 400
+    if runner not in ('openfold', 'boltz', 'esmfold'):
+        return jsonify({'error': f"Unknown runner '{runner}'. Choose 'openfold', 'boltz', or 'esmfold'."}), 400
 
     proc_env = os.environ.copy()
 
@@ -507,7 +507,7 @@ def process():
         completion_payload = {'pdb_file': pdb_file, 'residue_idx': residue_idx}
         output_folders = [fasta_dir, output_dir, attn_map_dir, image_output_dir]
 
-    else:
+    elif runner == 'boltz':
         # Boltz runner (Boltz-2 + VizFold tracer) integration.
         # We generate a minimal input.yaml for boltz predict and route trace outputs into `attn_map_dir`
         # to keep existing attention UI unchanged.
@@ -596,7 +596,66 @@ def process():
 
         completion_payload = _resolve_boltz_structure_payload
         output_folders = [fasta_dir, boltz_input_dir, boltz_out_dir, attn_map_dir]
-    
+
+    else:
+        # ESMfold runner via vizfold.backends.esmfold.ESMFoldRunner.
+        # Runs run_pretrained_esmf.py as a subprocess so output streams to the client.
+        # Attention text files land in esmf_out_dir/attention_files/ and are copied
+        # into attn_map_dir/ on completion so the existing /viz/list endpoint works unchanged.
+        esmf_out_dir = os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']),
+                                    f'outputs/esmf_outputs_{protein_id}_demo_tri_{residue_idx}')
+        os.makedirs(esmf_out_dir, exist_ok=True)
+
+        # Expose vizfold package (lives at project root) to the subprocess
+        proc_env['PYTHONPATH'] = (
+            f"{PROJECT_ROOT}:{proc_env['PYTHONPATH']}" if proc_env.get('PYTHONPATH')
+            else PROJECT_ROOT
+        )
+
+        device = proc_env.get('ESMF_DEVICE', 'cuda')
+        trace_mode = proc_env.get('ESMF_TRACE_MODE', 'attention')
+        top_k = proc_env.get('ESMF_TRACE_TOPK', '50')
+
+        cmd = [
+            sys.executable, '-u', 'run_pretrained_esmf.py',
+            '--fasta', fasta_path,
+            '--out', esmf_out_dir,
+            '--device', device,
+            '--trace_mode', trace_mode,
+            '--top_k', top_k,
+        ]
+
+        process = subprocess.Popen(
+            cmd,
+            cwd='..',
+            env=proc_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+            start_new_session=True,
+        )
+
+        def _resolve_esmf_payload():
+            # Copy attention text files into attn_map_dir so /viz/list can find them.
+            esmf_attn_src = os.path.join(esmf_out_dir, 'attention_files')
+            if os.path.isdir(esmf_attn_src):
+                os.makedirs(attn_map_dir, exist_ok=True)
+                for fname in os.listdir(esmf_attn_src):
+                    src = os.path.join(esmf_attn_src, fname)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, os.path.join(attn_map_dir, fname))
+            # Locate the PDB written by ESMFoldRunner.
+            pdb_path = os.path.join(esmf_out_dir, 'structure', 'predicted.pdb')
+            if os.path.isfile(pdb_path):
+                pdb_rel = os.path.relpath(pdb_path, os.path.abspath(app.config['UPLOAD_FOLDER']))
+                return {'pdb_file': pdb_rel, 'residue_idx': residue_idx}
+            return {'pdb_file': None, 'residue_idx': residue_idx}
+
+        completion_payload = _resolve_esmf_payload
+        output_folders = [fasta_dir, esmf_out_dir, attn_map_dir]
+
     # Store the process in the global dictionary
     running_processes[prediction_id] = {
         'process': process,
@@ -682,6 +741,50 @@ def list_proteins():
             seen.add(protein_id)
         except Exception as e:
             print(f"[WARN] Failed parsing boltz output dir {bdir}: {e}")
+
+    # Also include ESMfold predictions.
+    esmf_dirs = glob.glob(os.path.join(base, 'outputs', 'esmf_outputs_*_demo_tri_*'))
+    for edir in esmf_dirs:
+        try:
+            ename = os.path.basename(edir)
+            if not ename.startswith('esmf_outputs_'):
+                continue
+            parts = ename.split('_demo_tri_')
+            if len(parts) != 2:
+                continue
+            protein_id = parts[0].replace('esmf_outputs_', '')
+            residue_idx = int(parts[1])
+
+            fasta_path = os.path.join(base, f'fasta_{protein_id}', f'{protein_id}.fasta')
+            if not os.path.exists(fasta_path):
+                continue
+            with open(fasta_path, 'r') as f:
+                content = f.read().strip()
+            if not content:
+                continue
+            lines = content.splitlines()
+            description = lines[0][1:] if lines[0].startswith('>') else protein_id
+            sequence = ''.join([ln.strip() for ln in lines[1:] if ln.strip() and not ln.startswith('>')])
+
+            pdb_path = os.path.join(edir, 'structure', 'predicted.pdb')
+            if not os.path.isfile(pdb_path):
+                continue
+            pdb_file = os.path.relpath(pdb_path, base)
+
+            if protein_id in seen:
+                continue
+            proteins.append({
+                'protein_id': protein_id,
+                'description': description,
+                'sequence': sequence,
+                'residue_idx': residue_idx,
+                'pdb_file': pdb_file,
+                'runner': 'esmfold',
+            })
+            seen.add(protein_id)
+        except Exception as e:
+            print(f"[WARN] Failed parsing esmf output dir {edir}: {e}")
+
     return jsonify(proteins)
 
 @app.route('/viz/list')

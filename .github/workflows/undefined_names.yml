@@ -1,6 +1,15 @@
 name: undefined_names
 on: [pull_request, push]
 jobs:
+  boltz_trace_format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/boltz/check_trace_format_fixtures.py
+      - run: python -m unittest tests.test_boltz_trace_validate -v
   undefined_names:
     runs-on: ubuntu-latest
     steps:
