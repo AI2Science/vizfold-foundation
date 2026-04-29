@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
+import zipfile
+
 import re
 from pathlib import Path
 from typing import Any
@@ -42,6 +46,7 @@ class ArchiveReader(TraceReader):
     def __init__(self, archive_root: str | Path) -> None:
         self.archive_root = Path(archive_root)
         self._store: Any | None = None
+        self._extracted_archive_root: Path | None = None
         self._root = self._open_root(self.archive_root)
         self._metadata_cache: TraceMetadata | None = None
 
@@ -301,8 +306,29 @@ class ArchiveReader(TraceReader):
             raise FileNotFoundError(f"Archive path does not exist: {path}")
 
         if path.suffix == ".zip":
-            self._store = zarr.ZipStore(str(path), mode="r")
-            return zarr.open_group(store=self._store, mode="r")
+            extracted_dir = Path(tempfile.mkdtemp(prefix="vizfold_zarr_"))
+
+            with zipfile.ZipFile(path, "r") as zf:
+                zf.extractall(extracted_dir)
+
+            # Case 1: user zipped the contents of the .zarr folder
+            if (extracted_dir / "zarr.json").exists() or (extracted_dir / ".zgroup").exists():
+                self._extracted_archive_root = extracted_dir
+                return zarr.open_group(str(extracted_dir), mode="r")
+
+            # Case 2: user zipped the .zarr folder itself
+            zarr_dirs = list(extracted_dir.glob("*.zarr"))
+            if zarr_dirs:
+                self._extracted_archive_root = zarr_dirs[0]
+                return zarr.open_group(str(zarr_dirs[0]), mode="r")
+
+            # Case 3: zip contains one top-level folder
+            child_dirs = [p for p in extracted_dir.iterdir() if p.is_dir()]
+            if len(child_dirs) == 1:
+                self._extracted_archive_root = child_dirs[0]
+                return zarr.open_group(str(child_dirs[0]), mode="r")
+
+            raise ValueError(f"Could not find Zarr archive root inside zip file: {path}")
 
         return zarr.open_group(str(path), mode="r")
 

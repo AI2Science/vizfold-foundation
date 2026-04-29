@@ -18,3 +18,10 @@ cutlass/
 *.sto
 *.a3m
 *.hhr
+
+# generated archive test outputs
+*.zarr/
+*.zip
+vizfold_archive.zarr/
+vizfold_archive.zip
+create_archive.py
