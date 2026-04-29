@@ -83,6 +83,7 @@
                             <select class="form-select" id="runner" name="runner">
                                 <option value="openfold" selected>OpenFold</option>
                                 <option value="boltz">Boltz</option>
+                                <option value="esmfold">ESMFold</option>
                             </select>
                         </div>
                     </div>
@@ -353,7 +354,8 @@
             const runnerName = runnerSel ? (runnerSel.value || 'openfold') : 'openfold';
             const loadingText = document.querySelector('#loading p');
             if (loadingText) {
-                loadingText.textContent = `Running ${runnerName === 'boltz' ? 'Boltz' : 'OpenFold'} prediction. This may take several minutes...`;
+                const runnerLabel = runnerName === 'boltz' ? 'Boltz' : runnerName === 'esmfold' ? 'ESMFold' : 'OpenFold';
+                loadingText.textContent = `Running ${runnerLabel} prediction. This may take several minutes...`;
             }
         } catch (e) {
             // ignore

@@ -372,6 +372,40 @@ def process():
     
     description = description if description else protein_id
     description_protein = description.split('|')[0]
+
+    # ESMFold: return cached results immediately if a completed run already exists for this
+    # protein_id + residue_idx.  This must happen before the fasta_exists dedup check below,
+    # which would otherwise rename protein_id to "{id}_new" on every re-submission (because
+    # the fasta dir from the first run persists), causing the ESMFold block to look in a
+    # directory that doesn't exist and re-run the full model unnecessarily.
+    if runner == 'esmfold':
+        _base = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        _esmf_cached = os.path.join(_base, f'outputs/esmf_outputs_{protein_id}_demo_tri_{residue_idx}')
+        _pdb_cached  = os.path.join(_esmf_cached, 'structure', 'predicted.pdb')
+        if os.path.isfile(_pdb_cached):
+            # Sync attention text files into the canonical attn_map_dir so /viz/list works.
+            _attn_src = os.path.join(_esmf_cached, 'attention_files')
+            _attn_dst = os.path.join(_base, f'outputs/attention_files_{protein_id}_demo_tri_{residue_idx}')
+            if os.path.isdir(_attn_src):
+                os.makedirs(_attn_dst, exist_ok=True)
+                for _fname in os.listdir(_attn_src):
+                    _s = os.path.join(_attn_src, _fname)
+                    _d = os.path.join(_attn_dst, _fname)
+                    if os.path.isfile(_s) and not os.path.exists(_d):
+                        shutil.copy2(_s, _d)
+            _pdb_rel = os.path.relpath(_pdb_cached, _base)
+            _cached_payload = {'type': 'complete', 'protein_id': protein_id,
+                               'pdb_file': _pdb_rel, 'residue_idx': residue_idx}
+
+            def _cached_gen(_p=_cached_payload):
+                yield f"data: {json.dumps({'type': 'output', 'message': 'ESMFold output already exists; using cached results.'})}\n\n"
+                yield f"data: {json.dumps(_p)}\n\n"
+
+            return Response(_cached_gen(), mimetype='text/event-stream',
+                            headers={'Cache-Control': 'no-cache',
+                                     'X-Accel-Buffering': 'no',
+                                     'Connection': 'keep-alive'})
+
     fasta_exists = os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'fasta_{protein_id}'))
     output_exists = os.listdir(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) if os.path.exists(os.path.join(os.path.abspath(app.config['UPLOAD_FOLDER']), f'outputs/my_outputs_align_{protein_id}_demo_tri_{residue_idx}/predictions')) else []
     prot_old = protein_id
