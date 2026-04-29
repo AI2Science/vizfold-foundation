@@ -83,13 +83,23 @@ with st.sidebar:
             help="Root folder containing per-protein trace subdirectories.",
         )
 
+        if not os.path.isdir(trace_dir):
+            if trace_dir == default_trace:
+                st.error(
+                    "Sample trace not found. Generate it first:\n\n"
+                    "```\npython webui/make_sample_trace.py\n```"
+                )
+            else:
+                st.error(f"Directory not found: `{trace_dir}`")
+            st.stop()
+
         reader = TraceReader(trace_dir)
         proteins = reader.list_proteins()
 
         if not proteins:
             st.error(
-                "No proteins found. Check the path, or run "
-                "`python webui/make_sample_trace.py` first."
+                "Directory exists but contains no protein subdirectories. "
+                "Check the path, or run `python webui/make_sample_trace.py` first."
             )
             st.stop()
 
@@ -227,7 +237,11 @@ with st.sidebar:
         top_k = st.slider("Top-K connections", 10, 200, 50, step=10)
 
         _head_idx = None if head_sel_zarr == "Average" else int(head_sel_zarr)
-        connections = zarr_reader.load_attention(array_name, layer_idx, _head_idx, top_k)
+        try:
+            connections = zarr_reader.load_attention(array_name, layer_idx, _head_idx, top_k)
+        except ValueError as exc:
+            st.error(str(exc))
+            st.stop()
         head_label = "All heads averaged" if head_sel_zarr == "Average" else f"Head {head_sel_zarr}"
 
         pdb_string = zarr_reader.get_pdb_string()

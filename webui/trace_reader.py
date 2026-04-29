@@ -17,6 +17,7 @@ Attention files follow the format used by the existing OpenFold viz pipeline:
     ...
 """
 
+import logging
 import os
 import glob
 import re
@@ -24,6 +25,8 @@ import tempfile
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 AttentionMap = Dict[int, List[Tuple[int, int, float]]]
@@ -99,7 +102,13 @@ class TraceReader:
             self.root, protein, "attention",
             f"msa_row_attn_layer{layer_idx}.txt",
         )
-        return self._parse_heads_file(path, top_k) if os.path.exists(path) else {}
+        if not os.path.exists(path):
+            return {}
+        try:
+            return self._parse_heads_file(path, top_k)
+        except Exception as exc:
+            logger.warning("Failed to load attention from %s: %s", path, exc)
+            return {}
 
     def load_triangle_attention(
         self,
@@ -112,7 +121,13 @@ class TraceReader:
             self.root, protein, "attention",
             f"triangle_start_attn_layer{layer_idx}_residue_idx_{residue_idx}.txt",
         )
-        return self._parse_heads_file(path, top_k) if os.path.exists(path) else {}
+        if not os.path.exists(path):
+            return {}
+        try:
+            return self._parse_heads_file(path, top_k)
+        except Exception as exc:
+            logger.warning("Failed to load triangle attention from %s: %s", path, exc)
+            return {}
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -121,7 +136,7 @@ class TraceReader:
         heads: AttentionMap = {}
         current: Optional[int] = None
         with open(path) as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -130,8 +145,11 @@ class TraceReader:
                     current = int(parts[-1])
                     heads[current] = []
                 elif current is not None:
-                    r1, r2, w = map(float, line.split())
-                    heads[current].append((int(r1), int(r2), w))
+                    try:
+                        r1, r2, w = map(float, line.split())
+                        heads[current].append((int(r1), int(r2), w))
+                    except ValueError:
+                        logger.warning("Skipping malformed line %d in %s: %r", lineno, path, line)
         for h in heads:
             heads[h].sort(key=lambda x: x[2], reverse=True)
             if top_k is not None:
@@ -220,6 +238,13 @@ class ZarrTraceReader:
     ) -> Connections:
         arr = self._arrays[array_name]
         shape = arr.shape  # type: ignore[union-attr]
+
+        max_layer = self.n_layers(array_name) - 1
+        if layer_idx > max_layer:
+            raise ValueError(
+                f"layer_idx {layer_idx} exceeds max layer {max_layer} "
+                f"for array '{array_name}' with shape {shape}"
+            )
 
         if len(shape) == 4:
             # [n_layers, n_heads, N, N]
