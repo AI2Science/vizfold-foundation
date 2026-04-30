@@ -13,7 +13,7 @@ from numcodecs import Blosc
 from tqdm import tqdm
 
 
-# Global styling (clean paper look)
+# Global styling
 plt.rcParams.update({
     "figure.figsize": (6, 4),
     "axes.grid": True,
@@ -408,18 +408,18 @@ def run_benchmark():
     df.to_csv("benchmark_results.csv", index=False)
 
 
-    # =========================================================
-    # Write Performance (System Cost Baseline)
-    # =========================================================
-    plt.figure()
-    plt.plot(df["N_res"], df["hdf5_write"], marker="o", label="HDF5")
-    plt.plot(df["N_res"], df["zarr_write"], marker="o", label="Zarr")
-    plt.title("Write Performance vs Sequence Length")
-    plt.xlabel("Sequence Length (N_res)")
-    plt.ylabel("Time (seconds)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # # =========================================================
+    # # Write Performance (System Cost Baseline)
+    # # =========================================================
+    # plt.figure()
+    # plt.plot(df["N_res"], df["hdf5_write"], marker="o", label="HDF5")
+    # plt.plot(df["N_res"], df["zarr_write"], marker="o", label="Zarr")
+    # plt.title("Write Performance vs Sequence Length")
+    # plt.xlabel("Sequence Length (N_res)")
+    # plt.ylabel("Time (seconds)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
 
 
     # =========================================================
@@ -466,18 +466,18 @@ def run_benchmark():
     plt.show()
 
 
-    # =========================================================
-    # Fine-Grained Access (Head-Level Querying)
-    # =========================================================
-    plt.figure()
-    plt.plot(df["N_res"], df["hdf5_head_read"], marker="o", label="HDF5")
-    plt.plot(df["N_res"], df["zarr_head_read"], marker="o", label="Zarr")
-    plt.title("Attention Head Access Latency")
-    plt.xlabel("Sequence Length (N_res)")
-    plt.ylabel("Time (seconds)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # # =========================================================
+    # # Fine-Grained Access (Head-Level Querying)
+    # # =========================================================
+    # plt.figure()
+    # plt.plot(df["N_res"], df["hdf5_head_read"], marker="o", label="HDF5")
+    # plt.plot(df["N_res"], df["zarr_head_read"], marker="o", label="Zarr")
+    # plt.title("Attention Head Access Latency")
+    # plt.xlabel("Sequence Length (N_res)")
+    # plt.ylabel("Time (seconds)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
 
 
     # =========================================================
@@ -494,35 +494,35 @@ def run_benchmark():
     plt.show()
 
 
-    # =========================================================
-    # End-to-End Interpretability Workload (VizFold)
-    # =========================================================
-    plt.figure()
-    plt.plot(df["N_res"], df["viz_hdf5"], marker="o", label="HDF5")
-    plt.plot(df["N_res"], df["viz_zarr"], marker="o", label="Zarr")
-    plt.title("End-to-End Interpretability Workload (VizFold Simulation)")
-    plt.xlabel("Sequence Length (N_res)")
-    plt.ylabel("Time (seconds)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # # =========================================================
+    # # End-to-End Interpretability Workload (VizFold)
+    # # =========================================================
+    # plt.figure()
+    # plt.plot(df["N_res"], df["viz_hdf5"], marker="o", label="HDF5")
+    # plt.plot(df["N_res"], df["viz_zarr"], marker="o", label="Zarr")
+    # plt.title("End-to-End Interpretability Workload (VizFold Simulation)")
+    # plt.xlabel("Sequence Length (N_res)")
+    # plt.ylabel("Time (seconds)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
 
 
-    # =========================================================
-    # Access Pattern Sensitivity
-    # =========================================================
-    plt.figure()
-    plt.plot(df["N_res"], df["hdf5_random"], linestyle="--", label="HDF5 (Random)")
-    plt.plot(df["N_res"], df["hdf5_layer_read"], linestyle="-", label="HDF5 (Layer)")
-    plt.plot(df["N_res"], df["zarr_random"], linestyle="--", label="Zarr (Random)")
-    plt.plot(df["N_res"], df["zarr_layer_read"], linestyle="-", label="Zarr (Layer)")
+    # # =========================================================
+    # # Access Pattern Sensitivity
+    # # =========================================================
+    # plt.figure()
+    # plt.plot(df["N_res"], df["hdf5_random"], linestyle="--", label="HDF5 (Random)")
+    # plt.plot(df["N_res"], df["hdf5_layer_read"], linestyle="-", label="HDF5 (Layer)")
+    # plt.plot(df["N_res"], df["zarr_random"], linestyle="--", label="Zarr (Random)")
+    # plt.plot(df["N_res"], df["zarr_layer_read"], linestyle="-", label="Zarr (Layer)")
 
-    plt.title("Access Pattern Sensitivity Comparison")
-    plt.xlabel("Sequence Length (N_res)")
-    plt.ylabel("Time (seconds)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # plt.title("Access Pattern Sensitivity Comparison")
+    # plt.xlabel("Sequence Length (N_res)")
+    # plt.ylabel("Time (seconds)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
 
 
     # =========================================================
