@@ -463,7 +463,7 @@ def store_triangle_attention(
     attention_array = tensor_to_numpy(attention_array)
     
     if attention_array.ndim != 3:
-        raise ValueError("Expected ({}, {}, {} got {})".format(num_residues, num_residues, num_heads, attention_array.shape))
+        raise ValueError(f"Expected (num_residues, num_residues, num_heads), got {attention_array.shape}")
     n_i, n_j, num_heads = attention_array.shape
     
     if n_i != n_j:
