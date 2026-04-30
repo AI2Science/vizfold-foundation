@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import tempfile
 import zipfile
 
@@ -744,7 +743,16 @@ class ArchiveReader(TraceReader):
                 return None
 
         return None
-
+    
+    # Lightweight visualization fallback.
+    #
+    # Some archive writers store structure as coordinates instead of full PDB text.
+    # The Streamlit viewer can render PDB strings, so this converts coordinate-only
+    # archives into a simple CA-only PDB-like representation.
+    #
+    # This is not intended to reconstruct a complete biologically accurate PDB.
+    # A final archive schema should ideally include atom names, residue names,
+    # chain IDs, residue indices, and/or a real structure_pdb field.
     @staticmethod
     def _coords_to_pdb(coords: np.ndarray, sequence: str | None = None) -> str:
         arr = np.asarray(coords, dtype=float)

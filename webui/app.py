@@ -67,6 +67,9 @@ def _get_archive_reader(uploaded_file) -> ArchiveReader:
     return st.session_state["_archive_reader"]
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+# The UI supports two data paths:
+# 1. Trace directory: legacy/sample text-output workflow used by the existing UI.
+# 2. Zarr archive: standardized archive workflow backed by vizfold.offline.ArchiveReader.
 
 # Shared rendering outputs — populated by whichever source branch runs
 connections: list = []

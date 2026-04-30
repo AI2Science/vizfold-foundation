@@ -19,9 +19,10 @@ cutlass/
 *.a3m
 *.hhr
 
-# generated archive test outputs
+# generated local archive test outputs
 *.zarr/
-*.zip
 vizfold_archive.zarr/
 vizfold_archive.zip
+
+# local script from archive team, used for manual smoke testing only
 create_archive.py

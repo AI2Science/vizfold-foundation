@@ -1,2 +1,3 @@
 [server]
+# Large Zarr archives may exceed Streamlit's default 200 MB upload limit.
 maxUploadSize = 1000
