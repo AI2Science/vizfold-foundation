@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+
+# Zarr archives
+*.zarr/
+
+# OS files
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
