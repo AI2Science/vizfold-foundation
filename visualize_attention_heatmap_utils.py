@@ -293,6 +293,8 @@ def plot_all_heads_heatmap(
         ax.set_xlabel("Residue Position", fontsize=8)
         ax.set_ylabel("Residue Position", fontsize=8)
         ax.tick_params(axis="both", which="major", labelsize=6)
+        ax.set_xlim(0, 33)
+        ax.set_ylim(33, 0)
 
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.tick_params(labelsize=6)
