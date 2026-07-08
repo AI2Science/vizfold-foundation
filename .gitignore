@@ -58,7 +58,7 @@ pnpm-debug.log*
 # ----------------------------------------------------
 
 # Rust API build artifacts
-science-gateway/apps/api/target/
+science-gateway/apps/executor/target/
 
 # Windows executable artifacts
 *.exe
