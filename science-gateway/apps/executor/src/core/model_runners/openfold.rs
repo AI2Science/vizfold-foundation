@@ -20,11 +20,20 @@ pub fn plan_openfold_command(
         "model invocation profile config_json",
         &invocation_profile.config_json,
     )?;
+    let model_schema = parse_object(
+        "model backend parameter_schema_json",
+        &model_backend.parameter_schema_json,
+    )?;
+    let execution_schema = parse_object(
+        "execution target parameter_schema_json",
+        &execution_target.parameter_schema_json,
+    )?;
     let model_parameters = parse_object("run model_parameters_json", &run.model_parameters_json)?;
     let execution_parameters = parse_object(
         "run execution_parameters_json",
         &run.execution_parameters_json,
     )?;
+    validate_execution_parameters(&execution_schema, &execution_parameters)?;
 
     let program = required_string(&config, "program")?;
     let script = required_string(&config, "script")?;
@@ -33,67 +42,30 @@ pub fn plan_openfold_command(
 
     let fasta_dir = required_string(&execution_parameters, "fasta_dir")?;
     let output_dir = required_string(&execution_parameters, "output_dir")?;
-    let data_dir = required_string(&execution_parameters, "data_dir")?;
 
-    let config_preset =
-        optional_string(&model_parameters, "config_preset").unwrap_or_else(|| "model_1_ptm".into());
-    let model_device =
-        optional_string(&model_parameters, "model_device").unwrap_or_else(|| "cuda:0".into());
+    let mut args = vec!["-u".into(), script, fasta_dir];
 
-    let mut args = vec![
-        "-u".into(),
-        script,
-        fasta_dir,
-        data_path(&data_dir, "pdb_mmcif/mmcif_files"),
-        "--output_dir".into(),
-        output_dir,
-        "--config_preset".into(),
-        config_preset,
-        "--uniref90_database_path".into(),
-        data_path(&data_dir, "uniref90/uniref90.fasta"),
-        "--mgnify_database_path".into(),
-        data_path(&data_dir, "mgnify/mgy_clusters_2022_05.fa"),
-        "--pdb70_database_path".into(),
-        data_path(&data_dir, "pdb70/pdb70"),
-        "--uniclust30_database_path".into(),
-        data_path(
-            &data_dir,
-            "uniclust30/uniclust30_2018_08/uniclust30_2018_08",
-        ),
-        "--bfd_database_path".into(),
-        data_path(
-            &data_dir,
-            "bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
-        ),
-        "--model_device".into(),
-        model_device,
-    ];
+    append_model_schema_args(
+        &mut args,
+        &model_schema,
+        &model_parameters,
+        &execution_parameters,
+    )?;
 
-    if optional_bool(&model_parameters, "save_outputs").unwrap_or(false) {
-        args.push("--save_outputs".into());
-    }
-
-    if let Some(cpus) = optional_i64(&execution_parameters, "cpus") {
-        args.extend(["--cpus".into(), cpus.to_string()]);
-    }
+    args.extend(["--output_dir".into(), output_dir]);
+    append_execution_schema_args(&mut args, &execution_schema, &execution_parameters);
 
     if let Some(attn_map_dir) = optional_string(&execution_parameters, "attn_map_dir") {
         args.extend(["--attn_map_dir".into(), attn_map_dir]);
-    }
-
-    if let Some(num_recycles_save) = optional_i64(&model_parameters, "num_recycles_save") {
-        args.extend(["--num_recycles_save".into(), num_recycles_save.to_string()]);
     }
 
     if let Some(residue_idx) = optional_i64(&execution_parameters, "residue_idx") {
         args.extend(["--triangle_residue_idx".into(), residue_idx.to_string()]);
     }
 
-    if optional_bool(&model_parameters, "demo_attn").unwrap_or(false) {
-        args.push("--demo_attn".into());
-    }
-
     if optional_bool(&execution_parameters, "use_precomputed_alignments").unwrap_or(false) {
+        // TODO: move OpenFold precomputed-alignment handling into a later
+        // preflight/flow step that can validate layout before execution.
         let alignment_dir = required_string(&execution_parameters, "alignment_dir")?;
         args.extend(["--use_precomputed_alignments".into(), alignment_dir]);
     }
@@ -147,6 +119,183 @@ fn validate_entity_consistency(
             "OpenFold planner only supports local_subprocess invocation profiles, got '{}'",
             invocation_profile.invocation_kind
         )));
+    }
+
+    Ok(())
+}
+
+fn append_model_schema_args(
+    args: &mut Vec<String>,
+    model_schema: &Value,
+    model_parameters: &Value,
+    execution_parameters: &Value,
+) -> Result<(), DbErr> {
+    for (_name, declaration) in sorted_schema_declarations(model_schema, true) {
+        if optional_bool(declaration, "positional").unwrap_or(false) {
+            args.push(resolve_declared_value(
+                declaration,
+                model_parameters,
+                execution_parameters,
+            )?);
+        }
+    }
+
+    for (name, declaration) in sorted_schema_declarations(model_schema, false) {
+        if optional_bool(declaration, "positional").unwrap_or(false) {
+            continue;
+        }
+
+        let Some(cli_flag) = optional_string(declaration, "cli_flag") else {
+            continue;
+        };
+
+        if optional_string(declaration, "type").as_deref() == Some("boolean") {
+            if optional_bool(model_parameters, name).unwrap_or(false) {
+                args.push(cli_flag);
+            }
+            continue;
+        }
+
+        if declaration.get("source").is_some() {
+            let value =
+                resolve_declared_value(declaration, model_parameters, execution_parameters)?;
+            args.extend([cli_flag, value]);
+            continue;
+        }
+
+        if let Some(value) = selected_or_default_string(model_parameters, declaration, name) {
+            args.extend([cli_flag, value]);
+        }
+    }
+
+    Ok(())
+}
+
+fn append_execution_schema_args(
+    args: &mut Vec<String>,
+    execution_schema: &Value,
+    execution_parameters: &Value,
+) {
+    for (name, declaration) in sorted_schema_declarations(execution_schema, false) {
+        let Some(cli_flag) = optional_string(declaration, "cli_flag") else {
+            continue;
+        };
+
+        if let Some(value) = selected_or_default_string(execution_parameters, declaration, name) {
+            args.extend([cli_flag, value]);
+        }
+    }
+}
+
+fn sorted_schema_declarations(schema: &Value, position_first: bool) -> Vec<(&str, &Value)> {
+    let mut declarations = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .map(|(name, declaration)| (name.as_str(), declaration))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    declarations.sort_by(|(left_name, left), (right_name, right)| {
+        let left_position = optional_i64(left, "position").unwrap_or(i64::MAX);
+        let right_position = optional_i64(right, "position").unwrap_or(i64::MAX);
+        if position_first {
+            left_position
+                .cmp(&right_position)
+                .then_with(|| left_name.cmp(right_name))
+        } else {
+            left_name.cmp(right_name)
+        }
+    });
+
+    declarations
+}
+
+fn resolve_declared_value(
+    declaration: &Value,
+    model_parameters: &Value,
+    execution_parameters: &Value,
+) -> Result<String, DbErr> {
+    if optional_string(declaration, "source").as_deref() == Some("data_dir") {
+        let data_dir = required_string(execution_parameters, "data_dir")?;
+        let relative_path = required_string(declaration, "relative_path")?;
+        return Ok(data_path(&data_dir, &relative_path));
+    }
+
+    let name = required_string(declaration, "name")?;
+    selected_or_default_string(model_parameters, declaration, &name)
+        .ok_or_else(|| DbErr::Custom(format!("{name} is required")))
+}
+
+fn selected_or_default_string(
+    parameters: &Value,
+    declaration: &Value,
+    field_name: &str,
+) -> Option<String> {
+    parameters
+        .get(field_name)
+        .or_else(|| declaration.get("default"))
+        .and_then(json_value_to_string)
+}
+
+fn json_value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn validate_execution_parameters(
+    execution_schema: &Value,
+    execution_parameters: &Value,
+) -> Result<(), DbErr> {
+    let Some(properties) = execution_schema
+        .get("properties")
+        .and_then(Value::as_object)
+    else {
+        return Ok(());
+    };
+
+    if let Some(declaration) = properties.get("model_device") {
+        if let Some(model_device) = optional_string(execution_parameters, "model_device") {
+            if let Some(allowed_values) = declaration.get("enum").and_then(Value::as_array) {
+                let allowed = allowed_values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>();
+
+                if !allowed.contains(&model_device.as_str()) {
+                    return Err(DbErr::Custom(format!(
+                        "model_device '{model_device}' is not allowed by execution target schema"
+                    )));
+                }
+            }
+        }
+    }
+
+    if let Some(cpus) = optional_i64(execution_parameters, "cpus") {
+        if let Some(declaration) = properties.get("cpus") {
+            if let Some(minimum) = optional_i64(declaration, "minimum") {
+                if cpus < minimum {
+                    return Err(DbErr::Custom(format!(
+                        "cpus {cpus} is below execution target minimum {minimum}"
+                    )));
+                }
+            }
+
+            if let Some(maximum) = optional_i64(declaration, "maximum") {
+                if cpus > maximum {
+                    return Err(DbErr::Custom(format!(
+                        "cpus {cpus} exceeds execution target maximum {maximum}"
+                    )));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -229,7 +378,7 @@ mod tests {
             version: Some("test".into()),
             description: None,
             artifact_capabilities_json: "{}".into(),
-            parameter_schema_json: "{}".into(),
+            parameter_schema_json: openfold_parameter_schema().to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -241,7 +390,7 @@ mod tests {
             slug: "local".into(),
             target_type: "local".into(),
             description: None,
-            parameter_schema_json: "{}".into(),
+            parameter_schema_json: execution_parameter_schema().to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -293,7 +442,90 @@ mod tests {
         json!({
             "fasta_dir": "/tmp/fasta",
             "output_dir": "/tmp/output",
-            "data_dir": "/data"
+            "data_dir": "/data",
+            "model_device": "cuda:0"
+        })
+    }
+
+    fn openfold_parameter_schema() -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "config_preset": {
+                    "type": "string",
+                    "default": "model_1_ptm",
+                    "cli_flag": "--config_preset"
+                },
+                "template_mmcif_dir": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "pdb_mmcif/mmcif_files",
+                    "positional": true,
+                    "position": 2
+                },
+                "uniref90_database_path": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "uniref90/uniref90.fasta",
+                    "cli_flag": "--uniref90_database_path"
+                },
+                "mgnify_database_path": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "mgnify/mgy_clusters_2022_05.fa",
+                    "cli_flag": "--mgnify_database_path"
+                },
+                "pdb70_database_path": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "pdb70/pdb70",
+                    "cli_flag": "--pdb70_database_path"
+                },
+                "uniclust30_database_path": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "uniclust30/uniclust30_2018_08/uniclust30_2018_08",
+                    "cli_flag": "--uniclust30_database_path"
+                },
+                "bfd_database_path": {
+                    "type": "path",
+                    "source": "data_dir",
+                    "relative_path": "bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+                    "cli_flag": "--bfd_database_path"
+                },
+                "save_outputs": {
+                    "type": "boolean",
+                    "cli_flag": "--save_outputs"
+                },
+                "demo_attn": {
+                    "type": "boolean",
+                    "cli_flag": "--demo_attn"
+                },
+                "num_recycles_save": {
+                    "type": "integer",
+                    "cli_flag": "--num_recycles_save"
+                }
+            }
+        })
+    }
+
+    fn execution_parameter_schema() -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "model_device": {
+                    "type": "string",
+                    "enum": ["cpu", "cuda:0"],
+                    "default": "cuda:0",
+                    "cli_flag": "--model_device"
+                },
+                "cpus": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14,
+                    "cli_flag": "--cpus"
+                }
+            }
         })
     }
 
@@ -324,6 +556,9 @@ mod tests {
 
     #[test]
     fn includes_optional_model_parameters_when_present() {
+        let mut execution = execution_parameters();
+        execution["model_device"] = json!("cpu");
+
         let command = plan_openfold_command(
             &model_backend(),
             &execution_target(),
@@ -331,13 +566,12 @@ mod tests {
             &run(
                 json!({
                     "config_preset": "model_2_ptm",
-                    "model_device": "cpu",
                     "save_outputs": true,
                     "num_recycles_save": 1,
                     "model_preset": "monomer"
                 })
                 .to_string(),
-                execution_parameters().to_string(),
+                execution.to_string(),
             ),
         )
         .expect("command should plan");
@@ -348,6 +582,111 @@ mod tests {
         assert!(command.args.contains(&"--num_recycles_save".into()));
         assert!(command.args.contains(&"1".into()));
         assert!(!command.args.contains(&"--model_preset".into()));
+    }
+
+    #[test]
+    fn model_device_comes_from_execution_parameters() {
+        let mut execution = execution_parameters();
+        execution["model_device"] = json!("cpu");
+
+        let command = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(
+                json!({"model_device": "cuda:0"}).to_string(),
+                execution.to_string(),
+            ),
+        )
+        .expect("command should plan");
+
+        let model_device_index = command
+            .args
+            .iter()
+            .position(|arg| arg == "--model_device")
+            .expect("model device flag should be present");
+
+        assert_eq!(command.args[model_device_index + 1], "cpu");
+    }
+
+    #[test]
+    fn cpus_comes_from_execution_parameters() {
+        let mut execution = execution_parameters();
+        execution["cpus"] = json!(12);
+
+        let command = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect("command should plan");
+
+        let cpus_index = command
+            .args
+            .iter()
+            .position(|arg| arg == "--cpus")
+            .expect("cpus flag should be present");
+
+        assert_eq!(command.args[cpus_index + 1], "12");
+    }
+
+    #[test]
+    fn rejects_invalid_model_device_from_execution_schema_enum() {
+        let mut execution = execution_parameters();
+        execution["model_device"] = json!("cuda:1");
+
+        let error = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect_err("unsupported model device should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("model_device 'cuda:1' is not allowed")
+        );
+    }
+
+    #[test]
+    fn rejects_cpus_above_execution_schema_maximum() {
+        let mut execution = execution_parameters();
+        execution["cpus"] = json!(15);
+
+        let error = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect_err("too many cpus should fail");
+
+        assert!(error.to_string().contains("cpus 15 exceeds"));
+    }
+
+    #[test]
+    fn database_paths_are_generated_from_model_schema_declarations() {
+        let command = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution_parameters().to_string()),
+        )
+        .expect("command should plan");
+
+        assert_pair(
+            &command.args,
+            "--uniref90_database_path",
+            "/data/uniref90/uniref90.fasta",
+        );
+        assert_pair(
+            &command.args,
+            "--bfd_database_path",
+            "/data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+        );
     }
 
     #[test]
@@ -394,6 +733,22 @@ mod tests {
                 .contains(&"--use_precomputed_alignments".into())
         );
         assert!(command.args.contains(&"/tmp/alignments".into()));
+    }
+
+    #[test]
+    fn rejects_missing_alignment_dir_when_precomputed_alignments_requested() {
+        let mut execution = execution_parameters();
+        execution["use_precomputed_alignments"] = json!(true);
+
+        let error = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect_err("missing alignment_dir should fail");
+
+        assert!(error.to_string().contains("alignment_dir is required"));
     }
 
     #[test]
@@ -471,5 +826,14 @@ mod tests {
                 .to_string()
                 .contains("only supports local_subprocess invocation profiles")
         );
+    }
+
+    fn assert_pair(args: &[String], flag: &str, value: &str) {
+        let index = args
+            .iter()
+            .position(|arg| arg == flag)
+            .unwrap_or_else(|| panic!("{flag} should be present"));
+
+        assert_eq!(args[index + 1], value);
     }
 }

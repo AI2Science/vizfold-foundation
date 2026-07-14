@@ -15,7 +15,7 @@ fn main() -> Result<(), sea_orm::DbErr> {
         version: Some("example".into()),
         description: None,
         artifact_capabilities_json: "{}".into(),
-        parameter_schema_json: "{}".into(),
+        parameter_schema_json: openfold_parameter_schema().to_string(),
         created_at: now,
         updated_at: now,
     };
@@ -25,7 +25,7 @@ fn main() -> Result<(), sea_orm::DbErr> {
         slug: "local-runtime".into(),
         target_type: "local".into(),
         description: None,
-        parameter_schema_json: "{}".into(),
+        parameter_schema_json: execution_parameter_schema().to_string(),
         created_at: now,
         updated_at: now,
     };
@@ -58,7 +58,6 @@ fn main() -> Result<(), sea_orm::DbErr> {
         input_sequence: "MSTNPKPQRITF".into(),
         model_parameters_json: json!({
             "config_preset": "model_1_ptm",
-            "model_device": "cuda:0",
             "save_outputs": true,
             "demo_attn": true,
             "num_recycles_save": 1
@@ -69,6 +68,7 @@ fn main() -> Result<(), sea_orm::DbErr> {
             "output_dir": "/tmp/vizfold/output",
             "data_dir": "/data/openfold",
             "attn_map_dir": "/tmp/vizfold/attention",
+            "model_device": "cuda:0",
             "use_precomputed_alignments": true,
             "alignment_dir": "/tmp/vizfold/alignments",
             "cpus": 14,
@@ -87,4 +87,86 @@ fn main() -> Result<(), sea_orm::DbErr> {
     println!("{command:#?}");
 
     Ok(())
+}
+
+fn openfold_parameter_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "config_preset": {
+                "type": "string",
+                "default": "model_1_ptm",
+                "cli_flag": "--config_preset"
+            },
+            "template_mmcif_dir": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "pdb_mmcif/mmcif_files",
+                "positional": true,
+                "position": 2
+            },
+            "uniref90_database_path": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "uniref90/uniref90.fasta",
+                "cli_flag": "--uniref90_database_path"
+            },
+            "mgnify_database_path": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "mgnify/mgy_clusters_2022_05.fa",
+                "cli_flag": "--mgnify_database_path"
+            },
+            "pdb70_database_path": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "pdb70/pdb70",
+                "cli_flag": "--pdb70_database_path"
+            },
+            "uniclust30_database_path": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "uniclust30/uniclust30_2018_08/uniclust30_2018_08",
+                "cli_flag": "--uniclust30_database_path"
+            },
+            "bfd_database_path": {
+                "type": "path",
+                "source": "data_dir",
+                "relative_path": "bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
+                "cli_flag": "--bfd_database_path"
+            },
+            "save_outputs": {
+                "type": "boolean",
+                "cli_flag": "--save_outputs"
+            },
+            "demo_attn": {
+                "type": "boolean",
+                "cli_flag": "--demo_attn"
+            },
+            "num_recycles_save": {
+                "type": "integer",
+                "cli_flag": "--num_recycles_save"
+            }
+        }
+    })
+}
+
+fn execution_parameter_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "model_device": {
+                "type": "string",
+                "enum": ["cpu", "cuda:0"],
+                "default": "cuda:0",
+                "cli_flag": "--model_device"
+            },
+            "cpus": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 14,
+                "cli_flag": "--cpus"
+            }
+        }
+    })
 }
