@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::core::{
     commands::CommandSpec,
     entities::{execution_targets, model_backends, model_invocation_profiles, runs},
-    preflight::{PreflightCheck, PreflightReport},
+    preflight::{PreflightCheck, PreflightReport, PreflightRunner},
 };
 
 pub fn plan_openfold_command(
@@ -166,6 +166,17 @@ pub fn preflight_openfold(
     }
 
     Ok(PreflightReport::new(checks))
+}
+
+pub struct OpenFoldPreflightRunner<'a> {
+    pub command: &'a CommandSpec,
+    pub run: &'a runs::Model,
+}
+
+impl PreflightRunner for OpenFoldPreflightRunner<'_> {
+    fn run_preflight(&self) -> Result<PreflightReport, DbErr> {
+        preflight_openfold(self.command, self.run)
+    }
 }
 
 fn script_argument(command: &CommandSpec) -> Option<&str> {
@@ -540,10 +551,10 @@ mod tests {
     use crate::core::{
         commands::CommandSpec,
         entities::{execution_targets, model_backends, model_invocation_profiles, runs},
-        preflight::{PreflightReport, PreflightStatus},
+        preflight::{PreflightReport, PreflightRunner, PreflightStatus},
     };
 
-    use super::{plan_openfold_command, preflight_openfold_local};
+    use super::{OpenFoldPreflightRunner, plan_openfold_command, preflight_openfold};
 
     static NEXT_TEMP_DIR: AtomicUsize = AtomicUsize::new(0);
 
@@ -1113,7 +1124,7 @@ mod tests {
     #[test]
     fn preflight_passes_when_local_configuration_is_ready() {
         let layout = TestLayout::new();
-        let report = preflight_openfold_local(
+        let report = preflight_openfold(
             &layout.command(),
             &preflight_run(layout.execution_parameters()),
         )
@@ -1142,9 +1153,8 @@ mod tests {
         let mut command = layout.command();
         command.current_dir = None;
 
-        let report =
-            preflight_openfold_local(&command, &preflight_run(layout.execution_parameters()))
-                .expect("preflight should inspect configured values");
+        let report = preflight_openfold(&command, &preflight_run(layout.execution_parameters()))
+            .expect("preflight should inspect configured values");
 
         assert!(!report.has_failures());
         assert_eq!(
@@ -1163,9 +1173,8 @@ mod tests {
         let mut command = layout.command();
         command.args[1] = "missing_script.py".into();
 
-        let report =
-            preflight_openfold_local(&command, &preflight_run(layout.execution_parameters()))
-                .expect("preflight should inspect configured values");
+        let report = preflight_openfold(&command, &preflight_run(layout.execution_parameters()))
+            .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
         assert_eq!(
@@ -1180,7 +1189,7 @@ mod tests {
         let mut execution = layout.execution_parameters();
         execution["fasta_dir"] = json!(layout.root.join("missing-fasta"));
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
@@ -1193,7 +1202,7 @@ mod tests {
         let mut execution = layout.execution_parameters();
         execution["data_dir"] = json!(layout.root.join("missing-data"));
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
@@ -1209,7 +1218,7 @@ mod tests {
             .expect("execution parameters should be an object")
             .remove("output_dir");
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
@@ -1225,7 +1234,7 @@ mod tests {
         let mut execution = layout.execution_parameters();
         execution["output_dir"] = json!(layout.root.join("missing-parent").join("output"));
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
@@ -1241,7 +1250,7 @@ mod tests {
         let mut execution = layout.execution_parameters();
         execution["use_precomputed_alignments"] = json!(true);
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
@@ -1259,7 +1268,7 @@ mod tests {
         execution["use_precomputed_alignments"] = json!(true);
         execution["alignment_dir"] = json!(layout.alignment_dir);
 
-        let report = preflight_openfold_local(&layout.command(), &preflight_run(execution))
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
             .expect("preflight should inspect configured values");
 
         assert!(!report.has_failures());
@@ -1275,15 +1284,68 @@ mod tests {
         let mut command = layout.command();
         command.program.clear();
 
-        let report =
-            preflight_openfold_local(&command, &preflight_run(layout.execution_parameters()))
-                .expect("preflight should inspect configured values");
+        let report = preflight_openfold(&command, &preflight_run(layout.execution_parameters()))
+            .expect("preflight should inspect configured values");
 
         assert!(report.has_failures());
         assert_eq!(
             check_status(&report, "program configured"),
             PreflightStatus::Failed
         );
+    }
+
+    #[test]
+    fn openfold_preflight_runner_delegates_to_openfold_preflight() {
+        let layout = TestLayout::new();
+        let command = layout.command();
+        let run = preflight_run(layout.execution_parameters());
+        let runner = OpenFoldPreflightRunner {
+            command: &command,
+            run: &run,
+        };
+
+        let report = runner
+            .run_preflight()
+            .expect("runner should return the OpenFold preflight report");
+        let direct_report = preflight_openfold(&command, &run)
+            .expect("direct OpenFold preflight should return a report");
+
+        assert_eq!(report, direct_report);
+    }
+
+    #[test]
+    fn openfold_preflight_runner_returns_passing_report() {
+        let layout = TestLayout::new();
+        let command = layout.command();
+        let run = preflight_run(layout.execution_parameters());
+        let runner = OpenFoldPreflightRunner {
+            command: &command,
+            run: &run,
+        };
+
+        let report = runner
+            .run_preflight()
+            .expect("runner should inspect valid local paths");
+
+        assert!(!report.has_failures());
+    }
+
+    #[test]
+    fn openfold_preflight_runner_returns_failing_report() {
+        let layout = TestLayout::new();
+        let mut command = layout.command();
+        command.program.clear();
+        let run = preflight_run(layout.execution_parameters());
+        let runner = OpenFoldPreflightRunner {
+            command: &command,
+            run: &run,
+        };
+
+        let report = runner
+            .run_preflight()
+            .expect("runner should inspect configured values");
+
+        assert!(report.has_failures());
     }
 
     fn assert_pair(args: &[String], flag: &str, value: &str) {

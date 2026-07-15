@@ -1,3 +1,5 @@
+use sea_orm::DbErr;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PreflightStatus {
     Passed,
@@ -41,6 +43,10 @@ impl PreflightCheck {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PreflightReport {
     pub checks: Vec<PreflightCheck>,
+}
+
+pub trait PreflightRunner {
+    fn run_preflight(&self) -> Result<PreflightReport, DbErr>;
 }
 
 impl PreflightReport {
