@@ -154,7 +154,8 @@ pub fn preflight_openfold(
         )),
     }
 
-    checks.push(required_directory_check(&execution_parameters, "fasta_dir"));
+    checks.push(input_id_check(&run.input_id));
+    checks.push(fasta_input_check(&execution_parameters, &run.input_id));
     checks.push(required_directory_check(&execution_parameters, "data_dir"));
     checks.push(output_dir_check(&execution_parameters));
 
@@ -162,6 +163,10 @@ pub fn preflight_openfold(
         checks.push(required_directory_check(
             &execution_parameters,
             "alignment_dir",
+        ));
+        checks.push(precomputed_alignment_key_check(
+            &execution_parameters,
+            &run.input_id,
         ));
     }
 
@@ -208,6 +213,177 @@ fn required_directory_check(parameters: &Value, field_name: &str) -> PreflightCh
         PreflightCheck::failed(
             field_name,
             format!("'{path}' does not exist or is not a directory"),
+        )
+    }
+}
+
+fn input_id_check(input_id: &str) -> PreflightCheck {
+    if input_id.trim().is_empty() {
+        PreflightCheck::failed("input_id", "run input_id is missing or empty")
+    } else {
+        PreflightCheck::passed(
+            "input_id",
+            format!("run input_id '{input_id}' is configured"),
+        )
+    }
+}
+
+fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
+    let Some(fasta_dir) = optional_string(parameters, "fasta_dir").filter(|path| !path.is_empty())
+    else {
+        return PreflightCheck::failed("fasta_dir", "fasta_dir is missing");
+    };
+
+    let fasta_dir = Path::new(&fasta_dir);
+    if !fasta_dir.is_dir() {
+        return PreflightCheck::failed(
+            "fasta_dir",
+            format!(
+                "'{}' does not exist or is not a directory",
+                fasta_dir.display()
+            ),
+        );
+    }
+
+    let fasta_files = match fasta_files_in_directory(fasta_dir) {
+        Ok(files) => files,
+        Err(error) => {
+            return PreflightCheck::failed(
+                "fasta_dir",
+                format!("could not inspect '{}': {error}", fasta_dir.display()),
+            );
+        }
+    };
+
+    if fasta_files.is_empty() {
+        return PreflightCheck::failed(
+            "fasta_dir",
+            format!("'{}' contains no .fasta or .fa files", fasta_dir.display()),
+        );
+    }
+
+    if fasta_files.len() != 1 {
+        return PreflightCheck::failed(
+            "fasta_dir",
+            format!(
+                "'{}' must contain exactly one .fasta or .fa file, found {}",
+                fasta_dir.display(),
+                fasta_files.len()
+            ),
+        );
+    }
+
+    let fasta_path = &fasta_files[0];
+    let tag = match parse_single_fasta_tag(fasta_path) {
+        Ok(tag) => tag,
+        Err(error) => {
+            return PreflightCheck::failed(
+                "fasta_dir",
+                format!(
+                    "'{}' is not a valid single-record FASTA: {error}",
+                    fasta_path.display()
+                ),
+            );
+        }
+    };
+
+    if input_id.trim().is_empty() {
+        return PreflightCheck::failed(
+            "fasta_dir",
+            "cannot validate FASTA identity because run input_id is missing or empty",
+        );
+    }
+
+    if tag != input_id {
+        return PreflightCheck::failed(
+            "fasta_dir",
+            format!("FASTA tag '{tag}' does not match run input_id '{input_id}'"),
+        );
+    }
+
+    PreflightCheck::passed(
+        "fasta_dir",
+        format!(
+            "'{}' contains one FASTA file with tag '{tag}' matching run input_id",
+            fasta_dir.display()
+        ),
+    )
+}
+
+fn fasta_files_in_directory(fasta_dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut fasta_files = std::fs::read_dir(fasta_dir)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("fasta" | "fa")
+            )
+        })
+        .collect::<Vec<_>>();
+    fasta_files.sort();
+    Ok(fasta_files)
+}
+
+fn parse_single_fasta_tag(fasta_path: &Path) -> Result<String, String> {
+    let contents = std::fs::read_to_string(fasta_path).map_err(|error| error.to_string())?;
+    let mut lines = contents.lines();
+    let Some(header) = lines.next().map(str::trim) else {
+        return Err("file is empty".into());
+    };
+    let Some(header_text) = header.strip_prefix('>') else {
+        return Err("first line is not a FASTA header".into());
+    };
+    if lines.any(|line| line.trim_start().starts_with('>')) {
+        return Err("multiple FASTA records are not supported".into());
+    }
+
+    let tag = header_text
+        .chars()
+        .take_while(|character| character.is_alphanumeric() || *character == '_')
+        .collect::<String>();
+    if tag.is_empty() {
+        return Err("header does not contain an OpenFold tag".into());
+    }
+
+    Ok(tag)
+}
+
+fn precomputed_alignment_key_check(parameters: &Value, input_id: &str) -> PreflightCheck {
+    let Some(alignment_dir) =
+        optional_string(parameters, "alignment_dir").filter(|path| !path.is_empty())
+    else {
+        return PreflightCheck::failed("precomputed alignment key", "alignment_dir is missing");
+    };
+
+    let alignment_dir = Path::new(&alignment_dir);
+    if !alignment_dir.is_dir() {
+        return PreflightCheck::failed(
+            "precomputed alignment key",
+            format!("alignment_dir '{}' is unavailable", alignment_dir.display()),
+        );
+    }
+    if input_id.trim().is_empty() {
+        return PreflightCheck::failed(
+            "precomputed alignment key",
+            "cannot validate alignment key because run input_id is missing or empty",
+        );
+    }
+
+    let key_directory = alignment_dir.join(input_id);
+    if key_directory.is_dir() {
+        PreflightCheck::passed(
+            "precomputed alignment key",
+            format!("'{}' exists", key_directory.display()),
+        )
+    } else {
+        PreflightCheck::failed(
+            "precomputed alignment key",
+            format!(
+                "expected alignment directory '{}' is missing",
+                key_directory.display()
+            ),
         )
     }
 }
@@ -587,6 +763,11 @@ mod tests {
                 .expect("output parent should be created");
             fs::write(working_dir.join("run_openfold.py"), "# test script")
                 .expect("script should be created");
+            fs::write(
+                fasta_dir.join("input.fasta"),
+                ">1UBQ_1|Chain A\nMSTNPKPQRITF\n",
+            )
+            .expect("matching FASTA should be created");
 
             Self {
                 root,
@@ -623,7 +804,16 @@ mod tests {
     }
 
     fn preflight_run(execution_parameters: serde_json::Value) -> runs::Model {
-        run(json!({}).to_string(), execution_parameters.to_string())
+        preflight_run_with_input_id("1UBQ_1", execution_parameters)
+    }
+
+    fn preflight_run_with_input_id(
+        input_id: &str,
+        execution_parameters: serde_json::Value,
+    ) -> runs::Model {
+        let mut run = run(json!({}).to_string(), execution_parameters.to_string());
+        run.input_id = input_id.into();
+        run
     }
 
     fn check_status(report: &PreflightReport, name: &str) -> PreflightStatus {
@@ -633,6 +823,17 @@ mod tests {
             .find(|check| check.name == name)
             .unwrap_or_else(|| panic!("{name} check should be present"))
             .status
+    }
+
+    fn check_message<'a>(report: &'a PreflightReport, name: &str) -> &'a str {
+        report
+            .checks
+            .iter()
+            .find(|check| check.name == name)
+            .unwrap_or_else(|| panic!("{name} check should be present"))
+            .message
+            .as_deref()
+            .unwrap_or_else(|| panic!("{name} check should have a message"))
     }
 
     fn model_backend() -> model_backends::Model {
@@ -1198,6 +1399,100 @@ mod tests {
     }
 
     #[test]
+    fn preflight_fails_when_fasta_tag_does_not_match_input_id() {
+        let layout = TestLayout::new();
+        fs::write(
+            layout.fasta_dir.join("input.fasta"),
+            ">1UBQ\nMSTNPKPQRITF\n",
+        )
+        .expect("mismatched FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run(layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA tag");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
+        assert!(check_message(&report, "fasta_dir").contains("does not match run input_id"));
+    }
+
+    #[test]
+    fn preflight_fails_when_fasta_dir_contains_no_fasta_files() {
+        let layout = TestLayout::new();
+        fs::remove_file(layout.fasta_dir.join("input.fasta"))
+            .expect("default FASTA should be removed");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run(layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA directory");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
+        assert!(check_message(&report, "fasta_dir").contains("contains no .fasta or .fa files"));
+    }
+
+    #[test]
+    fn preflight_fails_when_fasta_dir_contains_multiple_fasta_files() {
+        let layout = TestLayout::new();
+        fs::write(
+            layout.fasta_dir.join("second.fa"),
+            ">1UBQ_1\nMSTNPKPQRITF\n",
+        )
+        .expect("second FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run(layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA directory");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
+        assert!(check_message(&report, "fasta_dir").contains("exactly one .fasta or .fa file"));
+    }
+
+    #[test]
+    fn preflight_fails_when_fasta_file_has_no_header() {
+        let layout = TestLayout::new();
+        fs::write(layout.fasta_dir.join("input.fasta"), "MSTNPKPQRITF\n")
+            .expect("headerless FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run(layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA header");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
+        assert!(check_message(&report, "fasta_dir").contains("not a FASTA header"));
+    }
+
+    #[test]
+    fn preflight_fails_when_fasta_file_contains_multiple_records() {
+        let layout = TestLayout::new();
+        fs::write(
+            layout.fasta_dir.join("input.fasta"),
+            ">1UBQ_1\nMSTNPKPQRITF\n>2OMF_1\nMSTNPKPQRITF\n",
+        )
+        .expect("multi-record FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run(layout.execution_parameters()),
+        )
+        .expect("preflight should inspect FASTA record count");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
+        assert!(check_message(&report, "fasta_dir").contains("multiple FASTA records"));
+    }
+
+    #[test]
     fn preflight_fails_when_data_dir_is_missing() {
         let layout = TestLayout::new();
         let mut execution = layout.execution_parameters();
@@ -1264,7 +1559,8 @@ mod tests {
     #[test]
     fn preflight_passes_when_requested_alignment_dir_exists() {
         let layout = TestLayout::new();
-        fs::create_dir_all(&layout.alignment_dir).expect("alignment directory should be created");
+        fs::create_dir_all(layout.alignment_dir.join("1UBQ_1"))
+            .expect("alignment key directory should be created");
         let mut execution = layout.execution_parameters();
         execution["use_precomputed_alignments"] = json!(true);
         execution["alignment_dir"] = json!(layout.alignment_dir);
@@ -1277,6 +1573,47 @@ mod tests {
             check_status(&report, "alignment_dir"),
             PreflightStatus::Passed
         );
+        assert_eq!(
+            check_status(&report, "precomputed alignment key"),
+            PreflightStatus::Passed
+        );
+    }
+
+    #[test]
+    fn preflight_fails_when_precomputed_alignment_key_is_missing() {
+        let layout = TestLayout::new();
+        fs::create_dir_all(&layout.alignment_dir).expect("alignment directory should be created");
+        let mut execution = layout.execution_parameters();
+        execution["use_precomputed_alignments"] = json!(true);
+        execution["alignment_dir"] = json!(layout.alignment_dir);
+
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
+            .expect("preflight should inspect the alignment key directory");
+
+        assert!(report.has_failures());
+        assert_eq!(
+            check_status(&report, "alignment_dir"),
+            PreflightStatus::Passed
+        );
+        assert_eq!(
+            check_status(&report, "precomputed alignment key"),
+            PreflightStatus::Failed
+        );
+        assert!(check_message(&report, "precomputed alignment key").contains("1UBQ_1"));
+    }
+
+    #[test]
+    fn preflight_fails_when_input_id_is_empty() {
+        let layout = TestLayout::new();
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run_with_input_id("  ", layout.execution_parameters()),
+        )
+        .expect("preflight should inspect input_id");
+
+        assert!(report.has_failures());
+        assert_eq!(check_status(&report, "input_id"), PreflightStatus::Failed);
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
     }
 
     #[test]

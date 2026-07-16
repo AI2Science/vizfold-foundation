@@ -201,6 +201,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
             "num_recycles_save": 1,
         })
         .to_string(),
+        // Reuse requires an existing `<alignment_dir>/<input_id>` directory.
         execution_parameters_json: json!({
             "fasta_dir": paths.fasta_dir,
             "data_dir": paths.data_dir,
