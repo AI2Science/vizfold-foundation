@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, path::PathBuf};
 
 use chrono::Utc;
 use executor::core::{
@@ -36,6 +36,8 @@ async fn main() -> Result<(), sea_orm::DbErr> {
 }
 
 struct DemoPaths {
+    input_id: String,
+    model_device: String,
     working_dir: String,
     data_dir: String,
     fasta_dir: String,
@@ -45,23 +47,55 @@ struct DemoPaths {
 
 impl DemoPaths {
     fn from_environment() -> Self {
+        let repository_root = repository_root();
         Self {
+            input_id: env_or_demo_value("VIZFOLD_OPENFOLD_INPUT_ID", "1UBQ_1"),
+            model_device: env_or_demo_value("VIZFOLD_OPENFOLD_MODEL_DEVICE", "cuda:0"),
             working_dir: env_or_demo_path(
                 "VIZFOLD_OPENFOLD_WORKING_DIR",
-                "/tmp/vizfold-demo/openfold",
+                repository_root.as_path(),
             ),
-            data_dir: env_or_demo_path("VIZFOLD_OPENFOLD_DATA_DIR", "/tmp/vizfold-demo/data"),
-            fasta_dir: env_or_demo_path("VIZFOLD_OPENFOLD_FASTA_DIR", "/tmp/vizfold-demo/fasta"),
-            output_dir: env_or_demo_path("VIZFOLD_OPENFOLD_OUTPUT_DIR", "/tmp/vizfold-demo/output"),
+            data_dir: env_or_demo_path(
+                "VIZFOLD_OPENFOLD_DATA_DIR",
+                PathBuf::from("/tmp/vizfold-demo/data"),
+            ),
+            fasta_dir: env_or_demo_path(
+                "VIZFOLD_OPENFOLD_FASTA_DIR",
+                repository_root
+                    .join("examples")
+                    .join("monomer")
+                    .join("fasta_dir_1UBQ"),
+            ),
+            output_dir: env_or_demo_path(
+                "VIZFOLD_OPENFOLD_OUTPUT_DIR",
+                repository_root
+                    .join("science-gateway")
+                    .join("openfold-demo-output"),
+            ),
             alignment_dir: env_or_demo_path(
                 "VIZFOLD_OPENFOLD_ALIGNMENT_DIR",
-                "/tmp/vizfold-demo/alignments",
+                repository_root
+                    .join("examples")
+                    .join("monomer")
+                    .join("alignments"),
             ),
         }
     }
 }
 
-fn env_or_demo_path(name: &str, default: &str) -> String {
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("executor manifest should be nested under the repository root")
+        .to_path_buf()
+}
+
+fn env_or_demo_path(name: &str, default: impl Into<PathBuf>) -> String {
+    env::var(name).unwrap_or_else(|_| default.into().display().to_string())
+}
+
+fn env_or_demo_value(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.into())
 }
 
@@ -193,7 +227,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
         execution_target_id: 2,
         invocation_profile_id: 3,
         status: "submitted".into(),
-        input_id: "1UBQ_1".into(),
+        input_id: paths.input_id.clone(),
         input_sequence: "MSTNPKPQRITF".into(),
         model_parameters_json: json!({
             "config_preset": "model_1_ptm",
@@ -208,7 +242,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
             "output_dir": paths.output_dir,
             "alignment_dir": paths.alignment_dir,
             "use_precomputed_alignments": true,
-            "model_device": "cpu",
+            "model_device": paths.model_device,
             "cpus": 1,
         })
         .to_string(),
