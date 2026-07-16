@@ -263,7 +263,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
         invocation_profile_id: 3,
         status: "submitted".into(),
         input_id: paths.input_id.clone(),
-        input_sequence: "MSTNPKPQRITF".into(),
+        input_sequence: "GSTIQPGTGYNNGYFYSYWNDGHGGVTYTNGPGGQFSVNWSNSGEFVGGKGWQPGTKNKVINFSGSYNPNGNSYLSVYGWSRNPLIEYYIVENFGTYNPSTGATKLGEVTSDGSVYDIYRTQRVNQPSIIGTATFYQYWSVRRNHRSSGSVNTANHFNAWAQQGLTLGTMDYQIVAVQGYFSSGSASITVS".into(),
         model_parameters_json: json!({
             "config_preset": "model_1_ptm",
             "save_outputs": true,
