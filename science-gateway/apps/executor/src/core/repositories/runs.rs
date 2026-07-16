@@ -19,6 +19,7 @@ pub async fn create(db: &DatabaseConnection, input: SubmitRunInput) -> Result<ru
         execution_target_id: Set(input.execution_target_id),
         invocation_profile_id: Set(input.invocation_profile_id),
         status: Set(input.status),
+        input_id: Set(input.input_id),
         input_sequence: Set(input.input_sequence),
         model_parameters_json: Set(input.model_parameters_json),
         execution_parameters_json: Set(input.execution_parameters_json),

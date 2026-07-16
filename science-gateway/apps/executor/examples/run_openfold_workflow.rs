@@ -193,6 +193,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
         execution_target_id: 2,
         invocation_profile_id: 3,
         status: "submitted".into(),
+        input_id: "1UBQ_1".into(),
         input_sequence: "MSTNPKPQRITF".into(),
         model_parameters_json: json!({
             "config_preset": "model_1_ptm",

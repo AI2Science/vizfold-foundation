@@ -9,6 +9,7 @@ pub struct Model {
     pub execution_target_id: i32,
     pub invocation_profile_id: i32,
     pub status: String,
+    pub input_id: String,
     pub input_sequence: String,
     pub model_parameters_json: String,
     pub execution_parameters_json: String,

@@ -14,6 +14,7 @@ pub struct SubmitRunInput {
     pub execution_target_id: i32,
     pub invocation_profile_id: i32,
     pub status: String,
+    pub input_id: String,
     pub input_sequence: String,
     pub model_parameters_json: String,
     pub execution_parameters_json: String,
@@ -41,6 +42,9 @@ pub async fn submit_run(
     db: &DatabaseConnection,
     input: SubmitRunInput,
 ) -> Result<runs::Model, DbErr> {
+    require_non_empty("input_id", &input.input_id)?;
+    require_non_empty("input_sequence", &input.input_sequence)?;
+
     let backend = repositories::model_backends::find_by_id(db, input.model_backend_id)
         .await?
         .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
@@ -81,6 +85,14 @@ pub async fn submit_run(
     reject_unknown_keys("execution_parameters", &execution_schema, &execution_params)?;
 
     repositories::runs::create(db, input).await
+}
+
+fn require_non_empty(field_name: &str, value: &str) -> Result<(), DbErr> {
+    if value.trim().is_empty() {
+        return Err(DbErr::Custom(format!("{field_name} must be non-empty")));
+    }
+
+    Ok(())
 }
 
 pub async fn update_run_status(

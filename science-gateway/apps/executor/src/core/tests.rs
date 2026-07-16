@@ -159,6 +159,7 @@ async fn creates_run_with_separate_parameter_sets() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 5}).to_string(),
             execution_parameters_json: json!({"gpu_count": 1, "walltime": "02:00:00"}).to_string(),
@@ -169,7 +170,76 @@ async fn creates_run_with_separate_parameter_sets() -> Result<(), DbErr> {
     assert_eq!(run.model_backend_id, backend.id);
     assert_eq!(run.execution_target_id, target.id);
     assert_eq!(run.invocation_profile_id, profile.id);
+    assert_eq!(run.input_id, "1UBQ_1");
     assert!(run.started_at.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_run_with_empty_input_id() -> Result<(), DbErr> {
+    let db = test_db().await?;
+    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
+    let target =
+        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
+    let profile = model_invocation_profiles::register_model_invocation_profile(
+        &db,
+        sample_invocation_profile_input(backend.id, target.id),
+    )
+    .await?;
+
+    let error = runs::submit_run(
+        &db,
+        SubmitRunInput {
+            model_backend_id: backend.id,
+            execution_target_id: target.id,
+            invocation_profile_id: profile.id,
+            status: "submitted".into(),
+            input_id: "   ".into(),
+            input_sequence: "MSTNPKPQRITF".into(),
+            model_parameters_json: json!({"num_recycles": 2}).to_string(),
+            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+        },
+    )
+    .await
+    .expect_err("empty input_id should fail");
+
+    assert!(error.to_string().contains("input_id must be non-empty"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_run_with_empty_input_sequence() -> Result<(), DbErr> {
+    let db = test_db().await?;
+    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
+    let target =
+        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
+    let profile = model_invocation_profiles::register_model_invocation_profile(
+        &db,
+        sample_invocation_profile_input(backend.id, target.id),
+    )
+    .await?;
+
+    let error = runs::submit_run(
+        &db,
+        SubmitRunInput {
+            model_backend_id: backend.id,
+            execution_target_id: target.id,
+            invocation_profile_id: profile.id,
+            status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
+            input_sequence: "   ".into(),
+            model_parameters_json: json!({"num_recycles": 2}).to_string(),
+            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+        },
+    )
+    .await
+    .expect_err("empty input_sequence should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("input_sequence must be non-empty")
+    );
     Ok(())
 }
 
@@ -202,6 +272,7 @@ async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: mismatched_profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 5}).to_string(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
@@ -237,6 +308,7 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: "[]".into(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
@@ -271,6 +343,7 @@ async fn records_artifact_manifest_entry() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
@@ -313,6 +386,7 @@ async fn retrieves_run_with_artifacts() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
@@ -359,6 +433,7 @@ async fn artifact_manifest_stores_uri_and_metadata_only() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
@@ -402,6 +477,7 @@ async fn updates_run_status() -> Result<(), DbErr> {
             execution_target_id: target.id,
             invocation_profile_id: profile.id,
             status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),

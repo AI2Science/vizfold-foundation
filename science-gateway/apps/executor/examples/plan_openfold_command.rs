@@ -55,6 +55,7 @@ fn main() -> Result<(), sea_orm::DbErr> {
         execution_target_id: execution_target.id,
         invocation_profile_id: invocation_profile.id,
         status: "submitted".into(),
+        input_id: "1UBQ_1".into(),
         input_sequence: "MSTNPKPQRITF".into(),
         model_parameters_json: json!({
             "config_preset": "model_1_ptm",
