@@ -10,7 +10,6 @@ pub struct RegisterModelInvocationProfileInput {
     pub execution_target_id: i32,
     pub invocation_kind: String,
     pub config_json: String,
-    pub parameter_schema_json: String,
 }
 
 pub async fn list_model_invocation_profiles(
@@ -31,10 +30,5 @@ pub async fn register_model_invocation_profile(
         .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
 
     require_json_object("model invocation profile config", &input.config_json)?;
-    require_json_object(
-        "model invocation profile parameter_schema",
-        &input.parameter_schema_json,
-    )?;
-
     repositories::model_invocation_profiles::create(db, input).await
 }

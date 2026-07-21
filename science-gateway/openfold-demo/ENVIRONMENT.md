@@ -77,7 +77,7 @@ Then run:
 cargo run --example run_openfold_workflow
 ```
 
-The example uses repo-aware defaults for the OpenFold script, FASTA input, precomputed alignments, output directory, and attention output directory.
+The example uses repo-aware defaults for the OpenFold script, FASTA input, precomputed alignments, and base output location.
 
 ## 6. Optional environment variable overrides
 
@@ -86,12 +86,10 @@ Most users only need `VIZFOLD_OPENFOLD_DATA_DIR`.
 Useful overrides:
 
 ```bash
-export VIZFOLD_OPENFOLD_DEMO_RUN_ID="openfold-demo-run"
 export VIZFOLD_OPENFOLD_INPUT_ID="6KWC_1"
 export VIZFOLD_OPENFOLD_FASTA_DIR="/path/to/fasta_dir"
 export VIZFOLD_OPENFOLD_ALIGNMENT_DIR="/path/to/alignments"
-export VIZFOLD_OPENFOLD_OUTPUT_DIR="/path/to/output"
-export VIZFOLD_OPENFOLD_ATTN_MAP_DIR="/path/to/attention-output"
+export VIZFOLD_OPENFOLD_OUTPUT_LOCATION="/path/to/output-root"
 export VIZFOLD_OPENFOLD_RESIDUE_IDX="1"
 export VIZFOLD_OPENFOLD_DEMO_ATTN="true"
 export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
@@ -108,6 +106,8 @@ the FASTA header should resolve to `6KWC_1`, and precomputed alignments should e
 ```text
 <alignment_dir>/6KWC_1
 ```
+
+`VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is written to `ModelInvocationProfile.config_json.output_location`. The run workspace is `<output_location>/<run.id>`; OpenFold receives it as `--output_dir`, and attention output is derived under `<output_location>/<run.id>/attention`.
 
 ## 7. Register known demo artifacts
 

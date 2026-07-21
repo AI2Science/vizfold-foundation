@@ -205,7 +205,6 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
                 config_json:
                     r#"{"mode":"local_mock","output_location":"science-gateway/mock-output"}"#
                         .into(),
-                parameter_schema_json: r#"{"type":"object","properties":{}}"#.into(),
             },
         )
         .await?;

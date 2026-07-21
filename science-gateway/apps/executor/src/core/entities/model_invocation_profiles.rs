@@ -9,7 +9,6 @@ pub struct Model {
     pub execution_target_id: i32,
     pub invocation_kind: String,
     pub config_json: String,
-    pub parameter_schema_json: String,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

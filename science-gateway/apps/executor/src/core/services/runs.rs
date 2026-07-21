@@ -76,11 +76,6 @@ pub async fn submit_run(
     let model_params = require_json_object("model_parameters", &input.model_parameters_json)?;
     let _execution_params =
         require_json_object("execution_parameters", &input.execution_parameters_json)?;
-    let _invocation_schema = require_json_object(
-        "model invocation profile parameter_schema",
-        &profile.parameter_schema_json,
-    )?;
-
     reject_unknown_keys("model_parameters", &model_schema, &model_params)?;
 
     // TODO: Execution parameter validation should eventually distinguish target

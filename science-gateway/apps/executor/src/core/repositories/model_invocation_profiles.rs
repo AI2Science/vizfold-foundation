@@ -27,7 +27,6 @@ pub async fn create(
         execution_target_id: Set(input.execution_target_id),
         invocation_kind: Set(input.invocation_kind),
         config_json: Set(input.config_json),
-        parameter_schema_json: Set(input.parameter_schema_json),
         ..Default::default()
     }
     .insert(db)

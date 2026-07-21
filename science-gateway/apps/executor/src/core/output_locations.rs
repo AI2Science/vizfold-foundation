@@ -53,7 +53,6 @@ mod tests {
             execution_target_id: 3,
             invocation_kind: "mock".into(),
             config_json: config_json.into(),
-            parameter_schema_json: json!({}).to_string(),
             created_at: now,
             updated_at: now,
         }

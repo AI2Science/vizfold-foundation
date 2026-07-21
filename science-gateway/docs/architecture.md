@@ -26,11 +26,10 @@ The artifact type catalog exists to provide stable artifact metadata and display
 
 ## Architecture note: parameter and resource ownership
 
-The current MVP has two model-facing parameter schemas and one target-level resource description:
+The current MVP has one model-facing parameter schema and one target-level resource description:
 
 - `ModelBackend.parameter_schema_json`
 - `ExecutionTarget.available_resources_json`
-- `ModelInvocationProfile.parameter_schema_json`
 
 `Run` has two concrete parameter buckets:
 
@@ -43,11 +42,11 @@ A cleaner model may be:
 
 1. `ModelBackend` owns the canonical model parameter contract. It defines the parameters a backend supports, their meaning, and where their values should be sourced from.
 
-2. `ModelInvocationProfile` provides target-specific invocation context and defaults, such as local paths, remote paths, script/program configuration, or target-specific output locations.
+2. `ModelInvocationProfile` owns backend-target invocation configuration in `config_json`, such as local paths, remote paths, program/script configuration, environment variables, and target-specific output locations. It does not currently define a separate parameter schema. If backend-target-specific run requirements are needed later, they should be added deliberately with a clear name and design rather than a generic unused wildcard field.
 
 3. `ExecutionTarget` describes runtime capabilities/resources rather than model-specific command parameters. For example, GPU availability, CPU limits, supported execution type, or resource constraints.
 
-Under this direction, model-specific CLI flags such as OpenFold `--attn_map_dir` should not live on a generic execution target. Likewise, concrete run values such as `output_dir` and `attn_map_dir` should remain part of the run’s selected execution parameters, while the model/backend contract defines that those values are needed and how they are interpreted.
+Under this direction, model-specific CLI flags such as OpenFold `--attn_map_dir` should not live on a generic execution target. Output paths are resolved from the invocation profile rather than supplied as unrelated run execution parameters.
 
 `ExecutionTarget.available_resources_json` is the current target-level field for these capabilities. The OpenFold workflow uses it to constrain the concrete resource values selected in `Run.execution_parameters_json`.
 
@@ -69,12 +68,12 @@ For the MVP, OpenFold can be supported through a built-in Rust planner and an op
 
 The executor should maintain a normalized output location concept that is independent of model-native argument names.
 
-The preferred future pattern is for `ModelInvocationProfile` to define a base `output_location` for a specific backend-target invocation. A concrete run then resolves its output workspace using the run identifier:
+`ModelInvocationProfile.config_json.output_location` defines the base output location for a specific backend-target invocation. A concrete run resolves its output workspace using the run identifier:
 
 ```text
 resolved_output_location = invocation_profile.output_location / run.id
 ```
-Model-specific command planning maps this resolved location to the backend-native argument. For OpenFold, the resolved output location maps to --output_dir.
+Model-specific command planning maps this resolved location to the backend-native argument. For OpenFold, the resolved output location maps to `--output_dir`, and the attention directory is derived as `<resolved_output_location>/attention` for `--attn_map_dir`.
 
 Model-specific secondary output paths, such as OpenFold attention map directories, should be derived from the resolved run output location where possible rather than supplied as unrelated top-level paths.
 

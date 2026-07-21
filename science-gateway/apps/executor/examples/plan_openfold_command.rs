@@ -44,7 +44,6 @@ fn main() -> Result<(), sea_orm::DbErr> {
             }
         })
         .to_string(),
-        parameter_schema_json: "{}".into(),
         created_at: now,
         updated_at: now,
     };

@@ -101,7 +101,6 @@ fn sample_invocation_profile_input(
         execution_target_id,
         invocation_kind: "mock".into(),
         config_json: json!({"mode": "test"}).to_string(),
-        parameter_schema_json: json!({"type": "object", "properties": {}}).to_string(),
     }
 }
 

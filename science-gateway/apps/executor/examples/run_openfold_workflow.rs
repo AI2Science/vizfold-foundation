@@ -14,12 +14,11 @@ use serde_json::json;
 async fn main() -> Result<(), sea_orm::DbErr> {
     let now = Utc::now();
     let paths = DemoPaths::from_environment();
-    print_demo_configuration(&paths);
-
     let model_backend = model_backend(now);
     let execution_target = execution_target(now);
     let invocation_profile = invocation_profile(now, &paths);
     let run = run(now, &paths);
+    print_demo_configuration(&paths, run.id);
 
     let command =
         plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
@@ -38,16 +37,14 @@ async fn main() -> Result<(), sea_orm::DbErr> {
 }
 
 struct DemoPaths {
-    demo_run_id: String,
     input_id: String,
     model_device: String,
-    attn_map_dir: String,
     residue_idx: i64,
     demo_attn: bool,
     working_dir: String,
     data_dir: String,
     fasta_dir: String,
-    output_dir: String,
+    output_location: String,
     alignment_dir: String,
 }
 
@@ -56,22 +53,14 @@ impl DemoPaths {
         let repository_root = repository_root();
         let input_id = env_or_demo_value("VIZFOLD_OPENFOLD_INPUT_ID", "6KWC_1");
         let residue_idx = env_or_demo_i64("VIZFOLD_OPENFOLD_RESIDUE_IDX", 1);
-        let demo_run_id = env_or_demo_value("VIZFOLD_OPENFOLD_DEMO_RUN_ID", "openfold-demo-run");
-        let output_dir = env_or_demo_path(
-            "VIZFOLD_OPENFOLD_OUTPUT_DIR",
+        let output_location = env_or_demo_path(
+            "VIZFOLD_OPENFOLD_OUTPUT_LOCATION",
             repository_root
                 .join("science-gateway")
-                .join("openfold-demo-output")
-                .join(&demo_run_id),
+                .join("openfold-demo-output"),
         );
         Self {
-            attn_map_dir: env_or_demo_path(
-                "VIZFOLD_OPENFOLD_ATTN_MAP_DIR",
-                PathBuf::from(&output_dir)
-                    .join(format!("attention_files_{input_id}_demo_tri_{residue_idx}")),
-            ),
             demo_attn: env_or_demo_bool("VIZFOLD_OPENFOLD_DEMO_ATTN", true),
-            demo_run_id,
             input_id,
             model_device: env_or_demo_value("VIZFOLD_OPENFOLD_MODEL_DEVICE", "cuda:0"),
             residue_idx,
@@ -90,7 +79,7 @@ impl DemoPaths {
                     .join("monomer")
                     .join("fasta_dir_6KWC"),
             ),
-            output_dir,
+            output_location,
             alignment_dir: env_or_demo_path(
                 "VIZFOLD_OPENFOLD_ALIGNMENT_DIR",
                 repository_root
@@ -251,9 +240,9 @@ fn invocation_profile(
             "program": "python3",
             "script": "run_pretrained_openfold.py",
             "working_dir": paths.working_dir,
+            "output_location": paths.output_location,
         })
         .to_string(),
-        parameter_schema_json: "{}".into(),
         created_at: now,
         updated_at: now,
     }
@@ -279,9 +268,7 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
         execution_parameters_json: json!({
             "fasta_dir": paths.fasta_dir,
             "data_dir": paths.data_dir,
-            "output_dir": paths.output_dir,
             "alignment_dir": paths.alignment_dir,
-            "attn_map_dir": paths.attn_map_dir,
             "residue_idx": paths.residue_idx,
             "use_precomputed_alignments": true,
             "model_device": paths.model_device,
@@ -295,13 +282,17 @@ fn run(now: chrono::DateTime<Utc>, paths: &DemoPaths) -> runs::Model {
     }
 }
 
-fn print_demo_configuration(paths: &DemoPaths) {
+fn print_demo_configuration(paths: &DemoPaths, run_id: i32) {
+    let output_dir = PathBuf::from(&paths.output_location).join(run_id.to_string());
     println!("== Demo configuration ==");
     println!("input_id: {}", paths.input_id);
     println!("model_device: {}", paths.model_device);
-    println!("demo_run_id: {}", paths.demo_run_id);
-    println!("output_dir: {}", paths.output_dir);
-    println!("attn_map_dir: {}", paths.attn_map_dir);
+    println!("output_location: {}", paths.output_location);
+    println!("resolved output_dir: {}", output_dir.display());
+    println!(
+        "resolved attn_map_dir: {}",
+        output_dir.join("attention").display()
+    );
     println!("triangle_residue_idx: {}", paths.residue_idx);
     println!("demo_attn: {}", paths.demo_attn);
 }

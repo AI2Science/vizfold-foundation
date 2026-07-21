@@ -884,7 +884,6 @@ mod tests {
             execution_target_id: 2,
             invocation_kind: "local_subprocess".into(),
             config_json,
-            parameter_schema_json: "{}".into(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

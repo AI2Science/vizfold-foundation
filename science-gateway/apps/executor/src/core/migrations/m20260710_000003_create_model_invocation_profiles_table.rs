@@ -39,11 +39,6 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(ModelInvocationProfiles::ParameterSchemaJson)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
                         ColumnDef::new(ModelInvocationProfiles::CreatedAt)
                             .timestamp()
                             .not_null()
@@ -101,7 +96,6 @@ enum ModelInvocationProfiles {
     ExecutionTargetId,
     InvocationKind,
     ConfigJson,
-    ParameterSchemaJson,
     CreatedAt,
     UpdatedAt,
 }

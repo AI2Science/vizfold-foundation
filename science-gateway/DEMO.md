@@ -120,8 +120,7 @@ export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
 export VIZFOLD_OPENFOLD_INPUT_ID="1UBQ_1"
 export VIZFOLD_OPENFOLD_FASTA_DIR="/path/to/fasta_dir"
 export VIZFOLD_OPENFOLD_ALIGNMENT_DIR="/path/to/alignments"
-export VIZFOLD_OPENFOLD_OUTPUT_DIR="/path/to/output"
-export VIZFOLD_OPENFOLD_ATTN_MAP_DIR="/path/to/attention-output"
+export VIZFOLD_OPENFOLD_OUTPUT_LOCATION="/path/to/output-root"
 export VIZFOLD_OPENFOLD_RESIDUE_IDX="1"
 export VIZFOLD_OPENFOLD_DEMO_ATTN="true"
 ```
@@ -137,6 +136,8 @@ the FASTA header should resolve to `1UBQ_1`, and precomputed alignments should e
 ```text
 alignment_dir/1UBQ_1
 ```
+
+`VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is the base output location. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
 
 ## 6. Common failure modes
 

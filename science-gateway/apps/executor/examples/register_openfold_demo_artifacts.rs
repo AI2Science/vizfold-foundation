@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::env;
 
 use executor::core::{
     config, db,
@@ -6,6 +6,7 @@ use executor::core::{
         artifacts as artifact_entities, execution_targets, model_backends,
         model_invocation_profiles, runs,
     },
+    output_locations::resolve_output_location,
     repositories, seed,
     services::artifacts::{self, RecordArtifactByTypeSlugInput},
 };
@@ -19,13 +20,16 @@ async fn main() -> Result<(), DbErr> {
     let db = db::connect_and_migrate().await?;
     seed::seed_defaults(&db).await?;
 
-    let run = find_or_create_demo_run(&db, &paths).await?;
+    let profile = find_demo_invocation_profile(&db).await?;
+    let run = find_or_create_demo_run(&db, &profile, &paths).await?;
+    let output_dir = resolve_output_location(&profile, &run)?;
+    let attn_map_dir = output_dir.join("attention");
     let mut summary = RegistrationSummary::default();
     register_directory(
         &db,
         run.id,
         "run_output_directory",
-        &paths.output_dir,
+        &output_dir,
         json!({
             "input_id": paths.input_id,
             "source": "register_openfold_demo_artifacts",
@@ -37,7 +41,7 @@ async fn main() -> Result<(), DbErr> {
         &db,
         run.id,
         "attention_output_directory",
-        &paths.attn_map_dir,
+        &attn_map_dir,
         json!({
             "input_id": paths.input_id,
             "source": "register_openfold_demo_artifacts",
@@ -49,15 +53,11 @@ async fn main() -> Result<(), DbErr> {
 
     println!("== OpenFold demo artifact registration ==");
     println!("database: {database_url}");
-    println!("demo_run_id: {}", paths.demo_run_id);
     println!("run id used: {}", run.id);
-    println!(
-        "output_dir scanned/registered: {}",
-        paths.output_dir.display()
-    );
+    println!("output_dir scanned/registered: {}", output_dir.display());
     println!(
         "attn_map_dir scanned/registered: {}",
-        paths.attn_map_dir.display()
+        attn_map_dir.display()
     );
     println!("artifacts created: {}", summary.created);
     println!(
@@ -69,37 +69,18 @@ async fn main() -> Result<(), DbErr> {
 }
 
 struct DemoPaths {
-    demo_run_id: String,
     input_id: String,
     residue_idx: i64,
-    output_dir: PathBuf,
-    attn_map_dir: PathBuf,
 }
 
 impl DemoPaths {
     fn from_environment() -> Self {
-        let repository_root = repository_root();
-        let demo_run_id = env_or_value("VIZFOLD_OPENFOLD_DEMO_RUN_ID", "openfold-demo-run");
         let input_id = env_or_value("VIZFOLD_OPENFOLD_INPUT_ID", "6KWC_1");
         let residue_idx = env_or_i64("VIZFOLD_OPENFOLD_RESIDUE_IDX", 1);
-        let output_dir = env_or_path(
-            "VIZFOLD_OPENFOLD_OUTPUT_DIR",
-            repository_root
-                .join("science-gateway")
-                .join("openfold-demo-output")
-                .join(&demo_run_id),
-        );
-        let attn_map_dir = env_or_path(
-            "VIZFOLD_OPENFOLD_ATTN_MAP_DIR",
-            output_dir.join(format!("attention_files_{input_id}_demo_tri_{residue_idx}")),
-        );
 
         Self {
-            demo_run_id,
             input_id,
             residue_idx,
-            output_dir,
-            attn_map_dir,
         }
     }
 }
@@ -109,20 +90,6 @@ struct RegistrationSummary {
     created: usize,
     already_registered: usize,
     missing: usize,
-}
-
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("executor manifest should be nested under the repository root")
-        .to_path_buf()
-}
-
-fn env_or_path(name: &str, default: impl Into<PathBuf>) -> PathBuf {
-    env::var(name)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default.into())
 }
 
 fn env_or_value(name: &str, default: &str) -> String {
@@ -140,16 +107,18 @@ fn env_or_i64(name: &str, default: i64) -> i64 {
 
 async fn find_or_create_demo_run(
     db: &DatabaseConnection,
+    profile: &model_invocation_profiles::Model,
     paths: &DemoPaths,
 ) -> Result<runs::Model, DbErr> {
     // Runs have numeric IDs and no external run-key column. This example therefore
-    // identifies its placeholder by input_id plus the recorded output_dir.
+    // reuses a placeholder by input_id and invocation profile.
     if let Some(run) = runs::Entity::find()
         .filter(runs::Column::InputId.eq(&paths.input_id))
+        .filter(runs::Column::InvocationProfileId.eq(profile.id))
         .all(db)
         .await?
         .into_iter()
-        .find(|run| execution_output_dir(run).as_deref() == Some(paths.output_dir.as_path()))
+        .next()
     {
         return Ok(run);
     }
@@ -164,13 +133,6 @@ async fn find_or_create_demo_run(
         .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom("seeded local target is missing".into()))?;
-    let profile = model_invocation_profiles::Entity::find()
-        .filter(model_invocation_profiles::Column::ModelBackendId.eq(backend.id))
-        .filter(model_invocation_profiles::Column::ExecutionTargetId.eq(target.id))
-        .one(db)
-        .await?
-        .ok_or_else(|| DbErr::Custom("seeded invocation profile is missing".into()))?;
-
     // This record is solely an artifact-indexing placeholder; it is never submitted
     // to the OpenFold planner or executor.
     repositories::runs::create(
@@ -183,23 +145,32 @@ async fn find_or_create_demo_run(
             input_id: paths.input_id.clone(),
             input_sequence: "artifact-indexing-placeholder".into(),
             model_parameters_json: json!({}).to_string(),
-            execution_parameters_json: json!({
-                "demo_run_id": paths.demo_run_id,
-                "output_dir": paths.output_dir,
-                "attn_map_dir": paths.attn_map_dir,
-            })
-            .to_string(),
+            execution_parameters_json: json!({}).to_string(),
         },
     )
     .await
 }
 
-fn execution_output_dir(run: &runs::Model) -> Option<PathBuf> {
-    serde_json::from_str::<serde_json::Value>(&run.execution_parameters_json)
-        .ok()?
-        .get("output_dir")?
-        .as_str()
-        .map(PathBuf::from)
+async fn find_demo_invocation_profile(
+    db: &DatabaseConnection,
+) -> Result<model_invocation_profiles::Model, DbErr> {
+    let backend = model_backends::Entity::find()
+        .filter(model_backends::Column::Slug.eq("openfold"))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("seeded OpenFold backend is missing".into()))?;
+    let target = execution_targets::Entity::find()
+        .filter(execution_targets::Column::Slug.eq("local-mock"))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("seeded local target is missing".into()))?;
+
+    model_invocation_profiles::Entity::find()
+        .filter(model_invocation_profiles::Column::ModelBackendId.eq(backend.id))
+        .filter(model_invocation_profiles::Column::ExecutionTargetId.eq(target.id))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("seeded invocation profile is missing".into()))
 }
 
 async fn register_directory(
@@ -289,13 +260,11 @@ mod tests {
         let db = test_db().await?;
         let existing_directory = env::current_dir().expect("current directory should be available");
         let paths = DemoPaths {
-            demo_run_id: "test-run".into(),
             input_id: "test-input".into(),
             residue_idx: 1,
-            output_dir: existing_directory.clone(),
-            attn_map_dir: existing_directory.clone(),
         };
-        let run = find_or_create_demo_run(&db, &paths).await?;
+        let profile = find_demo_invocation_profile(&db).await?;
+        let run = find_or_create_demo_run(&db, &profile, &paths).await?;
         let mut summary = RegistrationSummary::default();
 
         register_directory(
