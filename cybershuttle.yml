@@ -21,10 +21,10 @@ workspace:
 additional_dependencies:
   modules: []
   conda:
-    - cuda
+    - cuda-nvcc
+    - cuda-libraries-dev
     - gcc=12.4
-    - python=3.10
-    - setuptools=59.5.0
+    - python=3.11
     - pip
     - openmm
     - pdbfixer
@@ -47,11 +47,11 @@ additional_dependencies:
     - bioconda::hmmer
     - bioconda::hhsuite
     - bioconda::kalign2
-    - pytorch::pytorch=2.5
-    - pytorch::pytorch-cuda=12.4
+    - flash-attn>=2.7
+    - pytorch-gpu
     - pymol-open-source
-    - deepspeed=0.14.5
-    - dm-tree=0.1.6
+    - deepspeed=*=cuda*
+    - dm-tree
     - cutlass=3.6.0
     - wget
     - matplotlib

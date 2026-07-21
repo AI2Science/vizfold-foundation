@@ -185,8 +185,10 @@ def main(args):
     # Create the output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Create directory for attention related items
-    os.makedirs(args.attn_map_dir, exist_ok=True)
+    # Create directory for attention related items. Empty is the default and means
+    # "not dumping attention", which is also what the evoformer's save site checks.
+    if args.attn_map_dir:
+        os.makedirs(args.attn_map_dir, exist_ok=True)
 
     if args.config_preset.startswith("seq"):
         args.use_single_seq_mode = True
