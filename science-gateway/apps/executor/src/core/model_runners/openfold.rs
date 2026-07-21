@@ -47,9 +47,6 @@ pub fn plan_openfold_command(
     let script = required_string(&config, "script")?;
     let current_dir = optional_string(&config, "working_dir").map(PathBuf::from);
     let env = parse_env(&config)?;
-    let output_dir = resolve_output_location(invocation_profile, run)?;
-    let attention_dir = output_dir.join("attention");
-
     let mut args = vec!["-u".into(), script];
 
     append_model_schema_args(
@@ -57,17 +54,11 @@ pub fn plan_openfold_command(
         &model_schema,
         &model_parameters,
         &execution_parameters,
+        invocation_profile,
+        run,
     )?;
 
-    args.extend([
-        "--output_dir".into(),
-        output_dir.to_string_lossy().into_owned(),
-    ]);
     append_available_resources_args(&mut args, &available_resources, &execution_parameters);
-    args.extend([
-        "--attn_map_dir".into(),
-        attention_dir.to_string_lossy().into_owned(),
-    ]);
 
     if let Some(residue_idx) = optional_i64(&execution_parameters, "residue_idx") {
         args.extend(["--triangle_residue_idx".into(), residue_idx.to_string()]);
@@ -481,6 +472,8 @@ fn append_model_schema_args(
     model_schema: &Value,
     model_parameters: &Value,
     execution_parameters: &Value,
+    invocation_profile: &model_invocation_profiles::Model,
+    run: &runs::Model,
 ) -> Result<(), DbErr> {
     for (_name, declaration) in sorted_schema_declarations(model_schema, true) {
         if optional_bool(declaration, "positional").unwrap_or(false) {
@@ -488,6 +481,8 @@ fn append_model_schema_args(
                 declaration,
                 model_parameters,
                 execution_parameters,
+                invocation_profile,
+                run,
             )?);
         }
     }
@@ -509,8 +504,13 @@ fn append_model_schema_args(
         }
 
         if declaration.get("source").is_some() {
-            let value =
-                resolve_declared_value(declaration, model_parameters, execution_parameters)?;
+            let value = resolve_declared_value(
+                declaration,
+                model_parameters,
+                execution_parameters,
+                invocation_profile,
+                run,
+            )?;
             args.extend([cli_flag, value]);
             continue;
         }
@@ -568,23 +568,33 @@ fn sorted_schema_declarations(schema: &Value, position_first: bool) -> Vec<(&str
 
 fn resolve_declared_value(
     declaration: &Value,
-    model_parameters: &Value,
+    _model_parameters: &Value,
     execution_parameters: &Value,
+    invocation_profile: &model_invocation_profiles::Model,
+    run: &runs::Model,
 ) -> Result<String, DbErr> {
-    if optional_string(declaration, "source").as_deref() == Some("data_dir") {
-        let data_dir = required_string(execution_parameters, "data_dir")?;
-        let relative_path = required_string(declaration, "relative_path")?;
-        return Ok(data_path(&data_dir, &relative_path));
+    let source = required_string(declaration, "source")?;
+    match source.as_str() {
+        "data_dir" => {
+            let data_dir = required_string(execution_parameters, "data_dir")?;
+            let relative_path = required_string(declaration, "relative_path")?;
+            Ok(data_path(&data_dir, &relative_path))
+        }
+        "execution_parameters" => {
+            let parameter_name = required_string(declaration, "parameter")?;
+            required_string(execution_parameters, &parameter_name)
+        }
+        "run_output_workspace" => {
+            let workspace = resolve_output_location(invocation_profile, run)?;
+            let path = optional_string(declaration, "relative_path")
+                .map(|relative_path| workspace.join(relative_path))
+                .unwrap_or(workspace);
+            Ok(path.to_string_lossy().into_owned())
+        }
+        _ => Err(DbErr::Custom(format!(
+            "unsupported model parameter source '{source}'"
+        ))),
     }
-
-    if optional_string(declaration, "source").as_deref() == Some("execution_parameters") {
-        let parameter_name = required_string(declaration, "parameter")?;
-        return required_string(execution_parameters, &parameter_name);
-    }
-
-    let name = required_string(declaration, "name")?;
-    selected_or_default_string(model_parameters, declaration, &name)
-        .ok_or_else(|| DbErr::Custom(format!("{name} is required")))
 }
 
 fn selected_or_default_string(
@@ -923,7 +933,6 @@ mod tests {
     fn execution_parameters() -> serde_json::Value {
         json!({
             "fasta_dir": "/tmp/fasta",
-            "output_dir": "/tmp/output",
             "data_dir": "/data",
             "model_device": "cuda:0"
         })
@@ -981,6 +990,17 @@ mod tests {
                     "source": "data_dir",
                     "relative_path": "bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
                     "cli_flag": "--bfd_database_path"
+                },
+                "output_dir": {
+                    "type": "path",
+                    "source": "run_output_workspace",
+                    "cli_flag": "--output_dir"
+                },
+                "attn_map_dir": {
+                    "type": "path",
+                    "source": "run_output_workspace",
+                    "relative_path": "attention",
+                    "cli_flag": "--attn_map_dir"
                 },
                 "save_outputs": {
                     "type": "boolean",
@@ -1051,6 +1071,50 @@ mod tests {
         assert!(command.args.contains(&"model_1_ptm".into()));
         assert!(command.args.contains(&"--model_device".into()));
         assert!(command.args.contains(&"cuda:0".into()));
+    }
+
+    #[test]
+    fn schema_declared_output_paths_ignore_execution_parameter_values() {
+        let mut execution = execution_parameters();
+        execution["output_dir"] = json!("/stale/output");
+        execution["attn_map_dir"] = json!("/stale/attention");
+
+        let command = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect("command should plan");
+
+        let output_dir = PathBuf::from("/tmp/outputs").join("4");
+        assert_pair(&command.args, "--output_dir", &output_dir.to_string_lossy());
+        assert_pair(
+            &command.args,
+            "--attn_map_dir",
+            &output_dir.join("attention").to_string_lossy(),
+        );
+        assert!(!command.args.contains(&"/stale/output".into()));
+        assert!(!command.args.contains(&"/stale/attention".into()));
+    }
+
+    #[test]
+    fn schema_declared_output_paths_require_profile_output_location() {
+        let error = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(
+                json!({
+                    "program": "python3",
+                    "script": "run_pretrained_openfold.py"
+                })
+                .to_string(),
+            ),
+            &run(json!({}).to_string(), execution_parameters().to_string()),
+        )
+        .expect_err("schema-declared output paths should require output_location");
+
+        assert!(error.to_string().contains("output_location is required"));
     }
 
     #[test]
@@ -1277,8 +1341,7 @@ mod tests {
             &run(
                 json!({}).to_string(),
                 json!({
-                    "fasta_dir": "/tmp/fasta",
-                    "output_dir": "/tmp/output"
+                    "fasta_dir": "/tmp/fasta"
                 })
                 .to_string(),
             ),
@@ -1297,7 +1360,6 @@ mod tests {
             &run(
                 json!({}).to_string(),
                 json!({
-                    "output_dir": "/tmp/output",
                     "data_dir": "/data",
                     "model_device": "cuda:0"
                 })

@@ -187,6 +187,17 @@ fn model_backend(now: chrono::DateTime<Utc>) -> model_backends::Model {
                     "relative_path": "bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
                     "cli_flag": "--bfd_database_path"
                 },
+                "output_dir": {
+                    "type": "path",
+                    "source": "run_output_workspace",
+                    "cli_flag": "--output_dir"
+                },
+                "attn_map_dir": {
+                    "type": "path",
+                    "source": "run_output_workspace",
+                    "relative_path": "attention",
+                    "cli_flag": "--attn_map_dir"
+                },
                 "save_outputs": { "type": "boolean", "cli_flag": "--save_outputs" },
                 "demo_attn": { "type": "boolean", "cli_flag": "--demo_attn" },
                 "num_recycles_save": { "type": "integer", "cli_flag": "--num_recycles_save" }

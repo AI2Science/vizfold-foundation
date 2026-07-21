@@ -64,6 +64,39 @@ The `ExecutionWorkflow` coordinates this flow: `CommandSpec` → optional `Prefl
 
 For the MVP, OpenFold can be supported through a built-in Rust planner and an optional OpenFold preflight runner. Later, the same abstractions can support DB-driven command templates, external model plugins, richer preflight checks, and additional execution targets without changing the core execution flow. Produced outputs are not stored directly in the database; they remain in external storage and are registered as `ARTIFACT` manifest entries classified by the `ARTIFACT_TYPE` catalog. `ARTIFACT_TYPE` is catalog/reference data. `ARTIFACT` is run-specific manifest data.
 
+### Schema parameter sources
+
+`ModelBackend.parameter_schema_json` is the canonical contract for model-native arguments: it declares argument types, CLI flags, defaults, and where the planner obtains a value. A schema describes what a backend accepts; the selected run values remain in the `RUN` record for reproducibility.
+
+The current OpenFold source vocabulary is:
+
+| Source | Resolution |
+| --- | --- |
+| model parameter (no `source`) | Read from `Run.model_parameters_json`, falling back to a schema default when present. |
+| `execution_parameters` | Read the named `parameter` from `Run.execution_parameters_json`. |
+| `data_dir` | Read `data_dir` from `Run.execution_parameters_json` and join the declaration's `relative_path`. |
+| `run_output_workspace` | Resolve `ModelInvocationProfile.config_json.output_location / Run.id`. An optional `relative_path` is joined after resolution. |
+
+For example, OpenFold's normalized output arguments are declared in the model schema rather than emitted as planner-specific special cases:
+
+```json
+{
+  "output_dir": {
+    "type": "path",
+    "source": "run_output_workspace",
+    "cli_flag": "--output_dir"
+  },
+  "attn_map_dir": {
+    "type": "path",
+    "source": "run_output_workspace",
+    "relative_path": "attention",
+    "cli_flag": "--attn_map_dir"
+  }
+}
+```
+
+`invocation_profile_config` is the planned next source kind for direct profile-owned values such as a target-specific `data_dir`. It is not yet used by the OpenFold parameter schema; current `data_dir` behavior remains unchanged.
+
 ### Output location resolution
 
 The executor should maintain a normalized output location concept that is independent of model-native argument names.
