@@ -69,12 +69,12 @@ pub async fn submit_run(
         "model backend parameter_schema",
         &backend.parameter_schema_json,
     )?;
-    let execution_schema = require_json_object(
-        "execution target parameter_schema",
-        &target.parameter_schema_json,
+    let _available_resources = require_json_object(
+        "execution target available_resources",
+        &target.available_resources_json,
     )?;
     let model_params = require_json_object("model_parameters", &input.model_parameters_json)?;
-    let execution_params =
+    let _execution_params =
         require_json_object("execution_parameters", &input.execution_parameters_json)?;
     let _invocation_schema = require_json_object(
         "model invocation profile parameter_schema",
@@ -82,7 +82,12 @@ pub async fn submit_run(
     )?;
 
     reject_unknown_keys("model_parameters", &model_schema, &model_params)?;
-    reject_unknown_keys("execution_parameters", &execution_schema, &execution_params)?;
+
+    // TODO: Execution parameter validation should eventually distinguish target
+    // available resources/capabilities from concrete per-run execution values and
+    // invocation-profile-specific requirements. For now, submit_run only requires
+    // execution_parameters_json to be a JSON object; model-specific planning performs
+    // additional validation where needed.
 
     repositories::runs::create(db, input).await
 }

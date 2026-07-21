@@ -31,7 +31,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(ExecutionTargets::Description).text())
                     .col(
-                        ColumnDef::new(ExecutionTargets::ParameterSchemaJson)
+                        ColumnDef::new(ExecutionTargets::AvailableResourcesJson)
                             .text()
                             .not_null(),
                     )
@@ -66,7 +66,7 @@ enum ExecutionTargets {
     Slug,
     TargetType,
     Description,
-    ParameterSchemaJson,
+    AvailableResourcesJson,
     CreatedAt,
     UpdatedAt,
 }

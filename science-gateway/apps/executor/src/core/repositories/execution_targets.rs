@@ -25,7 +25,7 @@ pub async fn create(
         slug: Set(input.slug),
         target_type: Set(input.target_type),
         description: Set(input.description),
-        parameter_schema_json: Set(input.parameter_schema_json),
+        available_resources_json: Set(input.available_resources_json),
         ..Default::default()
     }
     .insert(db)

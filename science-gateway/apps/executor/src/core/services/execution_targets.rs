@@ -9,7 +9,7 @@ pub struct RegisterExecutionTargetInput {
     pub slug: String,
     pub target_type: String,
     pub description: Option<String>,
-    pub parameter_schema_json: String,
+    pub available_resources_json: String,
 }
 
 pub async fn list_execution_targets(
@@ -23,8 +23,8 @@ pub async fn register_execution_target(
     input: RegisterExecutionTargetInput,
 ) -> Result<execution_targets::Model, DbErr> {
     require_json_object(
-        "execution target parameter_schema",
-        &input.parameter_schema_json,
+        "execution target available_resources",
+        &input.available_resources_json,
     )?;
 
     repositories::execution_targets::create(db, input).await

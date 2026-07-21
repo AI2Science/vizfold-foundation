@@ -81,7 +81,7 @@ fn sample_execution_target_input() -> RegisterExecutionTargetInput {
         slug: "local-mock".into(),
         target_type: "local".into(),
         description: Some("Test execution target".into()),
-        parameter_schema_json: json!({
+        available_resources_json: json!({
             "type": "object",
             "properties": {
                 "gpu_count": { "type": "integer", "minimum": 0, "default": 0 },
@@ -285,7 +285,7 @@ async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
             slug: "docker-local".into(),
             target_type: "docker".into(),
             description: Some("Other target".into()),
-            parameter_schema_json: json!({"type": "object", "properties": {}}).to_string(),
+            available_resources_json: json!({"type": "object", "properties": {}}).to_string(),
         },
     )
     .await?;

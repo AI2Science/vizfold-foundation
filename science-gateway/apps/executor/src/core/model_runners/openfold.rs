@@ -28,16 +28,19 @@ pub fn plan_openfold_command(
         "model backend parameter_schema_json",
         &model_backend.parameter_schema_json,
     )?;
-    let execution_schema = parse_object(
-        "execution target parameter_schema_json",
-        &execution_target.parameter_schema_json,
+    let available_resources = parse_object(
+        "execution target available_resources_json",
+        &execution_target.available_resources_json,
     )?;
     let model_parameters = parse_object("run model_parameters_json", &run.model_parameters_json)?;
     let execution_parameters = parse_object(
         "run execution_parameters_json",
         &run.execution_parameters_json,
     )?;
-    validate_execution_parameters(&execution_schema, &execution_parameters)?;
+    validate_execution_parameters_against_available_resources(
+        &available_resources,
+        &execution_parameters,
+    )?;
 
     let program = required_string(&config, "program")?;
     let script = required_string(&config, "script")?;
@@ -56,7 +59,7 @@ pub fn plan_openfold_command(
     )?;
 
     args.extend(["--output_dir".into(), output_dir]);
-    append_execution_schema_args(&mut args, &execution_schema, &execution_parameters);
+    append_available_resources_args(&mut args, &available_resources, &execution_parameters);
 
     if let Some(attn_map_dir) = optional_string(&execution_parameters, "attn_map_dir") {
         args.extend(["--attn_map_dir".into(), attn_map_dir]);
@@ -520,12 +523,12 @@ fn append_model_schema_args(
     Ok(())
 }
 
-fn append_execution_schema_args(
+fn append_available_resources_args(
     args: &mut Vec<String>,
-    execution_schema: &Value,
+    available_resources: &Value,
     execution_parameters: &Value,
 ) {
-    for (name, declaration) in sorted_schema_declarations(execution_schema, false) {
+    for (name, declaration) in sorted_schema_declarations(available_resources, false) {
         let Some(cli_flag) = optional_string(declaration, "cli_flag") else {
             continue;
         };
@@ -604,11 +607,11 @@ fn json_value_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn validate_execution_parameters(
-    execution_schema: &Value,
+fn validate_execution_parameters_against_available_resources(
+    available_resources: &Value,
     execution_parameters: &Value,
 ) -> Result<(), DbErr> {
-    let Some(properties) = execution_schema
+    let Some(properties) = available_resources
         .get("properties")
         .and_then(Value::as_object)
     else {
@@ -625,7 +628,7 @@ fn validate_execution_parameters(
 
                 if !allowed.contains(&model_device.as_str()) {
                     return Err(DbErr::Custom(format!(
-                        "model_device '{model_device}' is not allowed by execution target schema"
+                        "model_device '{model_device}' is not allowed by execution target available resources"
                     )));
                 }
             }
@@ -637,7 +640,7 @@ fn validate_execution_parameters(
             if let Some(minimum) = optional_i64(declaration, "minimum") {
                 if cpus < minimum {
                     return Err(DbErr::Custom(format!(
-                        "cpus {cpus} is below execution target minimum {minimum}"
+                        "cpus {cpus} is below execution target resource minimum {minimum}"
                     )));
                 }
             }
@@ -645,7 +648,7 @@ fn validate_execution_parameters(
             if let Some(maximum) = optional_i64(declaration, "maximum") {
                 if cpus > maximum {
                     return Err(DbErr::Custom(format!(
-                        "cpus {cpus} exceeds execution target maximum {maximum}"
+                        "cpus {cpus} exceeds execution target resource maximum {maximum}"
                     )));
                 }
             }
@@ -856,7 +859,7 @@ mod tests {
             slug: "local".into(),
             target_type: "local".into(),
             description: None,
-            parameter_schema_json: execution_parameter_schema().to_string(),
+            available_resources_json: available_resources_schema().to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -983,7 +986,7 @@ mod tests {
         })
     }
 
-    fn execution_parameter_schema() -> serde_json::Value {
+    fn available_resources_schema() -> serde_json::Value {
         json!({
             "type": "object",
             "properties": {
@@ -1106,7 +1109,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_model_device_from_execution_schema_enum() {
+    fn rejects_invalid_model_device_from_available_resources_enum() {
         let mut execution = execution_parameters();
         execution["model_device"] = json!("cuda:1");
 
@@ -1126,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_cpus_above_execution_schema_maximum() {
+    fn rejects_cpus_above_available_resources_maximum() {
         let mut execution = execution_parameters();
         execution["cpus"] = json!(15);
 

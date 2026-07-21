@@ -9,7 +9,7 @@ pub struct Model {
     pub slug: String,
     pub target_type: String,
     pub description: Option<String>,
-    pub parameter_schema_json: String,
+    pub available_resources_json: String,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

@@ -10,7 +10,7 @@ This diagram describes the MVP data model for the Rust executor core. The goal i
 
 `MODEL_BACKEND` represents a registered model implementation, such as OpenFold, ESMFold, or Boltz. It stores model-level metadata, the model parameter schema, and the artifact types the model can theoretically produce.
 
-`EXECUTION_TARGET` represents an environment where execution can happen, such as local runtime, Docker, HPC, or a science gateway. It stores target-level metadata and execution parameter schema, but does not store model-specific installation details.
+`EXECUTION_TARGET` represents an environment where execution can happen, such as local runtime, Docker, HPC, or a science gateway. It stores target-level metadata and available resources/capabilities, such as supported devices, CPU bounds, GPU availability, memory/resource options, and runtime constraints. It does not store model-specific command parameters or installation details.
 
 `MODEL_INVOCATION_PROFILE` connects a specific model backend to a specific execution target. It owns the model-target-specific invocation configuration, such as subprocess, Docker, SLURM, or gateway invocation details. This prevents model-specific paths or command templates from leaking into the generic execution target definition.
 
@@ -24,20 +24,20 @@ This model intentionally does not include model-target artifact constraint logic
 
 The artifact type catalog exists to provide stable artifact metadata and display hints. Actual post-run artifact discovery, output scanning, file serving, and dashboard/viewer wiring are intentionally deferred.
 
-## Architecture note: parameter schema ownership
+## Architecture note: parameter and resource ownership
 
-The current MVP has three places that can participate in command planning:
+The current MVP has two model-facing parameter schemas and one target-level resource description:
 
 - `ModelBackend.parameter_schema_json`
-- `ExecutionTarget.parameter_schema_json`
+- `ExecutionTarget.available_resources_json`
 - `ModelInvocationProfile.parameter_schema_json`
 
-This has created some ambiguity because `Run` currently has only two concrete parameter buckets:
+`Run` has two concrete parameter buckets:
 
 - `Run.model_parameters_json`
 - `Run.execution_parameters_json`
 
-The intended future direction is to avoid treating all three schema locations as competing sources of command parameters.
+The target resource description must not be treated as a competing model-command parameter schema.
 
 A cleaner model may be:
 
@@ -49,9 +49,7 @@ A cleaner model may be:
 
 Under this direction, model-specific CLI flags such as OpenFold `--attn_map_dir` should not live on a generic execution target. Likewise, concrete run values such as `output_dir` and `attn_map_dir` should remain part of the run’s selected execution parameters, while the model/backend contract defines that those values are needed and how they are interpreted.
 
-This also suggests that `ExecutionTarget.parameter_schema_json` may eventually need to be renamed to something like `runtime_capabilities_json` or `resource_schema_json`, because it is not meant to become a model-specific command parameter schema.
-
-This is deferred for now. The current MVP keeps the existing structure while the OpenFold workflow example validates the executor flow end-to-end.
+`ExecutionTarget.available_resources_json` is the current target-level field for these capabilities. The OpenFold workflow uses it to constrain the concrete resource values selected in `Run.execution_parameters_json`.
 
 ## Executor Architecture Flow
 

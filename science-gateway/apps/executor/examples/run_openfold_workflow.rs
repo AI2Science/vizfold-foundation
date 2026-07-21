@@ -214,7 +214,7 @@ fn execution_target(now: chrono::DateTime<Utc>) -> execution_targets::Model {
         slug: "local".into(),
         target_type: "local".into(),
         description: Some("Local example target".into()),
-        parameter_schema_json: json!({
+        available_resources_json: json!({
             "type": "object",
             "properties": {
                 "model_device": {

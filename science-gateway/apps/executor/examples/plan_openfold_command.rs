@@ -25,7 +25,7 @@ fn main() -> Result<(), sea_orm::DbErr> {
         slug: "local-runtime".into(),
         target_type: "local".into(),
         description: None,
-        parameter_schema_json: execution_parameter_schema().to_string(),
+        available_resources_json: available_resources_schema().to_string(),
         created_at: now,
         updated_at: now,
     };
@@ -159,7 +159,7 @@ fn openfold_parameter_schema() -> serde_json::Value {
     })
 }
 
-fn execution_parameter_schema() -> serde_json::Value {
+fn available_resources_schema() -> serde_json::Value {
     json!({
         "type": "object",
         "properties": {

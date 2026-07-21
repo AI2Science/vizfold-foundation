@@ -170,7 +170,7 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
                 slug: "local-mock".into(),
                 target_type: "local".into(),
                 description: Some("Local mock execution target for development and tests.".into()),
-                parameter_schema_json:
+                available_resources_json:
                     r#"{"type":"object","properties":{"model_device":{"type":"string","enum":["cpu","cuda:0"],"default":"cuda:0","cli_flag":"--model_device"},"cpus":{"type":"integer","minimum":1,"maximum":14,"cli_flag":"--cpus"}}}"#
                         .into(),
             },
