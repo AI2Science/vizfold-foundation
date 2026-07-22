@@ -1,12 +1,12 @@
 #!/bin/bash
 # Install OpenFold, anywhere. Add a cluster as install/sites/<ClusterName>.sh.
 #
-#   curl -sL https://raw.githubusercontent.com/yasithdev/vizfold-foundation/delta-install-upstream/install.sh | bash
+#   curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 #   ./install.sh
 set -euo pipefail
 
-REPO_URL=${OPENFOLD_REPO_URL:-https://github.com/yasithdev/vizfold-foundation.git}
-BRANCH=${OPENFOLD_BRANCH:-delta-install-upstream}   # -> AI2Science/main once merged
+REPO_URL=${OPENFOLD_REPO_URL:-https://github.com/AI2Science/vizfold-foundation.git}
+BRANCH=${OPENFOLD_BRANCH:-main}
 SRC=${OPENFOLD_SRC:-$HOME/openfold-src}   # outlives the job; the editable install points here
 
 die() { echo "FATAL: $*" >&2; exit 1; }
