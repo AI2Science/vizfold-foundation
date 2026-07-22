@@ -2,11 +2,10 @@
 #
 #   . "$REPO/install/interactive.sh"
 #   prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$HOME/openfold")
-#   alloc=$(interactive::choose OPENFOLD_ALLOCATION allocation bbol cqj)
 #
-# Both echo the chosen value and return non-zero if there is none, leaving the
-# caller's `set -e` to stop. Prompts read /dev/tty, not stdin, which under
-# `curl ... | bash` is the script itself.
+# Echoes the value, so a caller can always proceed: a site works out a sensible
+# default and this only reports it, or takes an answer when someone is there.
+# Prompts read /dev/tty, not stdin, which under `curl ... | bash` is the script.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "interactive.sh is a library" >&2; exit 1; }
 [ -n "${INTERACTIVE_SH:-}" ] && return 0
@@ -29,18 +28,3 @@ interactive::resolve() {
     fi
 }
 
-interactive::choose() {
-    local var=$1 label=$2 choice
-    shift 2
-    [ -n "${!var:-}" ] && { echo "${!var}"; return 0; }
-    [ $# -eq 0 ] && { echo "no $label found; set $var" >&2; return 1; }
-    [ $# -eq 1 ] && { echo "$label: $1" >&2; echo "$1"; return 0; }
-    interactive::available || { echo "several $label ($*); set $var" >&2; return 1; }
-    echo "select $label:" >&2
-    # The >&2 covers the whole block, so the answer is echoed after it, not inside.
-    select choice in "$@"; do
-        [ -n "$choice" ] && break
-    done <"/dev/tty" >&2
-    [ -n "$choice" ] || { echo "no $label chosen" >&2; return 1; }   # EOF
-    echo "$choice"
-}
