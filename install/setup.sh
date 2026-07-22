@@ -17,6 +17,7 @@ STEREO=$REPO/openfold/resources/stereo_chemical_props.txt
 
 export CONDA_PKGS_DIRS=${OPENFOLD_PKGS_DIR:-$PREFIX/../.openfold-pkgs}
 export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
+export PIP_CACHE_DIR=$PREFIX/../.openfold-pip   # $HOME is small on some sites
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0;8.6;9.0}"   # no device to probe
 export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
 

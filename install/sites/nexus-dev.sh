@@ -1,8 +1,7 @@
 #!/bin/bash
 # Nexus (SLURM ClusterName "nexus-dev"). Reached from ../../install.sh.
 #
-# No database mirror and no project filesystem, so this installs under $HOME and
-# setup.sh fetches the parameters and example templates itself.
+# No database mirror, so setup.sh fetches the parameters and example templates.
 #
 # The GPU is a 10 GB A100 vGPU behind a 535 driver. Inference is fine -- torch
 # ships prebuilt cubins -- but OpenMM JITs through NVRTC, and a 12.8 toolkit
