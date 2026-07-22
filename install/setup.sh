@@ -70,6 +70,36 @@ export LD_LIBRARY_PATH=\$CONDA_PREFIX/lib:\${LD_LIBRARY_PATH:-}
 ACTIVATE
 . "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
 
+step nvrtc
+# OpenMM JITs its kernels through NVRTC, and a driver refuses PTX emitted by a
+# newer toolkit than its own -- CUDA_ERROR_UNSUPPORTED_PTX_VERSION, which surfaces
+# only as "Minimization failed after 100 attempts". torch is immune, shipping
+# prebuilt cubins, so pin NVRTC alone, beside the env: installed into it, the
+# solver drags torch down with it (43 downgrades on a 12.8 env).
+# LD_PRELOAD, not LD_LIBRARY_PATH: OpenMM's plugin carries DT_RPATH $ORIGIN/..,
+# and RPATH outranks LD_LIBRARY_PATH, so the env's own copy would still win.
+DRIVER_CUDA=${OPENFOLD_DRIVER_CUDA:-$(python3 -c "
+import ctypes
+v = ctypes.c_int()
+ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
+print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
+ENV_CUDA=$(ls "$CONDA_PREFIX"/lib/libnvrtc.so.*.*.* 2>/dev/null |
+    sed 's/.*so\.//; s/\.[0-9]*$//' | head -1) || true
+older() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ "$1" != "$2" ]; }
+
+if [ -n "${DRIVER_CUDA:-}" ] && [ -n "${ENV_CUDA:-}" ] && older "$DRIVER_CUDA" "$ENV_CUDA"; then
+    NVRTC=$PREFIX/nvrtc-$DRIVER_CUDA
+    [ -d "$NVRTC" ] || "$MM" create -y -p "$NVRTC" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
+    LIB=$(ls "$NVRTC"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
+    test -n "$LIB" || die "no libnvrtc in $NVRTC"
+    echo "export LD_PRELOAD=$LIB\${LD_PRELOAD:+:\$LD_PRELOAD}" \
+        >> "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
+    . "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
+    echo "driver CUDA $DRIVER_CUDA is older than NVRTC $ENV_CUDA; preloading ${LIB##*/}"
+else
+    echo "driver CUDA ${DRIVER_CUDA:-unknown}, NVRTC ${ENV_CUDA:-unknown}; no pin needed"
+fi
+
 step openfold
 # No build isolation: the extension must link against this env's torch.
 python3 -c 'import torch, openfold, attn_core_inplace_cuda' 2>/dev/null ||

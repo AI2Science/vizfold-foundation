@@ -3,12 +3,8 @@
 #
 # No database mirror, so setup.sh fetches the parameters and example templates.
 #
-# The GPU is a 10 GB A100 vGPU behind a 535 driver. Inference is fine -- torch
-# ships prebuilt cubins -- but OpenMM JITs through NVRTC, and a 12.8 toolkit
-# emits PTX this driver rejects (CUDA_ERROR_UNSUPPORTED_PTX_VERSION), which
-# surfaces as "Minimization failed after 100 attempts". Capping CUDA lower does
-# not help: no consistent stack solves at <=12.2. So relaxation is skipped here
-# until the driver is updated, and the example is one that fits in 10 GB.
+# The GPU is a 10 GB A100 vGPU, so the example is one that fits in it. Its 535
+# driver is older than the toolkit; setup.sh pins NVRTC to match.
 set -euo pipefail
 
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
@@ -28,7 +24,6 @@ export OPENFOLD_GPU_ACCOUNT=$ACCOUNT
 export OPENFOLD_GPU_PARTITION=${OPENFOLD_GPU_PARTITION:-gpu}
 export OPENFOLD_GPU_RESOURCES=${OPENFOLD_GPU_RESOURCES:---cpus-per-task=8 --mem=24G}
 export OPENFOLD_EXAMPLE=${OPENFOLD_EXAMPLE:-1UBQ_1}
-export OPENFOLD_FOLD_ARGS=${OPENFOLD_FOLD_ARGS:---skip_relaxation}
 SETUP=$REPO/install/setup.sh
 mkdir -p "$PREFIX"
 
