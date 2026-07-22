@@ -15,10 +15,13 @@ config::file() {
     echo "${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}"
 }
 
-config::load() {
-    local file key value
-    file=$(config::file)
+# Fill unset variables from a JSON file. Never overwrites, so the first caller
+# to set a value keeps it: inline environment, then the user's file, then the
+# site defaults -- highest precedence first, each only filling what is missing.
+config::fill() {
+    local file=$1 label=${2:-config} key value
     [ -r "$file" ] && command -v python3 >/dev/null || return 0
+    echo "$label: $file" >&2
     # `if`, not `&&`: a skipped last line would make the loop -- and sourcing this
     # file -- return non-zero, which aborts a `set -e` caller.
     while IFS='=' read -r key value; do
@@ -34,6 +37,11 @@ for k, v in items:
         print(f"{k}={v}")' "$file" 2>/dev/null)
     return 0
 }
+
+config::load() { config::fill "$(config::file)" "config"; }
+
+# <site>.sh loads its own <site>.json: same basename, beside it.
+config::site_defaults() { config::fill "${1%.sh}.json" "site defaults"; }
 
 # Only names that are set are written, so an unused one leaves no empty key.
 config::save() {

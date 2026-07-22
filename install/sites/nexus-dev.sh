@@ -10,6 +10,7 @@ set -euo pipefail
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
 . "$REPO/install/interactive.sh"
 . "$REPO/install/config.sh"
+config::site_defaults "${BASH_SOURCE[0]}"
 
 # Bulk data belongs on the shared /projects volume, not $HOME. Everything large
 # hangs off the prefix: the env, the package cache, parameters and templates.
@@ -22,9 +23,6 @@ ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" \
 
 export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
 export OPENFOLD_GPU_ACCOUNT=$ACCOUNT
-export OPENFOLD_GPU_PARTITION=${OPENFOLD_GPU_PARTITION:-gpu}
-export OPENFOLD_GPU_RESOURCES=${OPENFOLD_GPU_RESOURCES:---cpus-per-task=8 --mem=24G}
-export OPENFOLD_EXAMPLE=${OPENFOLD_EXAMPLE:-1UBQ_1}
 SETUP=$REPO/install/setup.sh
 mkdir -p "$PREFIX"
 
@@ -34,7 +32,7 @@ elif [ -n "${SLURM_JOB_ID:-}" ]; then
     LAUNCH=(srun --ntasks=1)
 else
     # debug has 2 cores and 5.5 GB, too small to build in; gpu is the roomy queue.
-    PARTITION=$(interactive::resolve OPENFOLD_PARTITION "slurm partition" gpu)
+    PARTITION=$(interactive::resolve OPENFOLD_PARTITION "slurm partition" "${OPENFOLD_PARTITION:-gpu}")
     LAUNCH=(
         sbatch --job-name=openfold-install
         --account="$ACCOUNT" --partition="$PARTITION"

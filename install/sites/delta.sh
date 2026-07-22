@@ -5,6 +5,7 @@ set -euo pipefail
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
 . "$REPO/install/interactive.sh"
 . "$REPO/install/config.sh"
+config::site_defaults "${BASH_SOURCE[0]}"
 
 die() { echo "FATAL: $*" >&2; exit 1; }
 
@@ -54,8 +55,6 @@ else
 fi
 
 export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
-export OPENFOLD_AF2_ROOT=${OPENFOLD_AF2_ROOT:-/sw/external/alphafold2/data_hyun_official}
-export OPENFOLD_GPU_PARTITION=${OPENFOLD_GPU_PARTITION:-gpuA100x4-interactive}
 SETUP=$REPO/install/setup.sh
 mkdir -p "$PREFIX"
 
@@ -66,7 +65,7 @@ elif [ -n "${SLURM_JOB_ID:-}" ]; then
 else
     [ -n "${ALLOCATION:-}" ] || require_allocation
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "$ALLOCATION-delta-cpu")
-    PARTITION=$(interactive::resolve OPENFOLD_PARTITION "slurm partition" cpu)
+    PARTITION=$(interactive::resolve OPENFOLD_PARTITION "slurm partition" "${OPENFOLD_PARTITION:-cpu}")
     LAUNCH=(
         sbatch --job-name=openfold-install
         --account="$ACCOUNT" --partition="$PARTITION"
