@@ -37,7 +37,7 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo "== $* (+$((SECONDS))s)"; }
 have() { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 
-mkdir -p "$PREFIX/bin" "$TMPDIR" "$UNICLUST" "$REPO/openfold/resources" "$REPO/outputs"
+mkdir -p "$PREFIX/bin" "$TMPDIR" "$UNICLUST" "$REPO/openfold/resources"
 hostname
 nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
 echo "prefix=$PREFIX repo=$REPO env=$ENV_NAME max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
