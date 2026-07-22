@@ -87,6 +87,7 @@ print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
 ENV_CUDA=$(ls "$CONDA_PREFIX"/lib/libnvrtc.so.*.*.* 2>/dev/null |
     sed 's/.*so\.//; s/\.[0-9]*$//' | head -1) || true
 older() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ "$1" != "$2" ]; }
+if [ -n "${DRIVER_CUDA:-}" ]; then export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA; fi
 
 if [ -n "${DRIVER_CUDA:-}" ] && [ -n "${ENV_CUDA:-}" ] && older "$DRIVER_CUDA" "$ENV_CUDA"; then
     NVRTC=$PREFIX/nvrtc-$DRIVER_CUDA
