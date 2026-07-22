@@ -11,6 +11,7 @@ ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
 MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8}   # a runtime above the driver breaks Amber relaxation
 
 DATA=$PREFIX/data
+ENV_DIR=$PREFIX/mamba/envs/$ENV_NAME
 MM=$PREFIX/bin/micromamba
 CUTLASS=$PREFIX/cutlass
 UNICLUST=$DATA/uniclust30/uniclust30_2018_08
@@ -49,12 +50,15 @@ step micromamba
     tar -xj -C "$PREFIX" bin/micromamba
 
 step "conda env $ENV_NAME"
-"$MM" env list | grep -qE "^\s*$ENV_NAME\s" ||
-    "$MM" create -y -n "$ENV_NAME" -f "$REPO/environment.yml" "cuda-version<=$MAX_CUDA"
+# By path and --no-rc: a ~/.condarc envs_dirs outranks MAMBA_ROOT_PREFIX and would
+# put a 12 GB environment wherever it points, typically a small $HOME, and its
+# channels join the solve. Neither belongs in a reproducible install.
+[ -d "$ENV_DIR" ] ||
+    "$MM" create -y --no-rc -p "$ENV_DIR" -f "$REPO/environment.yml" "cuda-version<=$MAX_CUDA"
 
 set +u   # the conda gcc hook reads SYS_SYSROOT unset
 eval "$("$MM" shell hook --shell bash)"
-micromamba activate "$ENV_NAME"
+micromamba activate "$ENV_DIR"
 set -u
 
 step "third-party dependencies"
@@ -91,7 +95,8 @@ if [ -n "${DRIVER_CUDA:-}" ]; then export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA; fi
 
 if [ -n "${DRIVER_CUDA:-}" ] && [ -n "${ENV_CUDA:-}" ] && older "$DRIVER_CUDA" "$ENV_CUDA"; then
     NVRTC=$PREFIX/nvrtc-$DRIVER_CUDA
-    [ -d "$NVRTC" ] || "$MM" create -y -p "$NVRTC" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
+    [ -d "$NVRTC" ] ||
+        "$MM" create -y --no-rc -p "$NVRTC" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
     LIB=$(ls "$NVRTC"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
     test -n "$LIB" || die "no libnvrtc in $NVRTC"
     echo "export LD_PRELOAD=$LIB\${LD_PRELOAD:+:\$LD_PRELOAD}" \
@@ -177,6 +182,6 @@ Check it works -- fold the bundled example and count the atoms:
 A few thousand atoms means it worked. To use the environment directly:
 
   export MAMBA_ROOT_PREFIX=$PREFIX/mamba
-  eval "\$($MM shell hook --shell bash)" && micromamba activate $ENV_NAME
+  eval "\$($MM shell hook --shell bash)" && micromamba activate $ENV_DIR
   export OPENFOLD_HOME=$REPO OPENFOLD_DATA_DIR=$DATA
 EOF
