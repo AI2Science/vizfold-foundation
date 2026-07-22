@@ -9,6 +9,7 @@ set -euo pipefail
 
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
 . "$REPO/install/interactive.sh"
+. "$REPO/install/config.sh"
 
 # Bulk data belongs on the shared /projects volume, not $HOME. Everything large
 # hangs off the prefix: the env, the package cache, parameters and templates.

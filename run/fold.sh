@@ -5,8 +5,9 @@
 #   OPENFOLD_PREFIX=<prefix> run/fold.sh 6KWC_1
 set -euo pipefail
 
-PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
+. "$REPO/install/config.sh"
+PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
 
 INPUT_ID=${1:-${OPENFOLD_INPUT_ID:-6KWC_1}}

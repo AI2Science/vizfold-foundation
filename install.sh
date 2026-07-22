@@ -36,6 +36,7 @@ fi
 test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
 
 . "$REPO/install/interactive.sh"
+. "$REPO/install/config.sh"
 SITES=$REPO/install/sites
 
 CLUSTER=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }') || true
@@ -44,5 +45,5 @@ SITE=$(interactive::resolve OPENFOLD_SITE "site" "$CLUSTER")
 test -f "$SITES/$SITE.sh" ||
     die "no site script for $SITE; have: $(cd "$SITES" && echo *.sh | sed 's/\.sh//g')"
 
-export OPENFOLD_HOME=$REPO
+export OPENFOLD_HOME=$REPO OPENFOLD_SITE=$SITE
 exec bash "$SITES/$SITE.sh"

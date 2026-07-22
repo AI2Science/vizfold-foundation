@@ -4,6 +4,7 @@ set -euo pipefail
 
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
 . "$REPO/install/interactive.sh"
+. "$REPO/install/config.sh"
 
 # Project space is /work/nvme/<allocation>/<user>, and it names the account too,
 # so a wrong guess bills the wrong project. Only asked for when it is needed.
