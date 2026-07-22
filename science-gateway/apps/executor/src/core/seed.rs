@@ -1,8 +1,10 @@
 use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
+use serde_json::json;
 
 use crate::core::{
+    config,
     entities::{artifact_types, execution_targets, model_backends, model_invocation_profiles},
-    services,
+    repositories, services,
 };
 
 pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
@@ -238,26 +240,44 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?
         .ok_or_else(|| DbErr::Custom("seeded local OpenFold execution target is missing".into()))?;
 
-    if model_invocation_profiles::Entity::find()
+    let local_openfold_config = local_openfold_config_json();
+    if let Some(profile) = model_invocation_profiles::Entity::find()
         .filter(model_invocation_profiles::Column::ModelBackendId.eq(backend.id))
         .filter(model_invocation_profiles::Column::ExecutionTargetId.eq(openfold_target.id))
         .one(db)
         .await?
-        .is_none()
     {
+        if profile.config_json != local_openfold_config {
+            repositories::model_invocation_profiles::update_config(
+                db,
+                profile.id,
+                local_openfold_config,
+            )
+            .await?;
+        }
+    } else {
         services::model_invocation_profiles::register_model_invocation_profile(
             db,
             services::model_invocation_profiles::RegisterModelInvocationProfileInput {
                 model_backend_id: backend.id,
                 execution_target_id: openfold_target.id,
                 invocation_kind: "local_subprocess".into(),
-                config_json:
-                    r#"{"program":"python3","script":"run_pretrained_openfold.py","working_dir":".","output_location":"science-gateway/openfold-demo-output"}"#
-                        .into(),
+                config_json: local_openfold_config,
             },
         )
         .await?;
     }
 
     Ok(())
+}
+
+fn local_openfold_config_json() -> String {
+    let repository_root = config::repository_root();
+    json!({
+        "program": "python3",
+        "script": "run_pretrained_openfold.py",
+        "working_dir": repository_root,
+        "output_location": repository_root.join("science-gateway").join("openfold-demo-output"),
+    })
+    .to_string()
 }

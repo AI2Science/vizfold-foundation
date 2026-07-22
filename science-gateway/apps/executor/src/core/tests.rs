@@ -4,7 +4,7 @@ use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
 use serde_json::json;
 
 use crate::core::{
-    db, seed,
+    config, db, seed,
     services::{
         artifact_types::{self, RegisterArtifactTypeInput},
         artifacts::{self, RecordArtifactInput},
@@ -115,8 +115,8 @@ async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() ->
         json!({
             "program": "python3",
             "script": "run_pretrained_openfold.py",
-            "working_dir": ".",
-            "output_location": "science-gateway/openfold-demo-output",
+            "working_dir": config::repository_root(),
+            "output_location": config::repository_root().join("science-gateway").join("openfold-demo-output"),
         })
     );
     Ok(())

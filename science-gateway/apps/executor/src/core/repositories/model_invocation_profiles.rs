@@ -32,3 +32,16 @@ pub async fn create(
     .insert(db)
     .await
 }
+
+pub async fn update_config(
+    db: &DatabaseConnection,
+    id: i32,
+    config_json: String,
+) -> Result<model_invocation_profiles::Model, DbErr> {
+    let model = find_by_id(db, id)
+        .await?
+        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let mut active_model: model_invocation_profiles::ActiveModel = model.into();
+    active_model.config_json = Set(config_json);
+    active_model.update(db).await
+}

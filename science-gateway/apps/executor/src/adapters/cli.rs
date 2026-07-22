@@ -1,6 +1,7 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
 use sea_orm::DbErr;
 use serde_json::json;
+use std::path::Path;
 
 use crate::core::{
     commands::LocalCommandRunner,
@@ -215,6 +216,14 @@ async fn queue_openfold_run(
         ));
     }
 
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir)?;
+    let alignment_dir = args
+        .alignment_dir
+        .as_deref()
+        .map(|path| canonicalize_local_path("--alignment-dir", path))
+        .transpose()?;
+
     let backend = model_backends::find_by_slug(database, "openfold")
         .await?
         .ok_or_else(seed_required_error)?;
@@ -232,8 +241,8 @@ async fn queue_openfold_run(
         .ok_or_else(seed_required_error)?;
 
     let mut execution_parameters = serde_json::Map::from_iter([
-        ("fasta_dir".into(), json!(args.fasta_dir)),
-        ("data_dir".into(), json!(args.data_dir)),
+        ("fasta_dir".into(), json!(fasta_dir)),
+        ("data_dir".into(), json!(data_dir)),
         ("residue_idx".into(), json!(args.residue_idx)),
         (
             "use_precomputed_alignments".into(),
@@ -242,7 +251,7 @@ async fn queue_openfold_run(
         ("model_device".into(), json!(args.model_device)),
         ("cpus".into(), json!(args.cpus)),
     ]);
-    if let Some(alignment_dir) = args.alignment_dir {
+    if let Some(alignment_dir) = alignment_dir {
         execution_parameters.insert("alignment_dir".into(), json!(alignment_dir));
     }
 
@@ -270,8 +279,18 @@ async fn queue_openfold_run(
     println!("status: {}", run.status);
     println!("input_id: {}", run.input_id);
     println!("\nNext:");
-    println!("  vizfold execute-run openfold {}", run.id);
+    println!("  vizfold execute-run {}", run.id);
     Ok(())
+}
+
+fn canonicalize_local_path(field: &str, path: &str) -> Result<String, DbErr> {
+    std::fs::canonicalize(Path::new(path))
+        .map(|path| path.display().to_string())
+        .map_err(|error| {
+            DbErr::Custom(format!(
+                "{field} path '{path}' could not be resolved: {error}"
+            ))
+        })
 }
 
 fn seed_required_error() -> DbErr {
@@ -555,6 +574,10 @@ mod tests {
 
     #[tokio::test]
     async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
+        let local_path = std::fs::canonicalize(".")
+            .expect("current working directory should be canonicalizable")
+            .display()
+            .to_string();
         let database = Database::connect("sqlite::memory:").await?;
         database
             .execute(Statement::from_string(
@@ -570,9 +593,9 @@ mod tests {
             OpenfoldQueueArgs {
                 input_id: "6KWC_1".into(),
                 input_sequence: "GSTI".into(),
-                fasta_dir: "fasta".into(),
-                data_dir: "data".into(),
-                alignment_dir: Some("alignments".into()),
+                fasta_dir: ".".into(),
+                data_dir: ".".into(),
+                alignment_dir: Some(".".into()),
                 model_device: "cpu".into(),
                 cpus: 1,
                 residue_idx: 1,
@@ -596,8 +619,39 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
                 .expect("execution parameters should be valid JSON"),
-            json!({"fasta_dir": "fasta", "data_dir": "data", "alignment_dir": "alignments", "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 1})
+            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 1})
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn queue_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
+        let database = Database::connect("sqlite::memory:").await?;
+        let missing_path = "definitely-missing-vizfold-local-path";
+
+        let error = queue_openfold_run(
+            &database,
+            OpenfoldQueueArgs {
+                input_id: "6KWC_1".into(),
+                input_sequence: "GSTI".into(),
+                fasta_dir: missing_path.into(),
+                data_dir: ".".into(),
+                alignment_dir: None,
+                model_device: "cpu".into(),
+                cpus: 1,
+                residue_idx: 1,
+                demo_attn: false,
+                save_outputs: true,
+                num_recycles_save: 1,
+                use_precomputed_alignments: false,
+            },
+        )
+        .await
+        .expect_err("missing local path should fail");
+
+        assert!(error.to_string().contains(
+            "--fasta-dir path 'definitely-missing-vizfold-local-path' could not be resolved"
+        ));
         Ok(())
     }
 }
