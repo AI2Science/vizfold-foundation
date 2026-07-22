@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
 use sea_orm::DbErr;
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
@@ -216,14 +216,6 @@ async fn queue_openfold_run(
         ));
     }
 
-    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir)?;
-    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir)?;
-    let alignment_dir = args
-        .alignment_dir
-        .as_deref()
-        .map(|path| canonicalize_local_path("--alignment-dir", path))
-        .transpose()?;
-
     let backend = model_backends::find_by_slug(database, "openfold")
         .await?
         .ok_or_else(seed_required_error)?;
@@ -239,6 +231,14 @@ async fn queue_openfold_run(
                 && profile.invocation_kind == "local_subprocess"
         })
         .ok_or_else(seed_required_error)?;
+    let working_dir = local_openfold_working_dir(&profile)?;
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir, &working_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir, &working_dir)?;
+    let alignment_dir = args
+        .alignment_dir
+        .as_deref()
+        .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
+        .transpose()?;
 
     let mut execution_parameters = serde_json::Map::from_iter([
         ("fasta_dir".into(), json!(fasta_dir)),
@@ -283,12 +283,42 @@ async fn queue_openfold_run(
     Ok(())
 }
 
-fn canonicalize_local_path(field: &str, path: &str) -> Result<String, DbErr> {
-    std::fs::canonicalize(Path::new(path))
+fn local_openfold_working_dir(
+    profile: &crate::core::entities::model_invocation_profiles::Model,
+) -> Result<String, DbErr> {
+    let config: serde_json::Value =
+        serde_json::from_str(&profile.config_json).map_err(|error| {
+            DbErr::Custom(format!(
+                "local OpenFold invocation profile config_json must be valid JSON: {error}"
+            ))
+        })?;
+    config
+        .get("working_dir")
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            DbErr::Custom(
+                "local OpenFold invocation profile config_json requires a non-empty working_dir"
+                    .into(),
+            )
+        })
+}
+
+fn canonicalize_local_path(field: &str, path: &str, working_dir: &str) -> Result<String, DbErr> {
+    let original_path = Path::new(path);
+    let attempted_path = if original_path.is_absolute() {
+        PathBuf::from(original_path)
+    } else {
+        PathBuf::from(working_dir).join(original_path)
+    };
+
+    std::fs::canonicalize(&attempted_path)
         .map(|path| path.display().to_string())
         .map_err(|error| {
             DbErr::Custom(format!(
-                "{field} path '{path}' could not be resolved: {error}"
+                "{field} original path '{path}' could not be resolved at '{}': {error}",
+                attempted_path.display()
             ))
         })
 }
@@ -574,8 +604,8 @@ mod tests {
 
     #[tokio::test]
     async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
-        let local_path = std::fs::canonicalize(".")
-            .expect("current working directory should be canonicalizable")
+        let local_path = std::fs::canonicalize(crate::core::config::repository_root())
+            .expect("repository root should be canonicalizable")
             .display()
             .to_string();
         let database = Database::connect("sqlite::memory:").await?;
@@ -627,6 +657,14 @@ mod tests {
     #[tokio::test]
     async fn queue_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
         let database = Database::connect("sqlite::memory:").await?;
+        database
+            .execute(Statement::from_string(
+                database.get_database_backend(),
+                "PRAGMA foreign_keys = ON".to_owned(),
+            ))
+            .await?;
+        db::migrate_database(&database).await?;
+        seed::seed_defaults(&database).await?;
         let missing_path = "definitely-missing-vizfold-local-path";
 
         let error = queue_openfold_run(
@@ -650,8 +688,13 @@ mod tests {
         .expect_err("missing local path should fail");
 
         assert!(error.to_string().contains(
-            "--fasta-dir path 'definitely-missing-vizfold-local-path' could not be resolved"
+            "--fasta-dir original path 'definitely-missing-vizfold-local-path' could not be resolved"
         ));
+        assert!(
+            error
+                .to_string()
+                .contains(&crate::core::config::repository_root().display().to_string())
+        );
         Ok(())
     }
 }
