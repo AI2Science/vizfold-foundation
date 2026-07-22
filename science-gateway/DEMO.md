@@ -139,7 +139,106 @@ alignment_dir/1UBQ_1
 
 `VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is the base output location. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
 
-## 6. Common failure modes
+## 6. CLI workflow alternative
+
+The example above is useful for exercising the planner directly. The `vizfold` CLI is the better development path for testing the full persisted workflow: seeded model/target/profile records, queued runs, execution status, and registered output artifacts.
+
+Run these commands from the executor crate:
+
+```bash
+cd vizfold-foundation/science-gateway/apps/executor
+```
+
+### Set up the local output workspace
+
+The seeded `local-openfold` profile uses the repository root as its working directory and writes runs below:
+
+```text
+<repo-root>/science-gateway/openfold-demo-output/<run-id>
+```
+
+Create the output parent before executing a run:
+
+```bash
+mkdir -p ../../../science-gateway/openfold-demo-output
+```
+
+In PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force -Path ../../../science-gateway/openfold-demo-output
+```
+
+### Seed and inspect the local records
+
+Seed is safe to repeat. It creates (or refreshes) the development OpenFold backend, `local-openfold` target, and matching `local_subprocess` invocation profile.
+
+```bash
+cargo run --bin vizfold -- seed
+cargo run --bin vizfold -- list models
+cargo run --bin vizfold -- list targets
+cargo run --bin vizfold -- list profiles
+```
+
+Verify that the output includes:
+
+* model backend `openfold`;
+* execution target `local-openfold` with type `local`;
+* an invocation profile that references those two IDs and has invocation kind `local_subprocess`.
+
+The CLI uses `DATABASE_URL` when present; otherwise it uses the executor's local SQLite default. Set `DATABASE_URL` if you want a separate development database.
+
+### Queue an OpenFold run
+
+Unlike shell-relative paths, relative local paths supplied to `queue-run` are resolved from the seeded profile's repository-root `working_dir`. The following paths are therefore relative to `vizfold-foundation`, even though the command is executed from the executor crate.
+
+```bash
+cargo run --bin vizfold -- queue-run openfold \
+  --input-id 6KWC_1 \
+  --input-sequence GSTIQPGTGYNNGYFYSYWNDGHGGVTYTNGPGGQFSVNWSNSGEFVGGKGWQPGTKNKVINFSGSYNPNGNSYLSVYGWSRNPLIEYYIVENFGTYNPSTGATKLGEVTSDGSVYDIYRTQRVNQPSIIGTATFYQYWSVRRNHRSSGSVNTANHFNAWAQQGLTLGTMDYQIVAVQGYFSSGSASITVS \
+  --fasta-dir examples/monomer/fasta_dir_6KWC \
+  --data-dir ../vizfold_data \
+  --alignment-dir examples/monomer/alignments \
+  --model-device cuda:0 \
+  --residue-idx 1 \
+  --demo-attn \
+  --use-precomputed-alignments
+```
+
+`--data-dir ../vizfold_data` matches the directory layout in this guide. All local FASTA, data, and alignment paths must exist when queuing; the CLI stores their canonical absolute paths in the run record.
+
+The command prints a run ID. Inspect it before execution:
+
+```bash
+cargo run --bin vizfold -- list runs
+cargo run --bin vizfold -- show run <run-id>
+```
+
+Confirm its status is `submitted`, its input ID is correct, and its backend/target/profile IDs point to the seeded OpenFold records.
+
+### Execute, register artifacts, and inspect the result
+
+Activate the Python/OpenFold environment first, as described above, then execute the queued run:
+
+```bash
+cargo run --bin vizfold -- execute-run <run-id>
+```
+
+The command prints every preflight check and either launches the configured OpenFold command or reports why execution was skipped. On a successful run, the output workspace is `<repo-root>/science-gateway/openfold-demo-output/<run-id>`.
+
+Register the known output directories after execution:
+
+```bash
+cargo run --bin vizfold -- register-artifacts <run-id>
+cargo run --bin vizfold -- register-artifacts <run-id>
+cargo run --bin vizfold -- show run <run-id>
+```
+
+The first registration records the workspace as `run_output_directory` and, if present, its `attention` child as `attention_output_directory`. The second call is idempotent and reports those artifacts as already present. `show run` lists the resulting artifact IDs, types, formats, and storage paths.
+
+Artifact registration does not block failed or incomplete runs: it prints a warning because available output may be partial, then registers only directories that actually exist.
+
+## 7. Common failure modes
 
 ### `ModuleNotFoundError: No module named 'torch'`
 
@@ -203,7 +302,7 @@ For the default demo:
 examples/monomer/alignments/1UBQ_1
 ```
 
-## 7. Notes
+## 8. Notes
 
 This demo does not automatically register newly generated alignments as reusable artifacts.
 

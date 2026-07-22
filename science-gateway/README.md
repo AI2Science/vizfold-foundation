@@ -82,6 +82,54 @@ cargo run
 
 The current HTTP health endpoint is available at [http://127.0.0.1:3001/health](http://127.0.0.1:3001/health).
 
+### Executor CLI
+
+The `vizfold` CLI provides a development workflow for inspecting and operating persisted OpenFold runs. Run it from `science-gateway/apps/executor`:
+
+```bash
+cargo run --bin vizfold -- seed
+cargo run --bin vizfold -- list models
+cargo run --bin vizfold -- list targets
+cargo run --bin vizfold -- list profiles
+cargo run --bin vizfold -- list runs
+```
+
+Queueing is model-specific because a run does not exist yet. Once queued, operations are run-centric:
+
+```bash
+cargo run --bin vizfold -- queue-run openfold ...
+cargo run --bin vizfold -- execute-run <run-id>
+cargo run --bin vizfold -- register-artifacts <run-id>
+cargo run --bin vizfold -- show run <run-id>
+```
+
+`seed` is safe to repeat and ensures the local OpenFold backend, `local-openfold` target, and matching invocation profile are available. The CLI uses `DATABASE_URL` when set and otherwise uses the SQLite default described below. For the complete local OpenFold setup and an end-to-end CLI workflow, see [DEMO.md](DEMO.md).
+
+### Installing the CLI
+
+Build the development binary from `science-gateway/apps/executor`:
+
+```bash
+cargo build --bin vizfold
+./target/debug/vizfold --help
+```
+
+On PowerShell, run the built binary with:
+
+```powershell
+.\target\debug\vizfold.exe --help
+```
+
+To install only the CLI binary into Cargo's bin directory (typically `~/.cargo/bin`) so it can be invoked directly, use:
+
+```bash
+cargo install --path . --bin vizfold
+vizfold --help
+vizfold seed
+```
+
+Use `cargo install --path . --bin vizfold --force` to update an existing installation. This is currently a development/demo CLI: the seeded local OpenFold profile assumes the checked-out repository layout, so build and run it against that checkout rather than treating it as a general standalone installed application.
+
 ### Database and SeaORM Migrations
 
 The executor uses SQLite and SeaORM migrations.
@@ -124,10 +172,7 @@ export DATABASE_URL="sqlite://data/vizfold-dev.db?mode=rwc"
 cargo run
 ```
 
-Important limitation:
-
-- There is not currently a separate CLI command in this repo for running SeaORM migrations independently of the executor process.
-- The supported way to form the DB and apply migrations right now is to start the executor.
+The `vizfold seed` command also opens the database and applies migrations before seeding. There is not currently a migrations-only CLI command; use either executor startup or `vizfold seed` for local development setup.
 
 ### Resetting an Existing Development Database
 
