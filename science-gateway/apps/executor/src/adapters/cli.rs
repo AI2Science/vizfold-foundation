@@ -3,10 +3,12 @@ use sea_orm::DbErr;
 use serde_json::json;
 
 use crate::core::{
+    commands::LocalCommandRunner,
     db,
+    preflight::PreflightStatus,
     repositories::{execution_targets, model_backends, model_invocation_profiles},
     seed::seed_defaults,
-    services::runs,
+    services::{openfold_execution::execute_openfold_run, runs},
 };
 
 #[derive(Debug, Parser)]
@@ -26,6 +28,8 @@ enum Command {
     Show(ShowArgs),
     /// Queue a run for a supported model backend.
     QueueRun(QueueRunArgs),
+    /// Execute a queued run for a supported model backend.
+    ExecuteRun(ExecuteRunArgs),
 }
 
 #[derive(Debug, Args)]
@@ -102,6 +106,18 @@ struct OpenfoldQueueArgs {
     use_precomputed_alignments: bool,
 }
 
+#[derive(Debug, Args)]
+struct ExecuteRunArgs {
+    #[command(subcommand)]
+    model: ExecuteRunModel,
+}
+
+#[derive(Debug, Subcommand)]
+enum ExecuteRunModel {
+    /// Execute an OpenFold run.
+    Openfold { run_id: i32 },
+}
+
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
     let database = db::connect_and_migrate().await?;
@@ -123,9 +139,65 @@ pub async fn run() -> Result<(), DbErr> {
         Command::QueueRun(queue) => match queue.model {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
         },
+        Command::ExecuteRun(execute) => match execute.model {
+            ExecuteRunModel::Openfold { run_id } => execute_openfold(&database, run_id).await?,
+        },
     }
 
     Ok(())
+}
+
+async fn execute_openfold(
+    database: &sea_orm::DatabaseConnection,
+    run_id: i32,
+) -> Result<(), DbErr> {
+    println!("Executing OpenFold run {run_id}");
+    let result = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
+
+    if let Some(report) = result.preflight_report {
+        let outcome = if report.has_failures() {
+            "failed"
+        } else {
+            "passed"
+        };
+        println!("\nPreflight: {outcome}");
+        for check in report.checks {
+            let message = check.message.as_deref().unwrap_or("no details");
+            println!(
+                "[{}] {}: {}",
+                preflight_status_label(check.status),
+                check.name,
+                message
+            );
+        }
+    }
+
+    if let Some(reason) = result.skipped_execution_reason {
+        println!("\nExecution skipped:\n{reason}");
+    }
+
+    if let Some(output) = result.command_output {
+        println!("\nCommand output:");
+        println!("exit_code: {}", output.exit_code);
+        println!("stdout:\n{}", output.stdout);
+        println!("stderr:\n{}", output.stderr);
+    }
+
+    if let Some(run) = runs::get_run_with_artifacts(database, run_id)
+        .await?
+        .map(|result| result.run)
+    {
+        println!("\nFinal status: {}", run.status);
+    }
+    Ok(())
+}
+
+fn preflight_status_label(status: PreflightStatus) -> &'static str {
+    match status {
+        PreflightStatus::Passed => "passed",
+        PreflightStatus::Warning => "warning",
+        PreflightStatus::Failed => "failed",
+    }
 }
 
 async fn queue_openfold_run(
@@ -464,6 +536,19 @@ mod tests {
                     use_precomputed_alignments: true,
                     ..
                 })
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_execute_openfold_run() {
+        let cli = Cli::try_parse_from(["vizfold", "execute-run", "openfold", "1"])
+            .expect("execute-run command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::ExecuteRun(ExecuteRunArgs {
+                model: ExecuteRunModel::Openfold { run_id: 1 }
             })
         ));
     }
