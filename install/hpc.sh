@@ -52,6 +52,7 @@ hpc::submit() {
             --account="$ACCOUNT" --partition="$PARTITION"
             --nodes=1 --ntasks=1 --cpus-per-task="${OPENFOLD_BUILD_CPUS:-8}"
             --mem="${OPENFOLD_BUILD_MEM:-24G}" --time="${OPENFOLD_BUILD_TIME:-02:00:00}"
+            ${OPENFOLD_BUILD_GRES:+--gres="$OPENFOLD_BUILD_GRES"}   # Delta-AI rejects CPU-only jobs
             --output="$PREFIX/install-%j.log" --export=ALL
         )
     fi
