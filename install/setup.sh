@@ -49,7 +49,9 @@ echo "prefix=$PREFIX repo=$REPO env=$ENV_NAME max_cuda=$MAX_CUDA mirror=$MIRROR$
 test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
 
 step micromamba
-[ -x "$MM" ] || curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest |
+# linux-64 or linux-aarch64 (Grace-Hopper), whichever this node is.
+case $(uname -m) in aarch64|arm64) MM_ARCH=linux-aarch64 ;; *) MM_ARCH=linux-64 ;; esac
+[ -x "$MM" ] || curl -Ls "https://micro.mamba.pm/api/micromamba/$MM_ARCH/latest" |
     tar -xj -C "$PREFIX" bin/micromamba
 
 step "conda env $ENV_NAME"
@@ -111,9 +113,15 @@ else
 fi
 
 step openfold
-# No build isolation: the extension must link against this env's torch.
+# No build isolation: the extension must link against this env's torch. Build in a
+# curated env -- a site's modules leak CC/CXX/CPATH/LD_LIBRARY_PATH for their own
+# gcc, and nvcc then cannot drive this env's toolchain (cc1plus/crt not found).
+# env -i drops all of that; PATH puts the env's compiler first. Runtime is untouched.
 python3 -c 'import torch, openfold, attn_core_inplace_cuda' 2>/dev/null ||
-    (cd "$REPO" && CUDA_HOME=$CONDA_PREFIX pip install --no-build-isolation -e .)
+    env -i HOME="$HOME" PATH="$CONDA_PREFIX/bin:/usr/bin:/bin" \
+        CUDA_HOME="$CONDA_PREFIX" TMPDIR="$TMPDIR" MAX_JOBS="$MAX_JOBS" \
+        TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST" \
+        pip install --no-build-isolation -e "$REPO"
 
 step datasets
 if [ "$MIRROR" = yes ]; then
@@ -124,8 +132,9 @@ if [ "$MIRROR" = yes ]; then
     # Guard on have(), not the symlink: writing into a linked read-only mirror fails.
     if ! have "$UNICLUST/uniclust30_2018_08"; then
         mkdir -p "$UNICLUST"
-        for f in "$AF2"/uniref30/UniRef30_2021_03*; do
-            [ -e "$f" ] && ln -sfn "$f" "$UNICLUST/uniclust30_2018_08${f##*UniRef30_2021_03}"
+        for f in "$AF2"/uniref30/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]*; do
+            [ -e "$f" ] || continue
+            ln -sfn "$f" "$UNICLUST/uniclust30_2018_08${f##*/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]}"
         done
     fi
 else
