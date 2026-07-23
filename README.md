@@ -6,7 +6,7 @@ Vizfold is a platform for running protein-structure models and inspecting what t
 2. Visualization & analysis: Explore, visualize, and analyze the extracted activations and attention maps.
 
 The `vizfold` CLI is the platform; a model backend plugs in underneath it. **OpenFold** is
-today's default (and only) backend, installed by `vizfold init`; the same `install/` scripts
+today's default (and only) backend, installed by `vizfold install`; the same `install/` scripts
 are built to host others (openfold3, boltz, esmfold) as they land.
 
 ---
@@ -28,18 +28,31 @@ release and installs it to `~/.local/bin` (set `VIZFOLD_VERSION=vX.Y.Z` to pin a
 install the OpenFold backend:
 
 ```bash
-vizfold init
+vizfold install
 ```
 
-`vizfold init` clones the matching checkout to `$HOME/vizfold-src` on first run (the binary
+`vizfold install` clones the matching checkout to `$HOME/vizfold-src` on first run (the binary
 ships only itself; the `install/` scripts and dashboard come from there), works out where it is
 running, picks the site, submits the OpenFold install to the scheduler, and prints the exact
 command to fold a test sequence. Cold: ~8 min on NCSA Delta, ~25 min where the AlphaFold
 databases have to be downloaded.
 
+### Uninstall
+
+```bash
+vizfold uninstall
+```
+
+Lists everything the install generated — the conda environment and the rest of the install
+prefix, the package caches beside it, the symlinks and build droppings it left in the checkout,
+the run database, the checkout it cloned into `$HOME/vizfold-src`, and
+`~/.config/vizfold/vizfold.json` — then removes it once you confirm (`--yes` skips the prompt).
+Fold outputs under the prefix, a checkout you pointed it at yourself, and the `vizfold` binary
+are left alone; drop the binary with `rm ~/.local/bin/vizfold`.
+
 ### Supported clusters
 
-Dispatch is on the SLURM `ClusterName`, so on these machines `vizfold init` needs no
+Dispatch is on the SLURM `ClusterName`, so on these machines `vizfold install` needs no
 arguments. Accounts and the install prefix are worked out live (your project space, the
 accounts you can charge); the values below are what a fresh install settles on.
 
@@ -54,7 +67,7 @@ accounts you can charge); the values below are what a fresh install settles on.
 | `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `<scratch>/vizfold` (`/storage/ice1/…`) |
 | `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `<scratch>/vizfold` (`/storage/scratch1/…`) |
 
-Legend — ✅ install + fold verified end-to-end from `vizfold init` (fold → 2839-atom relaxed
+Legend — ✅ install + fold verified end-to-end from `vizfold install` (fold → 2839-atom relaxed
 structure); ◐ install run on the cluster with its site-specific fixes, final fold not re-confirmed
 in this pass⁵; ⚙️ site profile written and its paths probed live, full install not yet run.
 
@@ -83,7 +96,7 @@ exactly what you care about and nothing else:
 
 | | | |
 | --- | --- | --- |
-| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold init` |
+| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold install` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
@@ -127,7 +140,7 @@ memory:
 To override for one run, put the variable inline — it wins over both files:
 
 ```bash
-OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 vizfold init
+OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 vizfold install
 ```
 
 Only the login-specific atom is discovered at run time (the allocation, account, or install
