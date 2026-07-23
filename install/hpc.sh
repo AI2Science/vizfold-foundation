@@ -1,9 +1,9 @@
 #!/bin/bash
-# hpc.sh -- the shared SLURM site flow. A <site>.sh sets REPO, sources this,
-# loads its <site>.json, works out its install prefix (and accounts, if they are
-# not just the scheduler default), then calls hpc::submit. Library; do not run.
+# hpc.sh -- the shared SLURM site flow. A <site>.sh sources this (which sets REPO
+# via config.sh), loads its <site>.json, works out its install prefix (and
+# accounts, if not just the scheduler default), then calls hpc::submit. Library.
 #
-#   REPO=...; . "$REPO/install/hpc.sh"
+#   . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 #   config::site_defaults "${BASH_SOURCE[0]}"
 #   hpc::submit "<default install prefix>" ["<default slurm account>"]
 #
@@ -16,9 +16,9 @@
 [ -n "${HPC_SH:-}" ] && return 0
 HPC_SH=1
 
-. "$REPO/install/interactive.sh"
-. "$REPO/install/config.sh"
-type die >/dev/null 2>&1 || die() { echo "FATAL: $*" >&2; exit 1; }
+# config.sh sets REPO and die(); both live beside this file.
+. "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
 hpc::submit() {
     local prefix_default=$1 account_default=${2:-}

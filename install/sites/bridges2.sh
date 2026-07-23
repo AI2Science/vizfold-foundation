@@ -3,8 +3,7 @@
 # AF2 mirror in <site>.json. Project space and account share the grant id.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/hpc.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
 # $HOME (/jet) is tiny; install under the grant's /ocean project space.

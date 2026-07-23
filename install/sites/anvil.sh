@@ -3,8 +3,7 @@
 # No database mirror; setup.sh fetches the parameters and example templates.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/hpc.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
 # $HOME is small; install on $PROJECT (snapshotted, for software, not purged),

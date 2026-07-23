@@ -3,8 +3,7 @@
 # Reached from a site script; ../install.sh picks one. Idempotent per step.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/config.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/config.sh"   # sets REPO, die
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 AF2=${OPENFOLD_AF2_ROOT:-}          # a site with a database mirror names it
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
@@ -41,7 +40,6 @@ REQUIRED=("$REPO/openfold/resources/params/params_model_1_ptm.npz" "$STEREO"
 )
 BINARIES=(jackhmmer hhblits hhsearch)
 
-die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo "== $* (+$((SECONDS))s)"; }
 have() { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 

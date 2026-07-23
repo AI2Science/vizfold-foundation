@@ -3,8 +3,7 @@
 # Per-allocation project space and -delta-{cpu,gpu} accounts; AF2 mirror in <site>.json.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/hpc.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
 # Project space is /work/nvme/<allocation>/<user>, which names the accounts too.

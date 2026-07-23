@@ -35,6 +35,8 @@ if [ ! -f "$REPO/setup.py" ]; then
 fi
 test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
 
+# Pin REPO for the libraries (config.sh reads OPENFOLD_HOME) before sourcing them.
+export OPENFOLD_HOME=$REPO
 . "$REPO/install/interactive.sh"
 . "$REPO/install/config.sh"
 SITES=$REPO/install/sites
@@ -45,5 +47,5 @@ SITE=$(interactive::resolve OPENFOLD_SITE "site" "$CLUSTER")
 test -f "$SITES/$SITE.sh" ||
     die "no site script for $SITE; have: $(cd "$SITES" && echo *.sh | sed 's/\.sh//g')"
 
-export OPENFOLD_HOME=$REPO OPENFOLD_SITE=$SITE
+export OPENFOLD_SITE=$SITE
 exec bash "$SITES/$SITE.sh"

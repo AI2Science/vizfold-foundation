@@ -5,8 +5,7 @@
 #   OPENFOLD_PREFIX=<prefix> run/fold.sh 6KWC_1
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/config.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../install/config.sh"   # sets REPO, die
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
 ENV_PREFIX=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME}
@@ -36,8 +35,6 @@ OUTPUT_DIR=${OPENFOLD_OUTPUT_DIR:-$PREFIX/outputs/$INPUT_ID}
 CONFIG_PRESET=${OPENFOLD_CONFIG_PRESET:-model_1_ptm}
 MODEL_DEVICE=${OPENFOLD_MODEL_DEVICE:-cuda:0}
 CPUS=${OPENFOLD_CPUS:-${SLURM_CPUS_PER_TASK:-8}}
-
-die() { echo "FATAL: $*" >&2; exit 1; }
 
 MM=$PREFIX/bin/micromamba
 [ -x "$MM" ] || die "nothing installed at $PREFIX; run install.sh first"

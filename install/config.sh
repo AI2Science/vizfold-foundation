@@ -11,6 +11,12 @@
 [ -n "${CONFIG_SH:-}" ] && return 0
 CONFIG_SH=1
 
+# The base every install script shares: where the checkout is, and how to fail.
+# OPENFOLD_HOME wins (install.sh exports it); otherwise walk up from this library,
+# which lives at <repo>/install/, to the setup.py at the checkout root.
+REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
+die() { echo "FATAL: $*" >&2; exit 1; }
+
 config::file() {
     echo "${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}"
 }

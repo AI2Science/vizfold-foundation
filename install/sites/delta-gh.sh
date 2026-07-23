@@ -4,8 +4,7 @@
 # queue, so the build runs on a GH200 node. No mirror; params are downloaded.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)}
-. "$REPO/install/hpc.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
 # environment.yml pins mkl (x86-only) and deepspeed=*=cuda* (no aarch64 CUDA build),
