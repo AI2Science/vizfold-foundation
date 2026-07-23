@@ -1,5 +1,6 @@
 {
   "OPENFOLD_AF2_ROOT": "/ocean/datasets/community/alphafold/v2.3.2",
+  "OPENFOLD_BUILD_CPUS": "16",
   "OPENFOLD_EXAMPLE": "6KWC_1",
   "OPENFOLD_GPU_GRES": "gpu:v100-32:1",
   "OPENFOLD_GPU_PARTITION": "GPU-shared",

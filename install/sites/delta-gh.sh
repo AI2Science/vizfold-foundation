@@ -8,6 +8,11 @@ REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.
 . "$REPO/install/hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
+# environment.yml pins mkl (x86-only) and deepspeed=*=cuda* (no aarch64 CUDA build),
+# so the env cannot solve on Grace-Hopper yet. Refuse here rather than burn GH200
+# hours on a build that dies at the solver. Needs an aarch64 environment variant.
+[ "$(uname -m)" = aarch64 ] && die "Delta-AI is aarch64: environment.yml (mkl, deepspeed=cuda) has no aarch64 solve. Needs an aarch64 env variant (nomkl/openblas + deepspeed via pip)."
+
 # Delta-AI shares Delta's /work/nvme; accounts are <allocation>-dtai-gh.
 usable() {
     local dir alloc accounts
