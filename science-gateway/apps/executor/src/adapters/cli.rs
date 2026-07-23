@@ -1,0 +1,777 @@
+use clap::{ArgAction, Args, Parser, Subcommand};
+use sea_orm::DbErr;
+use serde_json::json;
+use std::path::{Path, PathBuf};
+
+use crate::core::{
+    commands::LocalCommandRunner,
+    db,
+    output_locations::resolve_output_location,
+    preflight::PreflightStatus,
+    repositories::{execution_targets, model_backends, model_invocation_profiles},
+    seed::seed_defaults,
+    services::{
+        artifacts, openfold_artifacts::register_known_openfold_artifacts,
+        openfold_execution::execute_openfold_run, runs,
+    },
+};
+
+#[derive(Debug, Parser)]
+#[command(name = "vizfold", about = "VizFold executor administration CLI")]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Seed the default executor records.
+    Seed,
+    /// List executor records.
+    List(ListArgs),
+    /// Show one executor record.
+    Show(ShowArgs),
+    /// Queue a run for a supported model backend.
+    QueueRun(QueueRunArgs),
+    /// Execute a queued run.
+    ExecuteRun { run_id: i32 },
+    /// Register known artifacts for a completed run.
+    RegisterArtifacts { run_id: i32 },
+}
+
+#[derive(Debug, Args)]
+struct ListArgs {
+    #[command(subcommand)]
+    resource: ListResource,
+}
+
+#[derive(Debug, Subcommand)]
+enum ListResource {
+    /// List model backends.
+    Models,
+    /// List execution targets.
+    Targets,
+    /// List model invocation profiles.
+    Profiles,
+    /// List runs.
+    Runs {
+        /// Restrict results to runs with this status.
+        #[arg(long)]
+        status: Option<String>,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ShowArgs {
+    #[command(subcommand)]
+    resource: ShowResource,
+}
+
+#[derive(Debug, Subcommand)]
+enum ShowResource {
+    /// Show a run and its artifacts.
+    Run { run_id: i32 },
+}
+
+#[derive(Clone, Debug, Args)]
+struct QueueRunArgs {
+    #[command(subcommand)]
+    model: QueueRunModel,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+enum QueueRunModel {
+    /// Queue an OpenFold run.
+    Openfold(OpenfoldQueueArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+struct OpenfoldQueueArgs {
+    #[arg(long)]
+    input_id: String,
+    #[arg(long)]
+    input_sequence: String,
+    #[arg(long)]
+    fasta_dir: String,
+    #[arg(long)]
+    data_dir: String,
+    #[arg(long)]
+    alignment_dir: Option<String>,
+    #[arg(long, default_value = "cpu")]
+    model_device: String,
+    #[arg(long, default_value_t = 1)]
+    cpus: i64,
+    #[arg(long, default_value_t = 1)]
+    residue_idx: i64,
+    #[arg(long)]
+    demo_attn: bool,
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    save_outputs: bool,
+    #[arg(long, default_value_t = 1)]
+    num_recycles_save: i64,
+    #[arg(long)]
+    use_precomputed_alignments: bool,
+}
+
+pub async fn run() -> Result<(), DbErr> {
+    let cli = Cli::parse();
+    let database = db::connect_and_migrate().await?;
+
+    match cli.command {
+        Command::Seed => {
+            seed_defaults(&database).await?;
+            println!("Seeded default executor records.");
+        }
+        Command::List(list) => match list.resource {
+            ListResource::Models => list_models(&database).await?,
+            ListResource::Targets => list_targets(&database).await?,
+            ListResource::Profiles => list_profiles(&database).await?,
+            ListResource::Runs { status } => list_runs(&database, status.as_deref()).await?,
+        },
+        Command::Show(show) => match show.resource {
+            ShowResource::Run { run_id } => show_run(&database, run_id).await?,
+        },
+        Command::QueueRun(queue) => match queue.model {
+            QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
+        },
+        Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
+        Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
+    }
+
+    Ok(())
+}
+
+async fn register_artifacts(
+    database: &sea_orm::DatabaseConnection,
+    run_id: i32,
+) -> Result<(), DbErr> {
+    let run = runs::get_run_with_artifacts(database, run_id)
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?
+        .run;
+    if run.status != "completed" {
+        println!(
+            "Warning: run {run_id} has status '{}'; registered artifacts may be partial.",
+            run.status
+        );
+    }
+    let backend = model_backends::find_by_id(database, run.model_backend_id)
+        .await?
+        .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
+    if backend.slug != "openfold" {
+        return Err(DbErr::Custom(format!(
+            "artifact registration is currently only implemented for OpenFold runs (run {run_id} uses backend '{}')",
+            backend.slug
+        )));
+    }
+
+    let profile = model_invocation_profiles::find_by_id(database, run.invocation_profile_id)
+        .await?
+        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let workspace = resolve_output_location(&profile, &run)?;
+    let expected_paths = [
+        ("run_output_directory", workspace.clone()),
+        ("attention_output_directory", workspace.join("attention")),
+    ];
+    let existing = artifacts::list_artifacts_for_run(database, run_id).await?;
+    let artifacts = register_known_openfold_artifacts(database, run_id).await?;
+
+    println!("Registered artifacts for run {run_id}");
+    println!("\nOutput workspace:\n  {}", workspace.display());
+    println!("\nArtifacts:");
+    for (artifact_type, path) in expected_paths {
+        let storage_uri = path.display().to_string();
+        if !path.is_dir() {
+            println!("  [skipped] {artifact_type} -> path does not exist: {storage_uri}");
+        } else if existing
+            .iter()
+            .any(|artifact| artifact.storage_uri == storage_uri)
+        {
+            println!("  [already present] {artifact_type} -> {storage_uri}");
+        } else if artifacts
+            .iter()
+            .any(|artifact| artifact.storage_uri == storage_uri)
+        {
+            println!("  [registered] {artifact_type} -> {storage_uri}");
+        } else {
+            println!("  [skipped] {artifact_type} -> not registered");
+        }
+    }
+    Ok(())
+}
+
+async fn execute_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
+    let run = runs::get_run_with_artifacts(database, run_id)
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?
+        .run;
+    let backend = model_backends::find_by_id(database, run.model_backend_id)
+        .await?
+        .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
+
+    if backend.slug != "openfold" {
+        return Err(DbErr::Custom(format!(
+            "run {run_id} uses backend '{}'; only OpenFold runs can be executed",
+            backend.slug
+        )));
+    }
+
+    execute_openfold(database, run_id).await
+}
+
+async fn execute_openfold(
+    database: &sea_orm::DatabaseConnection,
+    run_id: i32,
+) -> Result<(), DbErr> {
+    println!("Executing OpenFold run {run_id}");
+    let result = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
+
+    if let Some(report) = result.preflight_report {
+        let outcome = if report.has_failures() {
+            "failed"
+        } else {
+            "passed"
+        };
+        println!("\nPreflight: {outcome}");
+        for check in report.checks {
+            let message = check.message.as_deref().unwrap_or("no details");
+            println!(
+                "[{}] {}: {}",
+                preflight_status_label(check.status),
+                check.name,
+                message
+            );
+        }
+    }
+
+    if let Some(reason) = result.skipped_execution_reason {
+        println!("\nExecution skipped:\n{reason}");
+    }
+
+    if let Some(output) = result.command_output {
+        println!("\nCommand output:");
+        println!("exit_code: {}", output.exit_code);
+        println!("stdout:\n{}", output.stdout);
+        println!("stderr:\n{}", output.stderr);
+    }
+
+    if let Some(run) = runs::get_run_with_artifacts(database, run_id)
+        .await?
+        .map(|result| result.run)
+    {
+        println!("\nFinal status: {}", run.status);
+    }
+    Ok(())
+}
+
+fn preflight_status_label(status: PreflightStatus) -> &'static str {
+    match status {
+        PreflightStatus::Passed => "passed",
+        PreflightStatus::Warning => "warning",
+        PreflightStatus::Failed => "failed",
+    }
+}
+
+async fn queue_openfold_run(
+    database: &sea_orm::DatabaseConnection,
+    args: OpenfoldQueueArgs,
+) -> Result<(), DbErr> {
+    if args.use_precomputed_alignments && args.alignment_dir.is_none() {
+        return Err(DbErr::Custom(
+            "--alignment-dir is required when --use-precomputed-alignments is set".into(),
+        ));
+    }
+
+    let backend = model_backends::find_by_slug(database, "openfold")
+        .await?
+        .ok_or_else(seed_required_error)?;
+    let target = execution_targets::find_by_slug(database, "local-openfold")
+        .await?
+        .ok_or_else(seed_required_error)?;
+    let profile = model_invocation_profiles::list(database)
+        .await?
+        .into_iter()
+        .find(|profile| {
+            profile.model_backend_id == backend.id
+                && profile.execution_target_id == target.id
+                && profile.invocation_kind == "local_subprocess"
+        })
+        .ok_or_else(seed_required_error)?;
+    let working_dir = local_openfold_working_dir(&profile)?;
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir, &working_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir, &working_dir)?;
+    let alignment_dir = args
+        .alignment_dir
+        .as_deref()
+        .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
+        .transpose()?;
+
+    let mut execution_parameters = serde_json::Map::from_iter([
+        ("fasta_dir".into(), json!(fasta_dir)),
+        ("data_dir".into(), json!(data_dir)),
+        ("residue_idx".into(), json!(args.residue_idx)),
+        (
+            "use_precomputed_alignments".into(),
+            json!(args.use_precomputed_alignments),
+        ),
+        ("model_device".into(), json!(args.model_device)),
+        ("cpus".into(), json!(args.cpus)),
+    ]);
+    if let Some(alignment_dir) = alignment_dir {
+        execution_parameters.insert("alignment_dir".into(), json!(alignment_dir));
+    }
+
+    let run = runs::submit_run(
+        database,
+        runs::SubmitRunInput {
+            model_backend_id: backend.id,
+            execution_target_id: target.id,
+            invocation_profile_id: profile.id,
+            status: "submitted".into(),
+            input_id: args.input_id,
+            input_sequence: args.input_sequence,
+            model_parameters_json: json!({
+                "save_outputs": args.save_outputs,
+                "demo_attn": args.demo_attn,
+                "num_recycles_save": args.num_recycles_save,
+            })
+            .to_string(),
+            execution_parameters_json: serde_json::Value::Object(execution_parameters).to_string(),
+        },
+    )
+    .await?;
+
+    println!("Queued OpenFold run {}", run.id);
+    println!("status: {}", run.status);
+    println!("input_id: {}", run.input_id);
+    println!("\nNext:");
+    println!("  vizfold execute-run {}", run.id);
+    Ok(())
+}
+
+fn local_openfold_working_dir(
+    profile: &crate::core::entities::model_invocation_profiles::Model,
+) -> Result<String, DbErr> {
+    let config: serde_json::Value =
+        serde_json::from_str(&profile.config_json).map_err(|error| {
+            DbErr::Custom(format!(
+                "local OpenFold invocation profile config_json must be valid JSON: {error}"
+            ))
+        })?;
+    config
+        .get("working_dir")
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            DbErr::Custom(
+                "local OpenFold invocation profile config_json requires a non-empty working_dir"
+                    .into(),
+            )
+        })
+}
+
+fn canonicalize_local_path(field: &str, path: &str, working_dir: &str) -> Result<String, DbErr> {
+    let original_path = Path::new(path);
+    let attempted_path = if original_path.is_absolute() {
+        PathBuf::from(original_path)
+    } else {
+        PathBuf::from(working_dir).join(original_path)
+    };
+
+    std::fs::canonicalize(&attempted_path)
+        .map(|path| path.display().to_string())
+        .map_err(|error| {
+            DbErr::Custom(format!(
+                "{field} original path '{path}' could not be resolved at '{}': {error}",
+                attempted_path.display()
+            ))
+        })
+}
+
+fn seed_required_error() -> DbErr {
+    DbErr::Custom(
+        "OpenFold backend, local-openfold target, or matching profile is missing; run `vizfold seed`"
+            .into(),
+    )
+}
+
+async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
+    let models = model_backends::list(database).await?;
+    print_table(
+        &["ID", "SLUG", "LABEL", "VERSION"],
+        models
+            .iter()
+            .map(|model| {
+                vec![
+                    model.id.to_string(),
+                    model.slug.clone(),
+                    model.label.clone(),
+                    model.version.clone().unwrap_or_else(|| "-".into()),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
+    let targets = execution_targets::list(database).await?;
+    print_table(
+        &["ID", "SLUG", "TYPE", "DESCRIPTION"],
+        targets
+            .iter()
+            .map(|target| {
+                vec![
+                    target.id.to_string(),
+                    target.slug.clone(),
+                    target.target_type.clone(),
+                    target.description.clone().unwrap_or_else(|| "-".into()),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+async fn list_profiles(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
+    let profiles = model_invocation_profiles::list(database).await?;
+    print_table(
+        &["ID", "MODEL ID", "TARGET ID", "INVOCATION KIND"],
+        profiles
+            .iter()
+            .map(|profile| {
+                vec![
+                    profile.id.to_string(),
+                    profile.model_backend_id.to_string(),
+                    profile.execution_target_id.to_string(),
+                    profile.invocation_kind.clone(),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+async fn list_runs(
+    database: &sea_orm::DatabaseConnection,
+    status: Option<&str>,
+) -> Result<(), DbErr> {
+    let runs = runs::list_runs(database).await?;
+    print_table(
+        &[
+            "ID",
+            "STATUS",
+            "MODEL ID",
+            "TARGET ID",
+            "PROFILE ID",
+            "INPUT ID",
+            "SUBMITTED AT",
+        ],
+        runs.iter()
+            .filter(|run| status.is_none_or(|value| run.status == value))
+            .map(|run| {
+                vec![
+                    run.id.to_string(),
+                    run.status.clone(),
+                    run.model_backend_id.to_string(),
+                    run.execution_target_id.to_string(),
+                    run.invocation_profile_id.to_string(),
+                    run.input_id.clone(),
+                    run.submitted_at.to_rfc3339(),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+async fn show_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
+    let Some(result) = runs::get_run_with_artifacts(database, run_id).await? else {
+        return Err(DbErr::Custom(format!("run {run_id} does not exist")));
+    };
+    let run = result.run;
+
+    println!("Run {}", run.id);
+    println!("status: {}", run.status);
+    println!("input_id: {}", run.input_id);
+    println!("model_backend_id: {}", run.model_backend_id);
+    println!("execution_target_id: {}", run.execution_target_id);
+    println!("invocation_profile_id: {}", run.invocation_profile_id);
+    println!("submitted_at: {}", run.submitted_at.to_rfc3339());
+    println!("started_at: {}", format_time(run.started_at));
+    println!("completed_at: {}", format_time(run.completed_at));
+    if let Some(error_message) = run.error_message {
+        println!("error_message: {error_message}");
+    }
+
+    println!("artifacts:");
+    print_table(
+        &["ID", "TYPE ID", "FORMAT", "STORAGE URI"],
+        result
+            .artifacts
+            .iter()
+            .map(|artifact| {
+                vec![
+                    artifact.id.to_string(),
+                    artifact.artifact_type_id.to_string(),
+                    artifact.format.clone(),
+                    artifact.storage_uri.clone(),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+fn format_time(value: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    value
+        .map(|time| time.to_rfc3339())
+        .unwrap_or_else(|| "-".into())
+}
+
+fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
+    let mut widths: Vec<usize> = headers.iter().map(|header| header.len()).collect();
+    for row in &rows {
+        for (index, cell) in row.iter().enumerate() {
+            widths[index] = widths[index].max(cell.len());
+        }
+    }
+
+    print_row(headers.iter().copied(), &widths);
+    let separator = widths
+        .iter()
+        .map(|width| "-".repeat(*width))
+        .collect::<Vec<_>>();
+    print_row(separator.iter().map(String::as_str), &widths);
+    for row in rows {
+        print_row(row.iter().map(String::as_str), &widths);
+    }
+}
+
+fn print_row<'a>(cells: impl IntoIterator<Item = &'a str>, widths: &[usize]) {
+    let rendered = cells
+        .into_iter()
+        .zip(widths)
+        .map(|(cell, width)| format!("{cell:<width$}", width = width))
+        .collect::<Vec<_>>()
+        .join("  ");
+    println!("{rendered}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, Statement};
+
+    use crate::core::{db, seed};
+
+    #[test]
+    fn parses_list_runs_with_status_filter() {
+        let cli = Cli::try_parse_from(["vizfold", "list", "runs", "--status", "failed"])
+            .expect("list runs command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::List(ListArgs {
+                resource: ListResource::Runs { status: Some(status) }
+            }) if status == "failed"
+        ));
+    }
+
+    #[test]
+    fn parses_show_run() {
+        let cli = Cli::try_parse_from(["vizfold", "show", "run", "1"])
+            .expect("show run command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::Show(ShowArgs {
+                resource: ShowResource::Run { run_id: 1 }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_queue_openfold_required_arguments() {
+        let cli = Cli::try_parse_from([
+            "vizfold",
+            "queue-run",
+            "openfold",
+            "--input-id",
+            "6KWC_1",
+            "--input-sequence",
+            "GSTI",
+            "--fasta-dir",
+            "fasta",
+            "--data-dir",
+            "data",
+        ])
+        .expect("queue-run command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::QueueRun(QueueRunArgs {
+                model: QueueRunModel::Openfold(OpenfoldQueueArgs {
+                    input_id,
+                    input_sequence,
+                    fasta_dir,
+                    data_dir,
+                    demo_attn: false,
+                    use_precomputed_alignments: false,
+                    cpus: 1,
+                    ..
+                })
+            }) if input_id == "6KWC_1" && input_sequence == "GSTI" && fasta_dir == "fasta" && data_dir == "data"
+        ));
+    }
+
+    #[test]
+    fn parses_queue_openfold_optional_flags() {
+        let cli = Cli::try_parse_from([
+            "vizfold",
+            "queue-run",
+            "openfold",
+            "--input-id",
+            "6KWC_1",
+            "--input-sequence",
+            "GSTI",
+            "--fasta-dir",
+            "fasta",
+            "--data-dir",
+            "data",
+            "--cpus",
+            "4",
+            "--demo-attn",
+            "--use-precomputed-alignments",
+        ])
+        .expect("queue-run command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::QueueRun(QueueRunArgs {
+                model: QueueRunModel::Openfold(OpenfoldQueueArgs {
+                    cpus: 4,
+                    demo_attn: true,
+                    use_precomputed_alignments: true,
+                    ..
+                })
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_execute_run() {
+        let cli = Cli::try_parse_from(["vizfold", "execute-run", "1"])
+            .expect("execute-run command should parse");
+
+        assert!(matches!(cli.command, Command::ExecuteRun { run_id: 1 }));
+    }
+
+    #[test]
+    fn parses_register_artifacts() {
+        let cli = Cli::try_parse_from(["vizfold", "register-artifacts", "1"])
+            .expect("register-artifacts command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::RegisterArtifacts { run_id: 1 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
+        let local_path = std::fs::canonicalize(crate::core::config::repository_root())
+            .expect("repository root should be canonicalizable")
+            .display()
+            .to_string();
+        let database = Database::connect("sqlite::memory:").await?;
+        database
+            .execute(Statement::from_string(
+                database.get_database_backend(),
+                "PRAGMA foreign_keys = ON".to_owned(),
+            ))
+            .await?;
+        db::migrate_database(&database).await?;
+        seed::seed_defaults(&database).await?;
+
+        queue_openfold_run(
+            &database,
+            OpenfoldQueueArgs {
+                input_id: "6KWC_1".into(),
+                input_sequence: "GSTI".into(),
+                fasta_dir: ".".into(),
+                data_dir: ".".into(),
+                alignment_dir: Some(".".into()),
+                model_device: "cpu".into(),
+                cpus: 1,
+                residue_idx: 1,
+                demo_attn: true,
+                save_outputs: true,
+                num_recycles_save: 1,
+                use_precomputed_alignments: true,
+            },
+        )
+        .await?;
+
+        let runs = runs::list_runs(&database).await?;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "submitted");
+        assert_eq!(runs[0].input_id, "6KWC_1");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&runs[0].model_parameters_json)
+                .expect("model parameters should be valid JSON"),
+            json!({"save_outputs": true, "demo_attn": true, "num_recycles_save": 1})
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
+                .expect("execution parameters should be valid JSON"),
+            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 1})
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn queue_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
+        let database = Database::connect("sqlite::memory:").await?;
+        database
+            .execute(Statement::from_string(
+                database.get_database_backend(),
+                "PRAGMA foreign_keys = ON".to_owned(),
+            ))
+            .await?;
+        db::migrate_database(&database).await?;
+        seed::seed_defaults(&database).await?;
+        let missing_path = "definitely-missing-vizfold-local-path";
+
+        let error = queue_openfold_run(
+            &database,
+            OpenfoldQueueArgs {
+                input_id: "6KWC_1".into(),
+                input_sequence: "GSTI".into(),
+                fasta_dir: missing_path.into(),
+                data_dir: ".".into(),
+                alignment_dir: None,
+                model_device: "cpu".into(),
+                cpus: 1,
+                residue_idx: 1,
+                demo_attn: false,
+                save_outputs: true,
+                num_recycles_save: 1,
+                use_precomputed_alignments: false,
+            },
+        )
+        .await
+        .expect_err("missing local path should fail");
+
+        assert!(error.to_string().contains(
+            "--fasta-dir original path 'definitely-missing-vizfold-local-path' could not be resolved"
+        ));
+        assert!(
+            error
+                .to_string()
+                .contains(&crate::core::config::repository_root().display().to_string())
+        );
+        Ok(())
+    }
+}

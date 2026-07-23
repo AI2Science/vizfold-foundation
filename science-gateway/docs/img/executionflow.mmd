@@ -1,0 +1,66 @@
+---
+config:
+  theme: default
+---
+flowchart LR
+    subgraph Registry["Registry / Configuration"]
+        MB["MODEL_BACKEND<br/>Model definition<br/>OpenFold, Boltz, ESMFold"]
+        ET["EXECUTION_TARGET<br/>Execution environment<br/>Local, Docker, HPC, Gateway"]
+        MIP["MODEL_INVOCATION_PROFILE<br/>How this model runs on this target<br/>subprocess / Docker / SLURM / plugin"]
+    end
+
+    subgraph Request["Concrete Execution Request"]
+        RUN["RUN<br/>Selected model + target + invocation profile<br/>Selected model/execution parameters"]
+    end
+
+    subgraph Planning["Command Planning"]
+        DISPATCH["Planner Dispatch<br/>Select planner by invocation kind / backend"]
+        BUILTIN["Built-in Planner<br/>OpenFold planner in Rust<br/>(MVP)"]
+        TEMPLATE["Template Planner<br/>DB/config-driven command templates<br/>(future)"]
+        PLUGIN["External Plugin Planner<br/>Installed model adapter<br/>(future)"]
+        SPEC["CommandSpec<br/>Resolved program, args, cwd, env"]
+    end
+
+    subgraph Preflight["Optional Preflight"]
+        PFRUNNER["PreflightRunner<br/>Model-specific readiness checks<br/>(optional)"]
+        PFREPORT["PreflightReport<br/>passed / warnings / failures"]
+    end
+
+    subgraph Execution["Execution"]
+        WORKFLOW["Execution Workflow<br/>plan → optional preflight → run"]
+        RUNNER["CommandRunner<br/>Runs CommandSpec"]
+        OUTPUT["CommandOutput<br/>exit code, stdout, stderr"]
+    end
+
+    subgraph Results["Results"]
+        ARTIFACT["ARTIFACT<br/>Manifest entries for produced outputs"]
+        STORAGE["External Storage<br/>filesystem / HPC / object storage"]
+    end
+
+    MB --> MIP
+    ET --> MIP
+    MB --> RUN
+    ET --> RUN
+    MIP --> RUN
+
+    RUN --> DISPATCH
+    MIP --> DISPATCH
+
+    DISPATCH --> BUILTIN
+    DISPATCH -. future .-> TEMPLATE
+    DISPATCH -. future .-> PLUGIN
+
+    BUILTIN --> SPEC
+    TEMPLATE -. future .-> SPEC
+    PLUGIN -. future .-> SPEC
+
+    SPEC --> WORKFLOW
+    PFRUNNER -. optional .-> WORKFLOW
+    WORKFLOW --> PFREPORT
+    PFREPORT -->|no failures| RUNNER
+    PFREPORT -->|failures| SKIP["Skip execution<br/>return workflow result"]
+    WORKFLOW -->|no preflight defined| RUNNER
+
+    RUNNER --> OUTPUT
+    OUTPUT --> ARTIFACT
+    STORAGE --> ARTIFACT

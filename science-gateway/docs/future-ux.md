@@ -1,0 +1,3 @@
+## Future UX Direction: Saved Workflows
+
+In the long term, VizFold could support saved researcher workflows where users configure a model backend, execution target, input type, model parameters, and visualization modules as a reusable pipeline. This would allow researchers to rerun common analyses by changing only input parameters, while preserving reproducibility metadata such as model version, execution environment, and output artifacts.

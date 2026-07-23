@@ -1,0 +1,242 @@
+# VizFold Gateway
+
+Prototype workspace for the VizFold science gateway.
+
+This subtree currently has two distinct tracks:
+
+- `apps/executor`: the active Rust core for persistence and execution-domain work.
+- `apps/workbench`: a disconnected Next.js frontend prototype that still runs on mock data.
+
+The frontend is useful for UX iteration, but the Rust executor is the main implementation path for core data model, database, and execution workflow development.
+
+## Repository Structure
+
+- `apps/`: runnable gateway applications.
+- `apps/executor/`: Rust service and core library. Contains SeaORM entities, migrations, services, seed setup, and the current Axum adapter.
+- `apps/workbench/`: Next.js workbench prototype for browsing concepts and mock flows. Not wired to the Rust executor yet.
+- `docs/`: gateway-specific notes, architecture sketches, future UX ideas, and backlog material.
+- `docs/architecture.md`: high-level architecture notes for the gateway direction.
+- `docs/future-ux.md`: product and interaction ideas that are not implemented yet.
+- `docs/todo.md`: working backlog and rough implementation notes.
+- `docs/img/`: diagrams and supporting images used by the docs.
+- `CONTRIBUTING.md`: lightweight branching and contribution guidance for this fork.
+
+## Current Development Status
+
+- The Rust executor is the primary active implementation path.
+- The workbench is still a UI prototype with static mock data.
+- The workbench does not own persistence and is not connected to the executor yet.
+- SeaORM migrations are part of the Rust executor startup flow.
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 20 LTS or later
+- npm
+- Git
+- Rust toolchain with `cargo` and `rustc`
+
+Recommended version checks:
+
+```bash
+node -v
+npm -v
+cargo -V
+rustc -V
+```
+
+### Clone the repository
+
+```bash
+git clone <repo-url>
+cd vizfold-foundation/science-gateway
+```
+
+## Workbench Development
+
+Run the frontend prototype from `science-gateway/apps/workbench`:
+
+```bash
+cd apps/workbench
+npm install
+npm run dev
+```
+
+The workbench will be available at [http://localhost:3000](http://localhost:3000).
+
+Notes:
+
+- This app currently uses mock data only.
+- No database setup is required for the current workbench prototype.
+- The older generic Next.js README language about alternate package managers or Vercel deployment is not important for current gateway development.
+
+## Executor Development
+
+Run the Rust executor from `science-gateway/apps/executor`:
+
+```bash
+cd apps/executor
+cargo run
+```
+
+The current HTTP health endpoint is available at [http://127.0.0.1:3001/health](http://127.0.0.1:3001/health).
+
+### Executor CLI
+
+The `vizfold` CLI provides a development workflow for inspecting and operating persisted OpenFold runs. Run it from `science-gateway/apps/executor`:
+
+```bash
+cargo run --bin vizfold -- seed
+cargo run --bin vizfold -- list models
+cargo run --bin vizfold -- list targets
+cargo run --bin vizfold -- list profiles
+cargo run --bin vizfold -- list runs
+```
+
+Queueing is model-specific because a run does not exist yet. Once queued, operations are run-centric:
+
+```bash
+cargo run --bin vizfold -- queue-run openfold ...
+cargo run --bin vizfold -- execute-run <run-id>
+cargo run --bin vizfold -- register-artifacts <run-id>
+cargo run --bin vizfold -- show run <run-id>
+```
+
+`seed` is safe to repeat and ensures the local OpenFold backend, `local-openfold` target, and matching invocation profile are available. The CLI uses `DATABASE_URL` when set and otherwise uses the SQLite default described below. For the complete local OpenFold setup and an end-to-end CLI workflow, see [DEMO.md](DEMO.md).
+
+### Installing the CLI
+
+Build the development binary from `science-gateway/apps/executor`:
+
+```bash
+cargo build --bin vizfold
+./target/debug/vizfold --help
+```
+
+On PowerShell, run the built binary with:
+
+```powershell
+.\target\debug\vizfold.exe --help
+```
+
+To install only the CLI binary into Cargo's bin directory (typically `~/.cargo/bin`) so it can be invoked directly, use:
+
+```bash
+cargo install --path . --bin vizfold
+vizfold --help
+vizfold seed
+```
+
+Use `cargo install --path . --bin vizfold --force` to update an existing installation. This is currently a development/demo CLI: the seeded local OpenFold profile assumes the checked-out repository layout, so build and run it against that checkout rather than treating it as a general standalone installed application.
+
+### Database and SeaORM Migrations
+
+The executor uses SQLite and SeaORM migrations.
+
+Current behavior:
+
+- Default database URL: `sqlite://data/vizfold.db?mode=rwc`
+- Database file location, when using the default URL: `science-gateway/apps/executor/data/vizfold.db`
+- Parent directories are created automatically if they do not exist.
+- SeaORM migrations run automatically during executor startup.
+- Default seed records are inserted on startup if they are missing.
+
+Create the database and apply migrations by starting the executor:
+
+```bash
+cd apps/executor
+cargo run
+```
+
+That startup path will:
+
+1. open or create the SQLite database file,
+2. enable SQLite foreign keys,
+3. run SeaORM migrations,
+4. seed default model backend and execution target records.
+
+To use a different SQLite file, set `DATABASE_URL` before running the executor.
+
+PowerShell:
+
+```powershell
+$env:DATABASE_URL = "sqlite://data/vizfold-dev.db?mode=rwc"
+cargo run
+```
+
+Bash:
+
+```bash
+export DATABASE_URL="sqlite://data/vizfold-dev.db?mode=rwc"
+cargo run
+```
+
+The `vizfold seed` command also opens the database and applies migrations before seeding. There is not currently a migrations-only CLI command; use either executor startup or `vizfold seed` for local development setup.
+
+### Resetting an Existing Development Database
+
+If you already ran an earlier version of the Rust executor, you may have an older SQLite schema on disk.
+
+The most likely symptom is an error like:
+
+```text
+no such column: model_backends.version
+```
+
+Why this happens:
+
+- SeaORM records applied migrations in the `seaql_migrations` table.
+- If a local database already marked the original migration names as applied, SeaORM will not rerun them automatically.
+- That means an older `vizfold.db` can keep the old table shape even after the code expects the new schema.
+
+This is a Rust executor migration-state issue. It is not caused by the disconnected Next.js workbench itself. The frontend does not currently manage this SQLite database.
+
+For the current development-only setup, the safest fix is to remove the existing executor database and let the executor recreate it.
+
+If you are using the default database path:
+
+PowerShell:
+
+```powershell
+Remove-Item .\apps\executor\data\vizfold.db
+cd .\apps\executor
+cargo run
+```
+
+Bash:
+
+```bash
+rm ./apps/executor/data/vizfold.db
+cd ./apps/executor
+cargo run
+```
+
+If you set a custom `DATABASE_URL`, delete the SQLite file referenced by that URL instead, then start the executor again.
+
+After reset, executor startup will recreate the DB, apply the current SeaORM migrations, and seed the default records again.
+
+Current expectation:
+
+- this reset guidance is appropriate for local development
+- no production-safe migration path exists yet for carrying an older executor DB forward automatically
+
+### Tests
+
+Run the Rust executor tests from `science-gateway/apps/executor`:
+
+```bash
+cargo test
+```
+
+These tests exercise the in-memory SQLite path, SeaORM migrations, and the core registration/run/artifact services.
+
+## What May Be Obsolete
+
+The previous gateway README referenced directories such as `packages/schemas`, `packages/adapters`, and `examples` as if they were part of `science-gateway`. Those entries do not exist in the current `science-gateway` subtree and should not be treated as active local structure here.
+
+Likewise, the workbench should not be described as integrated with the backend yet. The current accurate state is:
+
+- frontend prototype in `apps/workbench`
+- Rust core and persistence work in `apps/executor`
+- no real executor-to-workbench wiring yet

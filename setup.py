@@ -87,6 +87,7 @@ for major, minor in list(compute_capabilities):
         f'arch=compute_{major}{minor},code=sm_{major}{minor}',
     ])
 
+cc_flag = ['-gencode','arch=compute_120,code=sm_120']
 extra_cuda_flags += cc_flag
 
 if bare_metal_major != -1:
