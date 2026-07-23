@@ -23,6 +23,8 @@ if [ ! -f "$REPO/setup.py" ]; then
     # Our clone: keep it current so a re-run after a fix doesn't reuse stale code.
     REPO=$SRC
     if [ -d "$REPO/.git" ]; then
+        # Point origin at REPO_URL so OPENFOLD_REPO_URL applies to re-runs, not just the first clone.
+        git -C "$REPO" remote set-url origin "$REPO_URL" 2>/dev/null
         git -C "$REPO" fetch -q origin "$BRANCH" &&
             git -C "$REPO" reset -q --hard FETCH_HEAD ||
             echo "warning: could not update $REPO, using it as-is" >&2
