@@ -152,14 +152,20 @@ else
         bash "$REPO/scripts/download_alphafold_params.sh" "$PREFIX"
     ln -sfn "$PREFIX/params" "$REPO/openfold/resources/params"
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
+    # env -u LD_LIBRARY_PATH: the activated env prepends $CONDA_PREFIX/lib, and system
+    # curl then binds conda's libcurl, which on some sites lacks a needed feature and
+    # fails every fetch. || true so a single obsolete PDB does not abort the install;
+    # the count assert below catches a total failure loudly instead of silently.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
         awk '{ print tolower(substr($2, 1, 4)) }' | sort -u |
         xargs -P 8 -I{} sh -c \
-            '[ -s "$1/{}.cif" ] || curl -Lsf -o "$1/{}.cif" https://files.rcsb.org/download/{}.cif' _ \
-            "$DATA/pdb_mmcif/mmcif_files"
-    echo "fetched $(ls "$DATA/pdb_mmcif/mmcif_files" | wc -l) template mmCIFs"
+            '[ -s "$1/{}.cif" ] || env -u LD_LIBRARY_PATH curl -Lsf -o "$1/{}.cif" https://files.rcsb.org/download/{}.cif' _ \
+            "$DATA/pdb_mmcif/mmcif_files" || true
+    n=$(ls "$DATA/pdb_mmcif/mmcif_files" | wc -l)
+    echo "fetched $n template mmCIFs"
+    [ "$n" -gt 0 ] || die "no template mmCIFs fetched; check outbound https from the compute node"
 fi
-[ -f "$STEREO" ] || { curl -Lsf -o "$STEREO.part" \
+[ -f "$STEREO" ] || { env -u LD_LIBRARY_PATH curl -Lsf -o "$STEREO.part" \
     https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt &&
     mv "$STEREO.part" "$STEREO"; }
 mkdir -p "$REPO/tests/test_data/alphafold/common"
