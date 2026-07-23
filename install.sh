@@ -1,14 +1,13 @@
 #!/bin/bash
 
-# Install OpenFold on any HPC cluster in one command; add a cluster as install/sites/<ClusterName>.sh.
+# Bootstrap the vizfold platform CLI into ~/.local/bin; then `vizfold init` installs a model backend (OpenFold today; the same install/ scripts would host openfold3/boltz/esmfold).
 set -euo pipefail
-
-die() { echo "FATAL: $*" >&2; exit 1; }
 
 bootstrap::config() {
     REPO_URL=${OPENFOLD_REPO_URL:-https://github.com/AI2Science/vizfold-foundation.git}
     BRANCH=${OPENFOLD_BRANCH:-main}
-    SRC=${OPENFOLD_SRC:-$HOME/openfold-src}   # outlives the job; the editable install points here
+    SRC=${OPENFOLD_SRC:-$HOME/openfold-src}   # the checkout the CLI is built from; `vizfold init` reuses it
+    BIN=$HOME/.local/bin
 }
 
 # Piped into bash BASH_SOURCE is unusable; under sbatch it is the spool copy.
@@ -35,40 +34,41 @@ bootstrap::sync_checkout() {
             git -C "$REPO" reset -q --hard FETCH_HEAD ||
             echo "warning: could not update $REPO, using it as-is" >&2
     else
-        git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$REPO"   # tip only; the install needs no history
+        git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$REPO"   # tip only; the build needs no history
     fi
 }
 
-# Pin REPO for the libraries (config.sh reads OPENFOLD_HOME) before sourcing them.
-bootstrap::libs() {
-    test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
-    export OPENFOLD_HOME=$REPO
-    . "$REPO/install/slurm.sh"          # pulls in config.sh + interactive.sh; declares the slurm::* hooks and slurm::run
-    SITES=$REPO/install/sites
+# Minimal rustup into ~/.cargo so the build needs nothing preinstalled on the node.
+bootstrap::rust() {
+    command -v cargo >/dev/null && return
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    . "$HOME/.cargo/env"
 }
 
-bootstrap::pick_site() {
-    local cluster
-    cluster=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }') || true
-    [ -n "${cluster:-}" ] && [ -f "$SITES/$cluster.sh" ] || cluster=local
-    SITE=$(interactive::resolve OPENFOLD_SITE "site" "$cluster")
-    test -f "$SITES/$SITE.sh" ||
-        die "no site script for $SITE; have: $(cd "$SITES" && echo *.sh | sed 's/\.sh//g')"
-    export OPENFOLD_SITE=$SITE
+bootstrap::build() {
+    cargo build --release --manifest-path "$REPO/science-gateway/apps/executor/Cargo.toml"
+    install -Dm755 "$REPO/science-gateway/apps/executor/target/release/vizfold" "$BIN/vizfold"
+    echo "installed vizfold to $BIN/vizfold"
 }
 
-bootstrap::dispatch() {
-    config::site_defaults "$SITES/$SITE.sh"   # <site>.json defaults (fills unset)
-    . "$SITES/$SITE.sh"                        # register this site's hook overrides
-    slurm::run                                   # execute the assembled function set
+# Put ~/.local/bin on PATH for future shells (idempotent), and note it for this one.
+bootstrap::path() {
+    case ":$PATH:" in *":$BIN:"*) return ;; esac
+    local line="export PATH=\"$BIN:\$PATH\""
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        if [ "$rc" = "$HOME/.zshrc" ] && [ ! -f "$rc" ]; then continue; fi
+        grep -qsF "$line" "$rc" 2>/dev/null || echo "$line" >> "$rc"
+    done
+    echo "added $BIN to PATH in your shell rc; restart your shell or run: $line"
 }
 
 main() {
     bootstrap::config
     bootstrap::find_repo
     bootstrap::sync_checkout
-    bootstrap::libs
-    bootstrap::pick_site
-    bootstrap::dispatch
+    bootstrap::rust
+    bootstrap::build
+    bootstrap::path
+    echo "vizfold installed at $BIN/vizfold. Run \`vizfold init\` to install a model backend (OpenFold)."
 }
 main

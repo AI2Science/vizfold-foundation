@@ -173,30 +173,6 @@ setup::stereo() {
     ln -sfn "$STEREO" "$REPO/tests/test_data/alphafold/common/stereo_chemical_props.txt"
 }
 
-# Minimal rustup into the prefix (RUSTUP_HOME/CARGO_HOME contained), so the CLI build
-# needs nothing preinstalled on the build node.
-setup::rust() {
-    export RUSTUP_HOME=$PREFIX/rust CARGO_HOME=$PREFIX/rust
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-    . "$CARGO_HOME/env"
-}
-
-# Build + install the `vizfold` CLI to ~/.local/bin. Optional: a build failure warns
-# but never aborts the OpenFold install. (Clear $sentinel/cli to retry after a fix.)
-setup::cli() {
-    log cli
-    [ -f "$PREFIX/rust/env" ] && . "$PREFIX/rust/env"   # reuse a prior prefix-local rustup
-    command -v cargo >/dev/null || setup::rust || { echo "warning: no Rust toolchain; skipping CLI" >&2; return 0; }
-    local bin=$HOME/.local/bin manifest=$REPO/science-gateway/apps/executor/Cargo.toml
-    if cargo build --release --manifest-path "$manifest"; then
-        install -Dm755 "$REPO/science-gateway/apps/executor/target/release/vizfold" "$bin/vizfold" &&
-            echo "installed vizfold to $bin/vizfold (ensure $bin is on PATH)"
-    else
-        echo "warning: vizfold CLI build failed; OpenFold install unaffected" >&2
-    fi
-    return 0
-}
-
 setup::verify() {
     log verify
     python3 - <<'PY'
@@ -283,7 +259,6 @@ main() {
     setup::verify
     setup::fold_vars
     setup::config_save
-    step cli setup::cli
     setup::ready
 }
 

@@ -1,9 +1,13 @@
 # Vizfold Foundations
 
-This repository has two main components:
+Vizfold is a platform for running protein-structure models and inspecting what they compute:
 
 1. Model inference & feature extraction: Run protein structure prediction models and extract intermediate activations (hidden representations) and attention maps from any chosen layer.
 2. Visualization & analysis: Explore, visualize, and analyze the extracted activations and attention maps.
+
+The `vizfold` CLI is the platform; a model backend plugs in underneath it. **OpenFold** is
+today's default (and only) backend, installed by `vizfold init`; the same `install/` scripts
+are built to host others (openfold3, boltz, esmfold) as they land.
 
 ---
 
@@ -13,19 +17,26 @@ Link to Openfold implimentation - [README_vizfold_openfold.md](https://github.co
 
 ## Install
 
-On a cluster, one command. It works out where it is running and needs nothing from you:
+Two steps on a cluster. First bootstrap the `vizfold` CLI — one command, needs nothing from you:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 ```
 
-It clones a checkout, picks the site, submits itself to the scheduler, and prints the exact
-command to fold a test sequence. Cold: ~8 min on NCSA Delta, ~25 min where the AlphaFold
-databases have to be downloaded.
+That clones a checkout, builds the `vizfold` binary, and installs it to `~/.local/bin`. Then
+install the OpenFold backend:
+
+```bash
+vizfold init
+```
+
+`vizfold init` works out where it is running, picks the site, submits the OpenFold install to
+the scheduler, and prints the exact command to fold a test sequence. Cold: ~8 min on NCSA
+Delta, ~25 min where the AlphaFold databases have to be downloaded.
 
 ### Supported clusters
 
-Dispatch is on the SLURM `ClusterName`, so on these machines the one command above needs no
+Dispatch is on the SLURM `ClusterName`, so on these machines `vizfold init` needs no
 arguments. Accounts and the install prefix are worked out live (your project space, the
 accounts you can charge); the values below are what a fresh install settles on.
 
@@ -40,7 +51,7 @@ accounts you can charge); the values below are what a fresh install settles on.
 | `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `~/scratch` real root (`/storage/ice1/…`) |
 | `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | downloaded | `cpu-small` → `gpu-a100` (A100) | `~/scratch` real root (`/storage/scratch1/…`) |
 
-Legend — ✅ install + fold verified end-to-end from the one command (fold → 2839-atom relaxed
+Legend — ✅ install + fold verified end-to-end from `vizfold init` (fold → 2839-atom relaxed
 structure); ◐ install run on the cluster with its site-specific fixes, final fold not re-confirmed
 in this pass⁵; ⚙️ site profile written and its paths probed live, full install not yet run.
 
@@ -66,7 +77,7 @@ exactly what you care about and nothing else:
 
 | | | |
 | --- | --- | --- |
-| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/openfold ... \| bash` |
+| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/openfold vizfold init` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
@@ -100,8 +111,7 @@ memory:
 To override for one run, put the variable inline — it wins over both files:
 
 ```bash
-OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 \
-  curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
+OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 vizfold init
 ```
 
 Paths and accounts are worked out per site and are not in these files: the install prefix
@@ -113,7 +123,8 @@ read where things ended up instead of guessing.
 
 Two files in `install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` for
 what has to be computed (prefix, accounts, launcher) and `<name>.json` for what is just a
-value. `install.sh` dispatches on `ClusterName`, so nothing else needs to change.
+value. `vizfold init` (via `install/init.sh`) dispatches on `ClusterName`, so nothing else
+needs to change.
 
 ---
 

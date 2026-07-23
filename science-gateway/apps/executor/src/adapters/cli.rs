@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Initialize VizFold on this machine by running the installer.
+    /// Install a model backend (OpenFold) on this machine.
     Init,
     /// Start the workbench dashboard.
     Serve(ServeArgs),
@@ -171,45 +171,35 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Bootstrap this machine by running the installer with inherited stdio. Idempotent:
-/// installer steps are sentinel-guarded, so re-running is safe.
+/// Install a model backend (OpenFold) by running the checkout's `install/init.sh` with
+/// inherited stdio. Idempotent: its steps are sentinel-guarded, so re-running is safe.
 fn run_init() -> Result<(), DbErr> {
-    let installer = config::openfold_home().join("install.sh");
-    let mut command = std::process::Command::new("bash");
-    if installer.is_file() {
-        println!("Running installer: bash {}", installer.display());
-        command.arg(&installer);
-    } else {
-        println!("No local checkout found; fetching the installer from GitHub.");
-        command.arg("-c").arg(
-            "curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash",
-        );
+    let installer = config::vizfold_src().join("install/init.sh");
+    if !installer.is_file() {
+        return Err(DbErr::Custom(format!(
+            "no vizfold checkout found at {}; re-run the bootstrap installer (set VIZFOLD_SRC to override)",
+            installer.display()
+        )));
     }
-    let status = command
+    println!("Running model install: bash {}", installer.display());
+    let status = std::process::Command::new("bash")
+        .arg(&installer)
         .status()
-        .map_err(|error| DbErr::Custom(format!("failed to launch installer: {error}")))?;
+        .map_err(|error| DbErr::Custom(format!("failed to launch model install: {error}")))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| DbErr::Custom(format!("installer exited with status {status}")))
+        .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
 }
 
 /// Start the workbench dashboard, streaming its output to this shell.
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
-    let workbench = config::openfold_home().join("science-gateway/apps/workbench");
-
-    // A cluster home is inode-quota-capped NFS; keep the heavy node_modules/.next physically on
-    // the roomy work filesystem (the prefix) via symlinks.
-    for name in ["node_modules", ".next"] {
-        relocate_to_prefix(&workbench, name)?;
-    }
+    let workbench = serve_dir()?;
 
     let node_modules = workbench.join("node_modules");
     let empty =
         std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
     if empty {
-        // `npm install` (not `npm ci`) reconciles in place, following the symlink so the install
-        // lands on the work fs; `npm ci` would delete node_modules and recreate it on home (EDQUOT).
         println!("Installing workbench dependencies (npm install)...");
         run_npm(&workbench, &["install"])?;
     }
@@ -224,34 +214,44 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     run_npm(&workbench, &npm_args)
 }
 
-/// Make `<workbench>/<name>` a symlink to `<prefix>/workbench/<name>` (created on the work fs),
-/// so `npm install`/`next dev` write there instead of the inode-capped home. No-op when the
-/// prefix isn't a separate filesystem (dev checkout); replaces a real leftover dir (e.g. a prior
-/// failed install on home) with the symlink.
-fn relocate_to_prefix(workbench: &Path, name: &str) -> Result<(), DbErr> {
+/// Directory the dashboard runs from. A cluster home is inode-quota-capped NFS, so on a real
+/// install (prefix on a separate work fs) run the dashboard from a copy on that work fs — then
+/// npm's node_modules/.next land there, never on home. Dev checkout (prefix == home): run in
+/// place. The copy skips node_modules/.next (build artifacts) and preserves any already staged
+/// in the destination.
+fn serve_dir() -> Result<PathBuf, DbErr> {
+    let src = config::openfold_home().join("science-gateway/apps/workbench");
     if config::prefix() == config::openfold_home() {
-        return Ok(()); // no separate work fs to relocate onto
+        return Ok(src);
     }
-    let link = workbench.join(name);
-    let target = config::prefix().join("workbench").join(name);
-    std::fs::create_dir_all(&target).map_err(|error| {
-        DbErr::Custom(format!("failed to create '{}': {error}", target.display()))
-    })?;
-
-    match std::fs::symlink_metadata(&link) {
-        Ok(meta) if meta.file_type().is_symlink() => return Ok(()), // already relocated
-        Ok(_) => std::fs::remove_dir_all(&link).map_err(|error| {
-            DbErr::Custom(format!("failed to clear '{}': {error}", link.display()))
-        })?,
-        Err(_) => {}
-    }
-    std::os::unix::fs::symlink(&target, &link).map_err(|error| {
+    let dest = config::prefix().join("workbench");
+    copy_tree(&src, &dest, &["node_modules", ".next"]).map_err(|error| {
         DbErr::Custom(format!(
-            "failed to link '{}' -> '{}': {error}",
-            link.display(),
-            target.display()
+            "failed to stage workbench at '{}': {error}",
+            dest.display()
         ))
-    })
+    })?;
+    Ok(dest)
+}
+
+/// Recursively copy `src` into `dst`, overwriting files and merging directories, but skip the
+/// given names at the top level (build artifacts we neither copy nor clobber in `dst`).
+fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_str().is_some_and(|n| skip.contains(&n)) {
+            continue;
+        }
+        let (from, to) = (entry.path(), dst.join(&name));
+        if entry.file_type()?.is_dir() {
+            copy_tree(&from, &to, &[])?; // skip applies only at the workbench root
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 fn run_npm(dir: &Path, args: &[&str]) -> Result<(), DbErr> {
@@ -826,6 +826,31 @@ mod tests {
     fn parses_init() {
         let cli = Cli::try_parse_from(["vizfold", "init"]).expect("init command should parse");
         assert!(matches!(cli.command, Command::Init));
+    }
+
+    #[test]
+    fn copy_tree_excludes_build_artifacts_and_preserves_dest() {
+        let base = std::env::temp_dir().join(format!("vizfold-copytree-{}", std::process::id()));
+        let (src, dst) = (base.join("src"), base.join("dst"));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(src.join("node_modules")).unwrap();
+        std::fs::create_dir_all(src.join(".next")).unwrap();
+        std::fs::create_dir_all(src.join("app")).unwrap();
+        std::fs::write(src.join("package.json"), "{}").unwrap();
+        std::fs::write(src.join("node_modules/dep.js"), "src").unwrap();
+        std::fs::write(src.join("app/page.tsx"), "x").unwrap();
+        // A node_modules already staged in the destination must survive the copy.
+        std::fs::create_dir_all(dst.join("node_modules")).unwrap();
+        std::fs::write(dst.join("node_modules/installed.js"), "keep").unwrap();
+
+        super::copy_tree(&src, &dst, &["node_modules", ".next"]).unwrap();
+
+        assert!(dst.join("package.json").is_file());
+        assert!(dst.join("app/page.tsx").is_file());
+        assert!(!dst.join(".next").exists()); // excluded at top level
+        assert!(dst.join("node_modules/installed.js").is_file()); // preserved
+        assert!(!dst.join("node_modules/dep.js").exists()); // src node_modules not copied
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
