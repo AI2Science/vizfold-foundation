@@ -9,6 +9,20 @@ REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && until [ -f setup.
 . "$REPO/install/config.sh"
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
+ENV_PREFIX=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME}
+
+# torch and DeepSpeed JIT-compile at import; a site's module env (CC/CXX/CPATH/
+# PATH/LD_LIBRARY_PATH pointing at its own gcc) makes that compile fail with
+# "cannot execute cc1". Re-exec once in a curated env -- the treatment the install
+# build uses -- keeping HOME, a clean PATH, the SLURM/CUDA GPU binding, and every
+# OPENFOLD_* the caller and config set.
+if [ -z "${OPENFOLD_CLEAN_ENV:-}" ]; then
+    clean=(HOME="$HOME" PATH="$ENV_PREFIX/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
+    [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
+    while IFS= read -r kv; do clean+=("$kv"); done < <(
+        env | grep -E '^(OPENFOLD_[A-Z0-9_]*|SLURM_[A-Z0-9_]*|CUDA_VISIBLE_DEVICES|GPU_DEVICE_ORDINAL|NVIDIA_VISIBLE_DEVICES)=')
+    exec env -i "${clean[@]}" bash "$0" "$@"
+fi
 
 INPUT_ID=${1:-${OPENFOLD_INPUT_ID:-6KWC_1}}
 [ $# -gt 0 ] && shift                     # the rest pass through to the python script
