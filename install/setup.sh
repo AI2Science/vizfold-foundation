@@ -40,6 +40,11 @@ BINARIES=(jackhmmer hhblits hhsearch)
 
 step() { echo "== $* (+$((SECONDS))s)"; }
 have() { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
+# A step seals only after finishing, so an interrupted create/clone/download (dir
+# exists but incomplete) is redone next run, not skipped.
+sentinel=$PREFIX/.done
+sealed() { [ -e "$sentinel/$1" ]; }
+seal()   { mkdir -p "$sentinel"; touch "$sentinel/$1"; }
 
 mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$REPO/openfold/resources"
 hostname
@@ -49,13 +54,18 @@ test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
 
 step micromamba
 case $(uname -m) in aarch64|arm64) MM_ARCH=linux-aarch64 ;; *) MM_ARCH=linux-64 ;; esac
-[ -x "$MM" ] || curl -Ls "https://micro.mamba.pm/api/micromamba/$MM_ARCH/latest" |
-    tar -xj -C "$PREFIX" bin/micromamba
+sealed micromamba || {
+    curl -Ls "https://micro.mamba.pm/api/micromamba/$MM_ARCH/latest" | tar -xj -C "$PREFIX" bin/micromamba
+    seal micromamba
+}
 
 step "conda env $ENV_NAME"
 # By path + --no-rc so a ~/.condarc envs_dirs/channels can't hijack a reproducible env.
-[ -d "$ENV_DIR" ] ||
+sealed env || {
+    rm -rf "$ENV_DIR"   # clear a partial env; create fails on a non-empty dir
     "$MM" create -y --no-rc -p "$ENV_DIR" -f "$REPO/environment.yml" "cuda-version<=$MAX_CUDA"
+    seal env
+}
 
 set +u   # the conda gcc hook reads SYS_SYSROOT unset
 eval "$("$MM" shell hook --shell bash)"
@@ -63,8 +73,11 @@ micromamba activate "$ENV_DIR"
 set -u
 
 step "third-party dependencies"
-[ -d "$CUTLASS/.git" ] ||
+sealed cutlass || {
+    rm -rf "$CUTLASS"
     git clone -q https://github.com/NVIDIA/cutlass --branch v3.6.0 --depth 1 "$CUTLASS"
+    seal cutlass
+}
 mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
 cat > "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh" <<ACTIVATE
 export CUTLASS_PATH=$CUTLASS
@@ -90,8 +103,11 @@ export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA
 
 if [ -n "${DRIVER_CUDA:-}" ] && [ -n "${ENV_CUDA:-}" ] && older "$DRIVER_CUDA" "$ENV_CUDA"; then
     NVRTC=$PREFIX/nvrtc-$DRIVER_CUDA
-    [ -d "$NVRTC" ] ||
+    sealed "nvrtc-$DRIVER_CUDA" || {
+        rm -rf "$NVRTC"
         "$MM" create -y --no-rc -p "$NVRTC" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
+        seal "nvrtc-$DRIVER_CUDA"
+    }
     LIB=$(ls "$NVRTC"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
     test -n "$LIB" || die "no libnvrtc in $NVRTC"
     echo "export LD_PRELOAD=$LIB\${LD_PRELOAD:+:\$LD_PRELOAD}" \
@@ -127,8 +143,11 @@ if [ "$MIRROR" = yes ]; then
     fi
 else
     # No mirror: fetch params (4 GB, into the prefix) and the mmCIFs the examples cite.
-    [ -f "$PREFIX/params/params_model_1_ptm.npz" ] ||
+    sealed params || {
+        rm -rf "$PREFIX/params"   # a half-extracted tar would pass a single-file check
         bash "$REPO/scripts/download_alphafold_params.sh" "$PREFIX"
+        seal params
+    }
     ln -sfn "$PREFIX/params" "$REPO/openfold/resources/params"
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
     # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. || true tolerates a 404; assert catches total failure.
