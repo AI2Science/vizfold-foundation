@@ -6,6 +6,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
-# $HOME is 30 GB; install under ~/scratch, resolved to its real /storage path. Set OPENFOLD_PREFIX to a project volume to persist.
-SCRATCH=$(readlink -f "$HOME/scratch" 2>/dev/null || echo "$HOME/scratch")
+# $HOME is 30 GB; install on scratch. ~/scratch is a symlink, so use its real /storage
+# target. Set OPENFOLD_PREFIX to a project volume to persist (scratch is purged).
+SCRATCH=$(readlink -f "$HOME/scratch") || die "cannot resolve ~/scratch"
 hpc::submit "$SCRATCH/openfold"
