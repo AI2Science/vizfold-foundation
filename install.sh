@@ -1,8 +1,6 @@
 #!/bin/bash
-# Install OpenFold, anywhere. Add a cluster as install/sites/<ClusterName>.sh.
-#
-#   curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
-#   ./install.sh
+
+# Install OpenFold on any HPC cluster in one command; add a cluster as install/sites/<ClusterName>.sh.
 set -euo pipefail
 
 REPO_URL=${OPENFOLD_REPO_URL:-https://github.com/AI2Science/vizfold-foundation.git}
@@ -22,8 +20,7 @@ else
         until [ -f setup.py ] || [ "$PWD" = / ]; do cd ..; done; pwd)
 fi
 if [ ! -f "$REPO/setup.py" ]; then
-    # This clone is ours, so keep it current: re-running the one-liner after a fix
-    # must not silently reuse the checkout it made last time.
+    # Our clone: keep it current so a re-run after a fix doesn't reuse stale code.
     REPO=$SRC
     if [ -d "$REPO/.git" ]; then
         git -C "$REPO" fetch -q origin "$BRANCH" &&

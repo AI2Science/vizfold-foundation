@@ -1,6 +1,6 @@
 #!/bin/bash
-# PSC Bridges-2 (ClusterName "bridges2"). Reached from ../../install.sh.
-# AF2 mirror in <site>.json. Project space and account share the grant id.
+
+# PSC Bridges-2 ("bridges2"). AF2 mirror in <site>.json; account = grant id = /ocean project dir.
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"

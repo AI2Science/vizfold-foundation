@@ -1,14 +1,12 @@
 #!/bin/bash
-# NCSA Delta (ClusterName "delta"). Reached from ../../install.sh.
-# Per-allocation project space and -delta-{cpu,gpu} accounts; AF2 mirror in <site>.json.
+
+# NCSA Delta ("delta"). Per-allocation /work/nvme + -delta-{cpu,gpu} accounts; AF2 mirror in <site>.json.
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
-# Project space is /work/nvme/<allocation>/<user>, which names the accounts too.
-# Usable means both: a directory to install into and cpu+gpu accounts to charge --
-# this cluster hands out space you cannot charge, and accounts with no space.
+# Usable = both a /work/nvme/<alloc>/<user> dir and chargeable cpu+gpu accounts (this cluster hands out one without the other).
 usable() {
     local dir alloc accounts
     accounts=$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | sort -u)
@@ -19,8 +17,7 @@ usable() {
             grep -qx "$alloc-delta-gpu" <<<"$accounts" && echo "$alloc"
     done
 }
-# Pick one and say which -- never a question -- preferring one that already holds
-# an install, so re-running lands where the last one did.
+# Pick one (never a prompt), preferring one that already holds an install so a re-run lands there.
 allocation() {
     local u a
     u=$(usable); [ -n "$u" ] || return 1

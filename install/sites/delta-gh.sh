@@ -1,15 +1,12 @@
 #!/bin/bash
-# NCSA Delta-AI (ClusterName "delta-gh"). Reached from ../../install.sh.
-# Grace-Hopper (aarch64); setup.sh fetches an aarch64 micromamba. No CPU-only
-# queue, so the build runs on a GH200 node. No mirror; params are downloaded.
+
+# NCSA Delta-AI ("delta-gh"). Grace-Hopper aarch64; build on a GH200 node (no CPU queue); no mirror.
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 config::site_defaults "${BASH_SOURCE[0]}"
 
-# environment.yml pins mkl (x86-only) and deepspeed=*=cuda* (no aarch64 CUDA build),
-# so the env cannot solve on Grace-Hopper yet. Refuse here rather than burn GH200
-# hours on a build that dies at the solver. Needs an aarch64 environment variant.
+# environment.yml pins mkl (x86-only) + deepspeed=cuda (no aarch64 build): the env can't solve here. Refuse before burning GH200 hours.
 [ "$(uname -m)" = aarch64 ] && die "Delta-AI is aarch64: environment.yml (mkl, deepspeed=cuda) has no aarch64 solve. Needs an aarch64 env variant (nomkl/openblas + deepspeed via pip)."
 
 # Delta-AI shares Delta's /work/nvme; accounts are <allocation>-dtai-gh.

@@ -1,23 +1,17 @@
 #!/bin/bash
-# hpc.sh -- the shared SLURM site flow. A <site>.sh sources this (which sets REPO
-# via config.sh), loads its <site>.json, works out its install prefix (and
-# accounts, if not just the scheduler default), then calls hpc::submit. Library.
-#
+# hpc.sh -- shared SLURM site flow. Library. A <site>.sh sources it, loads its
+# <site>.json, resolves its prefix (and non-default accounts), then calls hpc::submit.
 #   . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
 #   config::site_defaults "${BASH_SOURCE[0]}"
-#   hpc::submit "<default install prefix>" ["<default slurm account>"]
-#
-# All of these are overridable inline or from a config file. The GPU account
-# defaults to the build account plus OPENFOLD_GPU_ACCOUNT_SUFFIX (empty unless a
-# site, like Anvil, bills GPUs separately). Everything else the fold needs --
-# OPENFOLD_GPU_PARTITION, _GPU_RESOURCES, _GPU_GRES, _EXAMPLE -- setup.sh reads.
+#   hpc::submit "<default prefix>" ["<default account>"]
+# GPU account = build account + OPENFOLD_GPU_ACCOUNT_SUFFIX (Anvil bills GPUs apart);
+# the rest (_GPU_PARTITION, _GPU_RESOURCES, _GPU_GRES, _EXAMPLE) setup.sh reads.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "hpc.sh is a library" >&2; exit 1; }
 [ -n "${HPC_SH:-}" ] && return 0
 HPC_SH=1
 
-# config.sh sets REPO and die(); both live beside this file.
-. "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
 hpc::submit() {

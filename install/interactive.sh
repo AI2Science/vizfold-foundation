@@ -3,9 +3,8 @@
 #   . "$REPO/install/interactive.sh"
 #   prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$HOME/openfold")
 #
-# Echoes the value, so a caller can always proceed: a site works out a sensible
-# default and this only reports it, or takes an answer when someone is there.
-# Prompts read /dev/tty, not stdin, which under `curl ... | bash` is the script.
+# Always echoes a value so the caller proceeds: reports the site's default, or takes an
+# answer at /dev/tty (not stdin, which under `curl | bash` is the script itself).
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "interactive.sh is a library" >&2; exit 1; }
 [ -n "${INTERACTIVE_SH:-}" ] && return 0

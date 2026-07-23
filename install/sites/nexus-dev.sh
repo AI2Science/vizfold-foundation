@@ -1,7 +1,6 @@
 #!/bin/bash
-# Nexus (ClusterName "nexus-dev"). Reached from ../../install.sh.
-# No database mirror; setup.sh fetches the parameters and example templates.
-# The GPU is a 10 GB A100 vGPU with a 535 driver; setup.sh pins NVRTC to match.
+
+# Nexus ("nexus-dev"). No mirror; 10 GB A100 vGPU on a 535 driver (setup.sh pins NVRTC).
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"

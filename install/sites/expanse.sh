@@ -1,7 +1,6 @@
 #!/bin/bash
-# SDSC Expanse (ClusterName "expanse"). Reached from ../../install.sh.
-# No database mirror; setup.sh fetches the parameters and example templates.
-# No default account is set here, so the first association is used unless overridden.
+
+# SDSC Expanse ("expanse"). No mirror; no default account, so the first association is used.
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
