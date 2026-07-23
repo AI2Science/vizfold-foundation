@@ -96,6 +96,75 @@ pub fn prefix() -> PathBuf {
         .unwrap_or_else(openfold_home)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SlurmContext {
+    InStep,
+    InAllocation,
+    None,
+}
+
+impl SlurmContext {
+    pub fn detect() -> Self {
+        if std::env::var_os("SLURM_STEP_ID").is_some() {
+            Self::InStep
+        } else if std::env::var_os("SLURM_JOB_ID").is_some() {
+            Self::InAllocation
+        } else {
+            Self::None
+        }
+    }
+}
+
+/// SLURM launch prefix for a fold, mirroring `install/setup.sh:212`. Empty means run bare --
+/// either we are already on the node, or no GPU partition is configured (the workstation case).
+pub fn gpu_launch(
+    context: SlurmContext,
+    partition: Option<&str>,
+    account: Option<&str>,
+    gres: Option<&str>,
+    resources: Option<&str>,
+    time: Option<&str>,
+) -> Vec<String> {
+    match context {
+        SlurmContext::InStep => return Vec::new(),
+        SlurmContext::InAllocation => return vec!["srun".to_owned(), "--ntasks=1".to_owned()],
+        SlurmContext::None => {}
+    }
+    let partition = partition.filter(|p| !p.is_empty());
+    let Some(partition) = partition else {
+        return Vec::new();
+    };
+    let mut args = vec!["srun".to_owned()];
+    if let Some(account) = account.filter(|a| !a.is_empty()) {
+        args.push("-A".to_owned());
+        args.push(account.to_owned());
+    }
+    args.push("-p".to_owned());
+    args.push(partition.to_owned());
+    args.push(format!("--gres={}", gres.unwrap_or("gpu:1")));
+    // Holds several space-separated flags and must split, as setup.sh:212 relies on word splitting.
+    args.extend(
+        resources
+            .unwrap_or("--cpus-per-task=8 --mem=32G")
+            .split_whitespace()
+            .map(str::to_owned),
+    );
+    args.push("-t".to_owned());
+    args.push(time.unwrap_or("02:00:00").to_owned());
+    args
+}
+
+pub fn gpu_launch_args() -> Vec<String> {
+    gpu_launch(
+        SlurmContext::detect(),
+        resolved("OPENFOLD_GPU_PARTITION").as_deref(),
+        resolved("OPENFOLD_GPU_ACCOUNT").as_deref(),
+        resolved("OPENFOLD_GPU_GRES").as_deref(),
+        resolved("OPENFOLD_GPU_RESOURCES").as_deref(),
+        resolved("OPENFOLD_GPU_TIME").as_deref(),
+    )
+}
+
 pub fn database_url() -> String {
     if let Ok(u) = std::env::var("DATABASE_URL")
         && !u.is_empty()
@@ -135,4 +204,92 @@ pub fn repository_root() -> PathBuf {
         .nth(3)
         .expect("executor manifest should be nested under the repository root")
         .to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SlurmContext, gpu_launch};
+
+    #[test]
+    fn in_step_runs_bare() {
+        assert!(
+            gpu_launch(
+                SlurmContext::InStep,
+                Some("gpuA100x4"),
+                None,
+                None,
+                None,
+                None
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn in_allocation_uses_a_plain_step() {
+        assert_eq!(
+            gpu_launch(
+                SlurmContext::InAllocation,
+                Some("gpuA100x4"),
+                None,
+                None,
+                None,
+                None
+            ),
+            vec!["srun", "--ntasks=1"]
+        );
+    }
+
+    #[test]
+    fn no_partition_runs_bare() {
+        assert!(gpu_launch(SlurmContext::None, None, Some("acct"), None, None, None).is_empty());
+    }
+
+    #[test]
+    fn empty_partition_runs_bare() {
+        assert!(gpu_launch(SlurmContext::None, Some(""), None, None, None, None).is_empty());
+    }
+
+    #[test]
+    fn resources_word_split_into_separate_arguments() {
+        assert_eq!(
+            gpu_launch(
+                SlurmContext::None,
+                Some("gpuA100x4"),
+                Some("bbkg-delta-gpu"),
+                Some("gpu:a100:1"),
+                Some("--cpus-per-task=8 --mem=32G"),
+                Some("04:00:00"),
+            ),
+            vec![
+                "srun",
+                "-A",
+                "bbkg-delta-gpu",
+                "-p",
+                "gpuA100x4",
+                "--gres=gpu:a100:1",
+                "--cpus-per-task=8",
+                "--mem=32G",
+                "-t",
+                "04:00:00",
+            ]
+        );
+    }
+
+    #[test]
+    fn defaults_match_the_installer() {
+        assert_eq!(
+            gpu_launch(SlurmContext::None, Some("gpu"), None, None, None, None),
+            vec![
+                "srun",
+                "-p",
+                "gpu",
+                "--gres=gpu:1",
+                "--cpus-per-task=8",
+                "--mem=32G",
+                "-t",
+                "02:00:00"
+            ]
+        );
+    }
 }
