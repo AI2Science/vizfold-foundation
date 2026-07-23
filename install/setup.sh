@@ -96,10 +96,15 @@ import ctypes
 v = ctypes.c_int()
 ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
 print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
+# A CPU-only build queue has no driver to probe, but the GPU node's may still be
+# older than the toolkit (Bridges-2 V100 = 12.6). Can't confirm it's new enough,
+# so assume old and pin conservatively -- 12.2 PTX loads on any >=12.2 driver and
+# still compiles OpenMM's kernels (proven on nexus). A site can set the exact one.
+: "${DRIVER_CUDA:=${OPENFOLD_FALLBACK_CUDA:-12.2}}"
 ENV_CUDA=$(ls "$CONDA_PREFIX"/lib/libnvrtc.so.*.*.* 2>/dev/null |
     sed 's/.*so\.//; s/\.[0-9]*$//' | head -1) || true
 older() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ "$1" != "$2" ]; }
-if [ -n "${DRIVER_CUDA:-}" ]; then export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA; fi
+export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA
 
 if [ -n "${DRIVER_CUDA:-}" ] && [ -n "${ENV_CUDA:-}" ] && older "$DRIVER_CUDA" "$ENV_CUDA"; then
     NVRTC=$PREFIX/nvrtc-$DRIVER_CUDA
