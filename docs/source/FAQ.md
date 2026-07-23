@@ -21,7 +21,7 @@ PyTorch (12.1). Please make sure to use the same CUDA versions.
 
 - I get some error involving `fatal error: cuda_runtime.h: No such file or directory` and or `ninja: build stopped: subcommand failed.`. 
 
-> Solution: Something went wrong with setting up some of the custom kernels. Try running `install_third_party_dependencies.sh` again or try `python3 setup.py install` from inside the OpenFold folder. Make sure to prepend the conda environment as described above before running this.
+> Solution: Something went wrong with setting up some of the custom kernels. Try running `install_third_party_dependencies.sh` again or try `pip install --no-build-isolation .` from inside the OpenFold folder. Make sure to prepend the conda environment as described above before running this.
 
 ## Training
 

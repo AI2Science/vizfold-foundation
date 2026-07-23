@@ -98,7 +98,15 @@ def _openmm_minimize(
         _add_restraints(system, pdb, stiffness, restraint_set, exclude_residues)
 
     integrator = openmm.LangevinIntegrator(0, 0.01, 0.0)
-    platform = openmm.Platform.getPlatformByName("CUDA" if use_gpu else "CPU")
+    # Some builds (e.g. the aarch64 conda openmm) ship no CUDA platform; fall back to CPU rather than fail every attempt.
+    if use_gpu:
+        try:
+            platform = openmm.Platform.getPlatformByName("CUDA")
+        except openmm.OpenMMException:
+            logging.warning("OpenMM CUDA platform not registered; relaxing on CPU")
+            platform = openmm.Platform.getPlatformByName("CPU")
+    else:
+        platform = openmm.Platform.getPlatformByName("CPU")
     simulation = openmm_app.Simulation(
         pdb.topology, system, integrator, platform
     )

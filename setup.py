@@ -13,12 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from setuptools import setup, Extension, find_packages
+import re
+import sys
+from setuptools import setup
 import subprocess
 
 import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from scripts.utils import get_nvidia_cc
 
 
@@ -62,9 +65,20 @@ _, bare_metal_major, _ = get_cuda_bare_metal_version(CUDA_HOME)
 if int(bare_metal_major) >= 11:
     compute_capabilities.add((8, 0))
 
-compute_capability, _ = get_nvidia_cc()
-if compute_capability is not None:
-    compute_capabilities = set([compute_capability])
+# TORCH_CUDA_ARCH_LIST is torch's standard override. Honour it so a build can
+# target the deployment GPUs instead of every capability, which matters when
+# building on a node with no device to probe.
+# Only major.minor entries are understood; torch's named aliases ("Ampere",
+# "All") and suffixed arches ("9.0a") are left to its own fallback.
+arch_list = re.findall(
+    r'\b(\d+)\.(\d+)\b', os.environ.get('TORCH_CUDA_ARCH_LIST', '')
+)
+if arch_list:
+    compute_capabilities = {(int(major), int(minor)) for major, minor in arch_list}
+else:
+    compute_capability, _ = get_nvidia_cc()
+    if compute_capability is not None:
+        compute_capabilities = set([compute_capability])
 
 cc_flag = []
 for major, minor in list(compute_capabilities):
@@ -74,8 +88,6 @@ for major, minor in list(compute_capabilities):
     ])
 
 extra_cuda_flags += cc_flag
-
-cc_flag = ['-gencode', 'arch=compute_70,code=sm_70']
 
 if bare_metal_major != -1:
     modules = [CUDAExtension(
@@ -112,25 +124,8 @@ else:
     )]
 
 setup(
-    name='openfold',
-    version='2.2.0',
-    description='A PyTorch reimplementation of DeepMind\'s AlphaFold 2',
-    author='OpenFold Team',
-    author_email='jennifer.wei@omsf.io',
-    license='Apache License, Version 2.0',
-    url='https://github.com/aqlaboratory/openfold',
-    packages=find_packages(exclude=["tests", "scripts"]),
-    include_package_data=True,
-    package_data={
-        "openfold": ['utils/kernel/csrc/*'],
-        "": ["resources/stereo_chemical_props.txt"]
-    },
+    # Metadata and packaging live in pyproject.toml. Only the CUDA extension
+    # stays here: it needs torch at build time to pick its -gencode flags.
     ext_modules=modules,
     cmdclass={'build_ext': BuildExtension},
-    classifiers=[
-        'License :: OSI Approved :: Apache Software License',
-        'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 3.10,'
-        'Topic :: Scientific/Engineering :: Artificial Intelligence',
-    ],
 )

@@ -1,14 +1,39 @@
-name: openfold-env 
+# OpenFold environment.
+#
+# flash-attn, deepspeed and dm-tree come from conda-forge rather than pip:
+# deepspeed and flash-attn import torch inside their setup.py, which pip's build
+# isolation hides, so a `pip:` block cannot install them (a plain
+# `conda env create -f environment.yml` fails with "No module named 'torch'"),
+# and dm-tree has no cp311 wheel.
+#
+#   flash-attn>=2.7    openfold/model/primitives.py unpacks 5 values from
+#                      unpad_input; 2.6.x returns 4, so the flash path raises
+#                      ValueError whenever it is reached.
+#   python=3.11        what this stack was solved and verified against; 3.10 also
+#                      has builds. setuptools=59.5.0 is dropped: no py311 build,
+#                      and nothing here needs that exact version.
+#   deepspeed=*=cuda*  the unqualified spec resolves to a CPU-only build.
+#
+# Versions are otherwise left to the solver so the stack stays internally
+# consistent. One constraint it cannot derive: the CUDA runtime must not exceed
+# the driver, but conda-forge's cuda-version 12.9 only requires __cuda >=12, so
+# it installs happily on a 12.8 driver and then makes OpenMM's CUDA platform
+# fail Amber minimization long after the fold itself succeeds. Cap it explicitly
+# if `nvidia-smi` reports a lower version than the solver picks. Note that
+# `env create` takes no extra specs, so this needs plain `create`:
+#
+#   mamba create -n openfold-env -f environment.yml 'cuda-version<=12.8'
+
+name: openfold-env
 channels:
   - conda-forge
   - bioconda
-  - pytorch
-  - nvidia 
+  - nvidia
 dependencies:
-  - cuda
+  - cuda-nvcc
+  - cuda-libraries-dev   # headers torch includes (cusparse, cublas, ...); Delta hid this via system CUDA
   - gcc=12.4
-  - python=3.10
-  - setuptools=59.5.0
+  - python=3.11
   - pip
   - openmm
   - pdbfixer
@@ -31,10 +56,9 @@ dependencies:
   - bioconda::hmmer
   - bioconda::hhsuite
   - bioconda::kalign2
-  - pytorch::pytorch=2.5
-  - pytorch::pytorch-cuda=12.4
+  - deepspeed=*=cuda*
+  - dm-tree
+  - flash-attn>=2.7
+  - pytorch-gpu
   - pip:
-      - deepspeed==0.14.5
-      - dm-tree==0.1.6
       - git+https://github.com/NVIDIA/dllogger.git
-      - flash-attn==2.6.3

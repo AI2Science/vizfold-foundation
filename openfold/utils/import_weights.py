@@ -16,6 +16,10 @@
 import re
 import logging
 from enum import Enum
+try:
+    from enum import member  # py3.11+: keep partial enum values as members (py3.13 makes them method descriptors)
+except ImportError:
+    def member(x): return x   # py<3.11: partial already stays a plain value
 from dataclasses import dataclass
 from functools import partial
 import numpy as np
@@ -28,27 +32,27 @@ _NPZ_KEY_PREFIX = "alphafold/alphafold_iteration/"
 
 # With Param, a poor man's enum with attributes (Rust-style)
 class ParamType(Enum):
-    LinearWeight = partial(  # hack: partial prevents fns from becoming methods
+    LinearWeight = member(partial(  # hack: partial prevents fns from becoming methods
         lambda w: w.unsqueeze(-1) if len(w.shape) == 1 else w.transpose(-1, -2)
-    )
-    LinearWeightMHA = partial(
+    ))
+    LinearWeightMHA = member(partial(
         lambda w: w.reshape(*w.shape[:-2], -1).transpose(-1, -2)
-    )
-    LinearMHAOutputWeight = partial(
+    ))
+    LinearMHAOutputWeight = member(partial(
         lambda w: w.reshape(*w.shape[:-3], -1, w.shape[-1]).transpose(-1, -2)
-    )
-    LinearBiasMHA = partial(lambda w: w.reshape(*w.shape[:-2], -1))
-    LinearWeightOPM = partial(
+    ))
+    LinearBiasMHA = member(partial(lambda w: w.reshape(*w.shape[:-2], -1)))
+    LinearWeightOPM = member(partial(
         lambda w: w.reshape(*w.shape[:-3], -1, w.shape[-1]).transpose(-1, -2)
-    )
-    LinearWeightMultimer = partial(
-        lambda w: w.unsqueeze(-1) if len(w.shape) == 1 else 
+    ))
+    LinearWeightMultimer = member(partial(
+        lambda w: w.unsqueeze(-1) if len(w.shape) == 1 else
             w.reshape(w.shape[0], -1).transpose(-1, -2)
-    )
-    LinearBiasMultimer = partial(
+    ))
+    LinearBiasMultimer = member(partial(
         lambda w: w.reshape(-1)
-    )
-    Other = partial(lambda w: w)
+    ))
+    Other = member(partial(lambda w: w))
 
     def __init__(self, fn):
         self.transformation = fn
