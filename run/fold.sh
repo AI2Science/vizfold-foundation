@@ -5,7 +5,9 @@
 #   OPENFOLD_PREFIX=<prefix> run/fold.sh 6KWC_1
 set -euo pipefail
 
-. "$(dirname "${BASH_SOURCE[0]}")/../install/config.sh"   # sets REPO, die
+# OPENFOLD_HOME if a scheduler spooled this script (BASH_SOURCE would then miss its
+# siblings); otherwise BASH_SOURCE, for a direct run. config.sh sets REPO and die().
+. "${OPENFOLD_HOME:-$(dirname "${BASH_SOURCE[0]}")/..}/install/config.sh"
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
 ENV_PREFIX=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME}

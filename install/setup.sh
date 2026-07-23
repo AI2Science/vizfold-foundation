@@ -3,7 +3,10 @@
 # Reached from a site script; ../install.sh picks one. Idempotent per step.
 set -euo pipefail
 
-. "$(dirname "${BASH_SOURCE[0]}")/config.sh"   # sets REPO, die
+# Under sbatch this runs from a spool copy, so BASH_SOURCE can't find its siblings;
+# OPENFOLD_HOME (exported by the site script) locates them. BASH_SOURCE is the
+# fallback for a direct run from a checkout. config.sh sets REPO and die().
+. "${OPENFOLD_HOME:-$(dirname "${BASH_SOURCE[0]}")/..}/install/config.sh"
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 AF2=${OPENFOLD_AF2_ROOT:-}          # a site with a database mirror names it
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
