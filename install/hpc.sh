@@ -53,7 +53,9 @@ hpc::run() {
         exec bash "$REPO/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX_DEFAULT= ACCOUNT_DEFAULT= GPU_ACCOUNT_DEFAULT= PREFIX ACCOUNT PARTITION SETUP LAUNCH
-    site::prefix; site::account; site::gpu_account
+    [ -n "${OPENFOLD_PREFIX:-}" ]      || site::prefix       # a pinned OPENFOLD_* skips that hook's discovery (and its die)
+    [ -n "${OPENFOLD_ACCOUNT:-}" ]     || site::account
+    [ -n "${OPENFOLD_GPU_ACCOUNT:-}" ] || site::gpu_account
 
     PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$PREFIX_DEFAULT")
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add site::prefix"

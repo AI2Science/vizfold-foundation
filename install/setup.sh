@@ -101,12 +101,16 @@ print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
 }
 
 # Pin NVRTC beside the env, LD_PRELOAD (beats its RPATH), so OpenMM emits PTX the driver accepts.
-setup::nvrtc_pin() {
-    local nvrtc=$PREFIX/nvrtc-$DRIVER_CUDA lib
+setup::nvrtc_create() {
+    local nvrtc=$PREFIX/nvrtc-$DRIVER_CUDA
     rm -rf "$nvrtc"
     "$MM" create -y --no-rc -p "$nvrtc" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
-    lib=$(ls "$nvrtc"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
-    test -n "$lib" || die "no libnvrtc in $nvrtc"
+}
+
+# Append every run: setup::activate rewrites openfold.sh from scratch, so this must not sit behind the create's sentinel.
+setup::nvrtc_preload() {
+    local lib; lib=$(ls "$PREFIX/nvrtc-$DRIVER_CUDA"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
+    test -n "$lib" || die "no libnvrtc in $PREFIX/nvrtc-$DRIVER_CUDA"
     echo "export LD_PRELOAD=$lib\${LD_PRELOAD:+:\$LD_PRELOAD}" \
         >> "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
     . "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
@@ -239,7 +243,10 @@ main() {
     step env        setup::env
     setup::activate
     step cutlass    setup::cutlass
-    setup::nvrtc_detect && step "nvrtc-$OPENFOLD_DRIVER_CUDA" setup::nvrtc_pin
+    if setup::nvrtc_detect; then
+        step "nvrtc-$OPENFOLD_DRIVER_CUDA" setup::nvrtc_create
+        setup::nvrtc_preload                          # unconditional: openfold.sh is rewritten every run
+    fi
     setup::openfold_present || setup::build_openfold
     if [ "$MIRROR" = yes ]; then
         setup::link_mirror
