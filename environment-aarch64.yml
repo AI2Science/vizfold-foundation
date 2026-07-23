@@ -1,0 +1,42 @@
+# OpenFold environment, aarch64 (Grace-Hopper) variant of environment.yml.
+# Differences forced by what conda-forge ships for linux-aarch64:
+#   mkl        -> nomkl   (Intel MKL is x86-only; aarch64 uses OpenBLAS)
+#   deepspeed  dropped    (no aarch64 build; it is an optional Evoformer kernel, OpenFold falls back)
+#   cuda 13    the aarch64 flash-attn/openmm/pytorch generation is CUDA 13 / py3.13, not the x86 CUDA 12 / py3.11
+name: openfold-env
+channels:
+  - conda-forge
+  - bioconda
+  - nvidia
+dependencies:
+  - cuda-nvcc
+  - cuda-libraries-dev
+  - gcc
+  - python=3.13
+  - pip
+  - openmm
+  - pdbfixer
+  - pytorch-lightning
+  - biopython
+  - numpy
+  - pandas
+  - PyYAML
+  - requests
+  - scipy
+  - tqdm
+  - typing-extensions
+  - wandb
+  - modelcif==0.7
+  - awscli
+  - ml-collections
+  - aria2
+  - nomkl
+  - git
+  - bioconda::hmmer
+  - bioconda::hhsuite
+  - bioconda::kalign2
+  - dm-tree
+  - flash-attn>=2.7
+  - pytorch=*=cuda*
+  - pip:
+      - git+https://github.com/NVIDIA/dllogger.git

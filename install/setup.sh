@@ -8,7 +8,11 @@ set -euo pipefail
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
 ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
-MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8}
+# aarch64 (Grace-Hopper) needs its own env: CUDA 13 / py3.13 generation, GH200-only sm_90.
+case $(uname -m) in
+    aarch64|arm64) ENV_YML=$REPO/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-13.9} ;;
+    *)             ENV_YML=$REPO/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
+esac
 
 DATA=$PREFIX/data
 ENV_DIR=$PREFIX/mamba/envs/$ENV_NAME
@@ -22,7 +26,7 @@ export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
 export PIP_CACHE_DIR=$PREFIX/../.openfold-pip
 export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
 # Every GPU these sites schedule (7.0 V100 .. 9.0 H100); a missing arch = "no kernel image".
-export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-7.0;8.0;8.6;9.0}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-$ARCH_DEFAULT}"
 # A CPU build node exposes no __cuda; without this, conda resolves pytorch-gpu to junk.
 export CONDA_OVERRIDE_CUDA=${OPENFOLD_MAX_CUDA:-12.8}
 
@@ -62,7 +66,7 @@ step "conda env $ENV_NAME"
 # By path + --no-rc so a ~/.condarc envs_dirs/channels can't hijack a reproducible env.
 sealed env || {
     rm -rf "$ENV_DIR"   # clear a partial env; create fails on a non-empty dir
-    "$MM" create -y --no-rc -p "$ENV_DIR" -f "$REPO/environment.yml" "cuda-version<=$MAX_CUDA"
+    "$MM" create -y --no-rc -p "$ENV_DIR" -f "$ENV_YML" "cuda-version<=$MAX_CUDA"
     seal env
 }
 
