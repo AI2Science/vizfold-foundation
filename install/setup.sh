@@ -22,6 +22,9 @@ export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
 export PIP_CACHE_DIR=$PREFIX/../.openfold-pip   # $HOME is small on some sites
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0;8.6;9.0}"   # no device to probe
 export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
+# A CPU build node has no driver, so conda sees no __cuda and resolves pytorch-gpu
+# down to an ancient CPU build that no longer exists. Assert the version instead.
+export CONDA_OVERRIDE_CUDA=${OPENFOLD_MAX_CUDA:-12.8}
 
 MIRROR=$([ -n "$AF2" ] && [ -d "$AF2" ] && echo yes || echo no)
 REQUIRED=("$REPO/openfold/resources/params/params_model_1_ptm.npz" "$STEREO"
@@ -39,7 +42,7 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo "== $* (+$((SECONDS))s)"; }
 have() { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 
-mkdir -p "$PREFIX/bin" "$TMPDIR" "$UNICLUST" "$REPO/openfold/resources"
+mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$REPO/openfold/resources"
 hostname
 nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
 echo "prefix=$PREFIX repo=$REPO env=$ENV_NAME max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
@@ -116,10 +119,15 @@ step datasets
 if [ "$MIRROR" = yes ]; then
     ln -sfn "$AF2"/* "$DATA/"
     ln -sfn "$AF2/params" "$REPO/openfold/resources/params"
-    # The schema asks for uniclust30; Delta ships its successor under uniref30.
-    for f in "$AF2"/uniref30/UniRef30_2021_03*; do
-        ln -sfn "$f" "$UNICLUST/uniclust30_2018_08${f##*UniRef30_2021_03}"
-    done
+    # hhblits wants uniclust30_2018_08. A mirror that ships it (PACE) is linked
+    # above; one that ships only its successor uniref30 (Delta) is aliased here.
+    # Guard on have(), not the symlink: writing into a linked read-only mirror fails.
+    if ! have "$UNICLUST/uniclust30_2018_08"; then
+        mkdir -p "$UNICLUST"
+        for f in "$AF2"/uniref30/UniRef30_2021_03*; do
+            [ -e "$f" ] && ln -sfn "$f" "$UNICLUST/uniclust30_2018_08${f##*UniRef30_2021_03}"
+        done
+    fi
 else
     # No mirror: fetch the parameters, and the templates the bundled examples cite.
     # Into the prefix, not the checkout: these are 4 GB, and a site puts its

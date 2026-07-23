@@ -1,4 +1,5 @@
 {
+  "OPENFOLD_AF2_ROOT": "/storage/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data",
   "OPENFOLD_EXAMPLE": "6KWC_1",
   "OPENFOLD_GPU_GRES": "gpu:a100:1",
   "OPENFOLD_GPU_PARTITION": "ice-gpu",
