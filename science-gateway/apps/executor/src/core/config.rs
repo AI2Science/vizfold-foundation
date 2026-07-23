@@ -141,14 +141,13 @@ pub fn gpu_launch(
     }
     args.push("-p".to_owned());
     args.push(partition.to_owned());
-    args.push(format!("--gres={}", gres.unwrap_or("gpu:1")));
+    let gres = gres.filter(|g| !g.is_empty()).unwrap_or("gpu:1");
+    args.push(format!("--gres={gres}"));
     // Holds several space-separated flags and must split, as setup.sh:212 relies on word splitting.
-    args.extend(
-        resources
-            .unwrap_or("--cpus-per-task=8 --mem=32G")
-            .split_whitespace()
-            .map(str::to_owned),
-    );
+    let resources = resources
+        .filter(|r| !r.is_empty())
+        .unwrap_or("--cpus-per-task=8 --mem=32G");
+    args.extend(resources.split_whitespace().map(str::to_owned));
     args.push("-t".to_owned());
     args.push(time.unwrap_or("02:00:00").to_owned());
     args
@@ -277,9 +276,33 @@ mod tests {
     }
 
     #[test]
-    fn defaults_match_the_installer() {
+    fn none_gres_resources_and_time_fall_back_to_defaults() {
         assert_eq!(
             gpu_launch(SlurmContext::None, Some("gpu"), None, None, None, None),
+            vec![
+                "srun",
+                "-p",
+                "gpu",
+                "--gres=gpu:1",
+                "--cpus-per-task=8",
+                "--mem=32G",
+                "-t",
+                "02:00:00"
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_gres_and_resources_fall_back_to_the_same_defaults_as_none() {
+        assert_eq!(
+            gpu_launch(
+                SlurmContext::None,
+                Some("gpu"),
+                None,
+                Some(""),
+                Some(""),
+                None
+            ),
             vec![
                 "srun",
                 "-p",
