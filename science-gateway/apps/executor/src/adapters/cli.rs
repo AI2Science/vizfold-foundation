@@ -172,24 +172,58 @@ pub async fn run() -> Result<(), DbErr> {
 }
 
 /// Install a model backend (OpenFold) by running the checkout's `install/init.sh` with
-/// inherited stdio. Idempotent: its steps are sentinel-guarded, so re-running is safe.
+/// inherited stdio. The release binary ships only itself, so the checkout is cloned on
+/// first init. Idempotent: its steps are sentinel-guarded, so re-running is safe.
 fn run_init() -> Result<(), DbErr> {
-    let installer = config::vizfold_src().join("install/init.sh");
+    let src = config::vizfold_src();
+    let installer = src.join("install/init.sh");
+    if !installer.is_file() {
+        clone_checkout(&src)?;
+    }
     if !installer.is_file() {
         return Err(DbErr::Custom(format!(
-            "no vizfold checkout found at {}; re-run the bootstrap installer (set VIZFOLD_SRC to override)",
-            installer.display()
+            "no vizfold checkout at {}; set VIZFOLD_SRC to a checkout",
+            src.display()
         )));
     }
     println!("Running model install: bash {}", installer.display());
     let status = std::process::Command::new("bash")
         .arg(&installer)
+        .env("OPENFOLD_HOME", &src)
         .status()
         .map_err(|error| DbErr::Custom(format!("failed to launch model install: {error}")))?;
     status
         .success()
         .then_some(())
         .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
+}
+
+/// Clone the vizfold checkout `vizfold init` runs its scripts (and serves the dashboard)
+/// from -- the release binary ships only itself. Pins the binary's own version tag
+/// (`VIZFOLD_REF` overrides), falling back to the repo default branch.
+fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
+    let repo =
+        std::env::var("VIZFOLD_REPO").unwrap_or_else(|_| "AI2Science/vizfold-foundation".into());
+    let url = format!("https://github.com/{repo}.git");
+    let dest = src.to_string_lossy().into_owned();
+    let pinned = match std::env::var("VIZFOLD_REF") {
+        Ok(r) if !r.is_empty() => Some(r),
+        _ => Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
+    };
+    println!("Fetching the vizfold checkout into {dest} ...");
+    let clone = |args: &[&str]| std::process::Command::new("git").args(args).status();
+    if let Some(r) = &pinned
+        && let Ok(s) = clone(&["clone", "--depth", "1", "--branch", r, &url, &dest])
+        && s.success()
+    {
+        return Ok(());
+    }
+    match clone(&["clone", "--depth", "1", &url, &dest]) {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err(DbErr::Custom(format!(
+            "failed to clone {url} into {dest}; set VIZFOLD_SRC to an existing checkout"
+        ))),
+    }
 }
 
 /// Start the workbench dashboard, streaming its output to this shell.

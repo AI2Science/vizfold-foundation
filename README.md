@@ -23,16 +23,19 @@ Two steps on a cluster. First bootstrap the `vizfold` CLI — one command, needs
 curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 ```
 
-That clones a checkout, builds the `vizfold` binary, and installs it to `~/.local/bin`. Then
+That downloads the prebuilt `vizfold` binary for your architecture from the latest GitHub
+release and installs it to `~/.local/bin` (set `VIZFOLD_VERSION=vX.Y.Z` to pin a release). Then
 install the OpenFold backend:
 
 ```bash
 vizfold init
 ```
 
-`vizfold init` works out where it is running, picks the site, submits the OpenFold install to
-the scheduler, and prints the exact command to fold a test sequence. Cold: ~8 min on NCSA
-Delta, ~25 min where the AlphaFold databases have to be downloaded.
+`vizfold init` clones the matching checkout to `$HOME/vizfold-src` on first run (the binary
+ships only itself; the `install/` scripts and dashboard come from there), works out where it is
+running, picks the site, submits the OpenFold install to the scheduler, and prints the exact
+command to fold a test sequence. Cold: ~8 min on NCSA Delta, ~25 min where the AlphaFold
+databases have to be downloaded.
 
 ### Supported clusters
 
@@ -42,14 +45,14 @@ accounts you can charge); the values below are what a fresh install settles on.
 
 | `ClusterName` (cluster) | Verified | Arch | AF2 databases | Build → fold partition (GPU) | Install prefix |
 | --- | --- | --- | --- | --- | --- |
-| `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/openfold` |
-| `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² |
-| `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/openfold` |
-| `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/openfold` |
-| `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/openfold` |
-| `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/openfold` |
-| `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `~/scratch` real root (`/storage/ice1/…`) |
-| `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `~/scratch` real root (`/storage/scratch1/…`) |
+| `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/vizfold` |
+| `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/vizfold-gh`² |
+| `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/vizfold` |
+| `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/vizfold` |
+| `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/vizfold` |
+| `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/vizfold` |
+| `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `<scratch>/vizfold` (`/storage/ice1/…`) |
+| `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `<scratch>/vizfold` (`/storage/scratch1/…`) |
 
 Legend — ✅ install + fold verified end-to-end from `vizfold init` (fold → 2839-atom relaxed
 structure); ◐ install run on the cluster with its site-specific fixes, final fold not re-confirmed
@@ -80,22 +83,32 @@ exactly what you care about and nothing else:
 
 | | | |
 | --- | --- | --- |
-| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/openfold vizfold init` |
+| 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold init` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
-`install/sites/delta.json`:
+A `<site>.json` carries every variable and templates paths off `$VAR` references, resolved
+recursively (`$VAR` against the environment first, then other keys in the same file). The site's
+`<site>.sh` discovers only the one login-specific atom the templates need — the allocation, the
+SLURM account, or `OPENFOLD_BASE` (the install directory). `install/sites/delta.json`:
 
 ```json
 {
+  "OPENFOLD_ACCOUNT": "$ALLOC-delta-cpu",
   "OPENFOLD_AF2_ROOT": "/work/hdd/data/alphafold2/database",
+  "OPENFOLD_BASE": "/work/nvme/$ALLOC/$USER",
   "OPENFOLD_EXAMPLE": "6KWC_1",
+  "OPENFOLD_GPU_ACCOUNT": "$ALLOC-delta-gpu",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=32G",
   "OPENFOLD_MAX_CUDA": "12.8",
-  "OPENFOLD_PARTITION": "cpu"
+  "OPENFOLD_PARTITION": "cpu",
+  "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"
 }
 ```
+
+Here `delta.sh` discovers just `$ALLOC` (the `/work/nvme` allocation, via `sacctmgr`); the
+account, base, and prefix all template off it.
 
 `install/sites/nexus-dev.json` — no database mirror, so `OPENFOLD_AF2_ROOT` is absent and the
 install fetches the parameters itself. Its GPU is a 10 GB vGPU, hence the smaller example and
@@ -117,17 +130,17 @@ To override for one run, put the variable inline — it wins over both files:
 OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 vizfold init
 ```
 
-Paths and accounts are worked out per site and are not in these files: the install prefix
-comes from your project space, and the SLURM accounts from the ones you can actually charge.
-Every value it settles on is written to `~/.config/vizfold/vizfold.json`, so other tools can
-read where things ended up instead of guessing.
+Only the login-specific atom is discovered at run time (the allocation, account, or install
+base); the templates in the `.json` derive the rest. Every value it settles on — fully
+expanded — is written to `~/.config/vizfold/vizfold.json`, so other tools can read where things
+ended up instead of guessing.
 
 ### Adding a cluster
 
-Two files in `install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` for
-what has to be computed (prefix, accounts, launcher) and `<name>.json` for what is just a
-value. `vizfold init` (via `install/init.sh`) dispatches on `ClusterName`, so nothing else
-needs to change.
+Two files in `install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
+single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
+declares everything else and templates paths/accounts off that atom (and `$USER`). `vizfold
+init` (via `install/init.sh`) dispatches on `ClusterName`, so nothing else needs to change.
 
 ---
 

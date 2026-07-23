@@ -57,8 +57,8 @@ pub fn openfold_home() -> PathBuf {
         .unwrap_or_else(repository_root)
 }
 
-/// Repo checkout holding `install/init.sh` (what `vizfold init` runs). `VIZFOLD_SRC` env >
-/// vizfold.json `OPENFOLD_HOME` > the bootstrap's default clone location (`$HOME/openfold-src`).
+/// Repo checkout holding `install/init.sh` (what `vizfold init` runs, cloning it if absent).
+/// `VIZFOLD_SRC` env > vizfold.json `OPENFOLD_HOME` > the default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
     if let Ok(v) = std::env::var("VIZFOLD_SRC")
         && !v.is_empty()
@@ -67,7 +67,7 @@ pub fn vizfold_src() -> PathBuf {
     }
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("{}/openfold-src", home_dir())))
+        .unwrap_or_else(|| PathBuf::from(format!("{}/vizfold-src", home_dir())))
 }
 
 pub fn data_dir() -> PathBuf {

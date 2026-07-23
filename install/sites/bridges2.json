@@ -8,5 +8,5 @@
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=5 --mem=32G",
   "OPENFOLD_MAX_CUDA": "12.8",
   "OPENFOLD_PARTITION": "RM-shared",
-  "OPENFOLD_PREFIX": "$OPENFOLD_BASE/openfold"
+  "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"
 }
