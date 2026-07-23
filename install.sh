@@ -35,7 +35,7 @@ bootstrap::sync_checkout() {
             git -C "$REPO" reset -q --hard FETCH_HEAD ||
             echo "warning: could not update $REPO, using it as-is" >&2
     else
-        git clone -q --branch "$BRANCH" "$REPO_URL" "$REPO"
+        git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$REPO"   # tip only; the install needs no history
     fi
 }
 
