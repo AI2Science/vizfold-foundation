@@ -3,6 +3,7 @@
 #   mkl        -> nomkl   (Intel MKL is x86-only; aarch64 uses OpenBLAS)
 #   deepspeed  dropped    (no aarch64 build; it is an optional Evoformer kernel, OpenFold falls back)
 #   cuda 13    the aarch64 flash-attn/openmm/pytorch generation is CUDA 13 / py3.13, not the x86 CUDA 12 / py3.11
+#   gcc<15     gcc 15's -Wtemplate-body strictness rejects torch 2.12's ATen headers (List_inl.h needs 'typename')
 name: openfold-env
 channels:
   - conda-forge
@@ -11,7 +12,8 @@ channels:
 dependencies:
   - cuda-nvcc
   - cuda-libraries-dev
-  - gcc
+  - gcc<15
+  - gxx<15
   - python=3.13
   - pip
   - openmm
