@@ -39,7 +39,7 @@ moving target.
 | # | Decision | Rationale |
 |---|---|---|
 | 1 | **Keep** the 3-table catalog and the schema interpreter | Explicit call. The audit recommended cutting both (~1,385 LOC); preserved instead for decision 2. |
-| 2 | The catalog's job is a **provenance log** | Rows are written by `vizfold install` from resolved config, **append-on-change, never mutated**. Each run FKs the rows current at queue time, so run #47 stays reproducible after a reinstall changes the config. This defeats the "it is only ever 1-2 rows" critique: provenance rows accumulate. |
+| 2 | Provenance is a **snapshot serialized onto the run row**, not a versioned catalog | Original plan was append-on-change catalog rows. Verification killed it: `slug` carries `UNIQUE` at both DB and entity level on all three catalogs, `.one()` has no `ORDER BY` so ~10 reads would silently resolve to the oldest row, `seed_defaults` runs on every `ExecutionCore::bootstrap()`, and profile lookups keyed on `(backend_id, target_id)` fork when `backend.id` changes. A `runs.provenance_json` column is immutable by construction (runs are already append-only), needs no constraint surgery, and records *what actually ran* rather than a pointer to a mutable row. See [PR5](#pr5--provenance-snapshot-60-loc). |
 | 3 | Workbench gets wired up (Project B) | Hence `axum` stays and becomes a real API rather than being deleted and re-added. |
 | 4 | HPC execution is **blocking `srun`**, never detached `sbatch` | Fits `CommandRunner`'s fire-and-wait shape with no schema change. Detached batch would need `runs.job_id`, a `running` status, a poll command, and crash reconciliation. |
 | 5 | Sequencing is **value-first** | Workstation + HPC land in PR1-2 (~70 LOC, provably independent of all layer surgery). Everything after is subtraction against a working system. |
@@ -275,25 +275,40 @@ break compilation are the 3 in `openfold_execution.rs` (`:423, :444, :464`) and 
 **Drop `#![allow(dead_code)]` from `services/mod.rs`** in this PR — otherwise it silently masks
 every service function that PR4 and PR5 orphan.
 
-### PR5 — Provenance (−20 LOC net)
+### PR5 — Provenance snapshot (+60 LOC)
 
-`vizfold install` writes the catalog rows from resolved config, replacing the hardcoded
-`seed.rs` blocks. Semantics: **compare the resolved config against the newest existing row of that
-kind; if any compared field differs, insert a new row; never `UPDATE`.** Runs FK the rows current
-at queue time (they already do), so historical runs keep pointing at what actually produced them.
+Add a nullable `provenance_json` column to `runs`. At queue time, serialize the resolved
+backend / target / profile payload plus the env-derived paths into it:
 
-The compared fields, stated explicitly so "changed" is not a judgement call:
+```rust
+json!({
+    "backend":  { "slug": .., "version": .., "parameter_schema": .. },
+    "target":   { "slug": .., "available_resources": .. },
+    "profile":  { "invocation_kind": .., "config": .. },
+    "resolved": { "openfold_home": .., "prefix": .., "env_prefix": .. },
+})
+```
 
-| Row | Compared on |
-|---|---|
-| `model_backends` | `slug`, `version` |
-| `execution_targets` | `slug`, `target_type`, `available_resources_json` |
-| `model_invocation_profiles` | `slug`, `invocation_kind`, `config_json` |
+The catalog tables are **not** touched — `UNIQUE` on slug stays, seeding stays idempotent, no
+ordering changes, no new migrations beyond the one column.
 
-"Newest" means highest `id` among rows sharing that `slug`. Lookups that currently resolve a slug
-to a single row (`cli.rs:588-591`) must become "newest row for this slug" — otherwise a second
-provenance row makes the query ambiguous. This is the one place PR5 changes read behaviour, and it
-is the step most likely to break `queue-run` if missed.
+**This fixes a live correctness bug**, which is the real justification. `update_config`
+(`repositories/model_invocation_profiles.rs:37-49`) mutates the very row completed runs point at,
+and `resolve_output_location` (`output_locations.rs:9-36`) reads `output_location` out of that same
+`config_json` at artifact-registration time (`cli.rs:480`). So today, config drift between a run
+finishing and its artifacts being registered silently relocates where the executor looks for that
+run's outputs. After this PR, a completed run resolves its output location from its own immutable
+snapshot.
+
+Why not versioned catalog rows: `slug` is `UNIQUE` at both DB (`unique_key()` in three migrations)
+and entity (`#[sea_orm(unique)]`) level, so a second row cannot be inserted without three SQLite
+table rebuilds; `.one()` has no `ORDER BY`, so every slug read would silently return the oldest
+row; `seed_defaults` runs on every `ExecutionCore::bootstrap()` (`execution.rs:56`), so any
+imprecision in change-detection appends a row per CLI invocation; the profile lookups at
+`seed.rs:216, :244` key on `(backend_id, target_id)` and fork into duplicates the moment
+`backend.id` changes; and `config_json` embeds env-derived paths, so a different checkout would
+append a version every run. `runs` also FKs the catalog `ON DELETE RESTRICT`, making superseded
+rows unprunable.
 
 The 4 registry services become the write path and are thereby justified — they are the only place
 `require_json_object` validation runs.
@@ -323,15 +338,29 @@ The 4 registry services become the write path and are thereby justified — they
   table-drive the surviving `plan_openfold_command` flag cases into a single loop over
   `(params, expected_flag, expected_value)`.
 
-### PR7 — Squash migrations (−560 LOC)
+### PR7 — Baseline schema, old migrations deleted (−560 LOC)
 
-7 migrations (710 LOC) into 1 create-schema migration (~150). `m20260717_000005` drops and rebuilds
-the artifacts table that `m20260707_000003` created two weeks earlier, and carries a
-`create_legacy_artifacts_table()` helper. Every `down()` is dead: rolling back a single-user local
-SQLite file means deleting it, which is exactly what `science-gateway/README.md:179-224` prescribes
-while stating no production-safe migration path exists.
+The project is pre-production, so there is no migration history worth preserving. **Replace all 7
+migration files with a single baseline** that creates the schema as it is actually needed, and
+delete the old ones outright rather than squashing them into an equivalent chain.
 
-**Do this last**, once the entity set has stopped moving, so the squash happens once.
+The 7 are not a coherent history anyway: `m20260717_000005` drops and rebuilds the artifacts table
+that `m20260707_000003` created two weeks earlier, and carries a `create_legacy_artifacts_table()`
+helper for data that never existed in production. Every `down()` is dead — rolling back a
+single-user local SQLite file means deleting the file, exactly what
+`science-gateway/README.md:179-224` already prescribes.
+
+The baseline creates all 6 tables at their final shape and **includes `runs.provenance_json`
+directly**, so PR5 needs no `ALTER` migration of its own. Retained deliberately though currently
+unread: `artifact_types.display_mode` / `.viewer_kind` and `execution_targets.target_type` —
+Project B consumes the first two, and decision 1 keeps the third.
+
+**Sequencing change:** this now runs *before* PR5 rather than last, because PR5 depends on the
+column it introduces. The entity set is stable from that point — PR4 and PR6 change layering and
+control flow, not schema.
+
+**Existing dev databases are not migrated.** Delete the SQLite file and let it recreate; that is
+already the documented workflow, and `seed_defaults` is existence-guarded so it repopulates.
 
 ### Reconciliation
 
@@ -341,14 +370,18 @@ while stating no production-safe migration path exists.
 | PR2 `srun` + streaming | +25 |
 | PR3 dead surface | −800 |
 | PR4 `repositories/` | −620 (269 impl + ~350 redundant tests removed by choice) |
-| PR5 provenance | −20 |
+| PR5 provenance snapshot | +60 |
 | PR6 ceremony + tests | −585 |
-| PR7 migration squash | −560 |
-| **Net** | **−2,515** |
+| PR7 baseline schema | −560 |
+| **Net** | **−2,435** |
 
-7,858 − 2,515 = **5,343** (−32%). PR4 and PR6 figures include the tests that delete alongside
+7,858 − 2,435 = **5,423** (−31%). PR4 and PR6 figures include the tests that delete alongside
 their implementation, which is where most of the test reduction comes from. Treat all counts as
 ±10%: they are `wc -l` on the current tree, spot-verified, not a compiler's opinion.
+
+**Execution order** (differs from PR numbering, which follows the spec's narrative):
+PR1 → PR2 → PR3 → PR7 → PR5 → PR4 → PR6. Value first, then the schema baseline that PR5 needs,
+then the layering cleanup. PR3 must precede PR4 (the `examples/` dependency).
 
 ## Data flow
 
@@ -413,8 +446,9 @@ interpreter's permutation tests stay with the interpreter (decision 1).
 2. `vizfold execute-run` folds on a beefy workstation with no SLURM present, defaulting to all
    cores and streaming progress.
 3. The same command on a cluster prefixes `srun` correctly in all four contexts.
-4. Re-running `vizfold install` after a config change appends a catalog row; an unchanged config
-   appends none; no existing row is ever mutated.
+4. A queued run carries a `provenance_json` snapshot of the backend, target, profile, and resolved
+   paths that produced it, and a completed run resolves its output location from that snapshot
+   rather than from a profile row that may have been mutated since.
 5. `cargo build`, `cargo test`, `cargo clippy --all-targets` clean.
 6. Rust LOC 7,858 → ~5,300 (−32%); 6 tables intact.
 
