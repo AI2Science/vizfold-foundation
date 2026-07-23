@@ -14,6 +14,9 @@ config::file() {
 }
 
 # Fill unset vars from a JSON file, never overwriting -- so inline > user file > site defaults.
+# Values are templates: $VAR/${VAR} resolve against the environment first, then against other keys in
+# the same file, recursively -- so a <site>.json builds OPENFOLD_PREFIX off OPENFOLD_BASE off a
+# discovered $ALLOC, in any key order. No commands run; an unresolved name expands to empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
     [ -r "$file" ] && command -v python3 >/dev/null || return 0
@@ -22,14 +25,21 @@ config::fill() {
     while IFS='=' read -r key value; do
         if [ -n "$key" ] && [ -z "${!key:-}" ]; then export "$key=$value"; fi
     done < <(python3 -c '
-import json, sys
+import json, os, re, sys
 try:
-    items = json.load(open(sys.argv[1])).items()
+    scope = {k: v for k, v in json.load(open(sys.argv[1])).items() if isinstance(v, str) and "\n" not in v}
 except Exception:
     sys.exit(0)
-for k, v in items:
-    if isinstance(v, str) and "\n" not in v:
-        print(f"{k}={v}")' "$file" 2>/dev/null)
+ref = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+def resolve(name, seen):
+    if name in os.environ: return os.environ[name]           # inline / discovered / user-file wins
+    if name in scope and name not in seen: return expand(scope[name], seen | {name})
+    return ""                                                # unknown -> empty (discovery dies if an atom is missing)
+def expand(val, seen):
+    return ref.sub(lambda m: resolve(m.group(1) or m.group(2), seen), val)
+for k, v in scope.items():
+    if k not in os.environ:                                  # fill unset only
+        print(f"{k}={expand(v, {k})}")' "$file" 2>/dev/null)
     return 0
 }
 

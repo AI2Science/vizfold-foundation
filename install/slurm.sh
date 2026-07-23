@@ -8,10 +8,9 @@ SLURM_SH=1
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
-# Hooks a site contributes. Each sets the *_DEFAULT that slurm::run declares (bash dynamic scope); unset ones stay no-ops.
-slurm::prefix()      { :; }
-slurm::account()     { :; }
-slurm::gpu_account() { :; }
+# A site overrides this to export the account-specific vars its <site>.json templates reference
+# ($ALLOC, OPENFOLD_ACCOUNT, OPENFOLD_SCRATCH, ...). No-op by default; runs before <site>.json is filled.
+slurm::discover() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
 slurm::allocation() {
@@ -36,6 +35,7 @@ slurm::nvme_alloc() {
     [ -n "${ALLOC:-}" ] && return
     ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
     [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
+    export ALLOC
 }
 
 # The user's Slurm default account, overridable inline.
@@ -52,16 +52,12 @@ slurm::run() {
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v sbatch >/dev/null 2>&1; then
         exec bash "$REPO/install/setup.sh"          # no scheduler: install here
     fi
-    local PREFIX_DEFAULT= ACCOUNT_DEFAULT= GPU_ACCOUNT_DEFAULT= PREFIX ACCOUNT PARTITION SETUP LAUNCH
-    [ -n "${OPENFOLD_PREFIX:-}" ]      || slurm::prefix       # a pinned OPENFOLD_* skips that hook's discovery (and its die)
-    [ -n "${OPENFOLD_ACCOUNT:-}" ]     || slurm::account
-    [ -n "${OPENFOLD_GPU_ACCOUNT:-}" ] || slurm::gpu_account
-
-    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$PREFIX_DEFAULT")
-    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add slurm::prefix"
-    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(slurm::default_account)
-    ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "$ACCOUNT_DEFAULT")
-    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${GPU_ACCOUNT_DEFAULT:-$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
+    local PREFIX ACCOUNT PARTITION SETUP LAUNCH
+    # OPENFOLD_PREFIX/ACCOUNT come pre-resolved: inline env, or <site>.json templates expanded off slurm::discover's vars.
+    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "${OPENFOLD_PREFIX:-}")
+    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
+    ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
+    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
     SETUP=$REPO/install/setup.sh
     mkdir -p "$PREFIX"

@@ -25,9 +25,10 @@ init::pick_site() {
 }
 
 init::dispatch() {
-    config::site_defaults "$SITES/$SITE.sh"   # <site>.json defaults (fills unset)
-    . "$SITES/$SITE.sh"                        # register this site's hook overrides
-    slurm::run                                   # execute the assembled function set
+    . "$SITES/$SITE.sh"                                 # register slurm::discover
+    [ -n "${OPENFOLD_PREFIX:-}" ] || slurm::discover    # export the account-specific vars the <site>.json templates need
+    config::site_defaults "$SITES/$SITE.sh"             # fill + expand <site>.json (templates resolve off the discovered vars)
+    slurm::run
 }
 
 main() {

@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Nexus ("nexus-dev"). No mirror; 10 GB A100 vGPU on a 535 driver (setup.sh pins NVRTC); bulk data on shared /projects, not $HOME.
+# Nexus ("nexus-dev"). No mirror; 10 GB A100 vGPU on a 535 driver (setup.sh pins NVRTC); prefix templates off OPENFOLD_BASE = a writable /projects dir, not $HOME.
 
-slurm::prefix() {
-    local c base
+slurm::discover() {
+    local c
     for c in "/projects/$USER" /projects/*/"$USER" /projects; do
-        [ -d "$c" ] && [ -w "$c" ] && { base=$c; break; }
+        [ -d "$c" ] && [ -w "$c" ] && { export OPENFOLD_BASE=$c; return; }
     done
-    PREFIX_DEFAULT=${base:-$HOME}/openfold
+    export OPENFOLD_BASE=$HOME
 }
