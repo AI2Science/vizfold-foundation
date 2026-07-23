@@ -43,7 +43,7 @@ moving target.
 | 3 | Workbench gets wired up (Project B) | Hence `axum` stays and becomes a real API rather than being deleted and re-added. |
 | 4 | HPC execution is **blocking `srun`**, never detached `sbatch` | Fits `CommandRunner`'s fire-and-wait shape with no schema change. Detached batch would need `runs.job_id`, a `running` status, a poll command, and crash reconciliation. |
 | 5 | Sequencing is **value-first** | Workstation + HPC land in PR1-2 (~70 LOC, provably independent of all layer surgery). Everything after is subtraction against a working system. |
-| 6 | **`vizfold install` also uses blocking `srun` with streamed stdio** | Consistency: no stage of the system detaches. Covered in PR2. |
+| 6 | **`vizfold install` runs on an interactive shell throughout, streaming every step live** | **This is the primary goal of the project.** A user watching an install must see each step and its sub-process output as it happens, not a silent terminal that bursts at the end. Requires `srun --pty`; forbids piping the install through `tee`. Covered in PR2. |
 
 ### Rejected
 
@@ -125,25 +125,55 @@ vizfold install  -> .status() inherits stdio          streams   (cli.rs:204)
 Replace the `sbatch` branch at `slurm.sh:73-80` with `srun`:
 
 ```bash
+pty=(); [ -t 1 ] && pty=(--pty)
 LAUNCH=(
-    srun --job-name=vizfold-install
+    srun -u "${pty[@]}" --job-name=vizfold-install
     --account="$ACCOUNT" --partition="$PARTITION"
     --nodes=1 --ntasks=1 --cpus-per-task="${OPENFOLD_BUILD_CPUS:-8}"
     --mem="${OPENFOLD_BUILD_MEM:-24G}" --time="${OPENFOLD_BUILD_TIME:-02:00:00}"
     ${OPENFOLD_BUILD_GRES:+--gres="$OPENFOLD_BUILD_GRES"}
 )
-"${LAUNCH[@]}" "$SETUP" 2>&1 | tee "$PREFIX/install.log"
-exit "${PIPESTATUS[0]}"
+exec "${LAUNCH[@]}" "$SETUP"
 ```
 
 `--output=` and `--export=ALL` drop — both are `sbatch` concepts; `srun` streams to the terminal
-and propagates the environment by default. `exec` is replaced by the tee pipeline, with
-`PIPESTATUS[0]` preserving the real exit code. This collapses branches 2 and 3 into one tool.
+and propagates the environment by default. `exec` is preserved, so the exit code is exact. This
+collapses branches 2 and 3 into one tool.
+
+**`--pty` is load-bearing, not cosmetic** (decision 6). It gives the remote task a pseudo-terminal,
+so tools inside `setup.sh` stay in interactive mode. Without it, srun hands the task a pipe and
+every one of them switches to block buffering:
+
+| Tool in `setup.sh` | Task stdout is a pipe | Task stdout is a PTY |
+|---|---|---|
+| `curl` (params, templates, datasets) | progress meter suppressed entirely | live progress |
+| `micromamba` / `conda` solve | no progress rendering | live |
+| `python` build steps | 4–8 KB block buffering, output bursts | line-buffered |
+| `git clone` | no progress | live |
+
+`-u` additionally stops srun's *own* line buffering of forwarded output. `--pty` is applied only
+when stdout is a terminal (`[ -t 1 ]`), so non-interactive invocations (CI, `nohup`) still work —
+`srun --pty` requires a real terminal on the calling side.
+
+**Do not pipe the install through `tee`.** It replaces the TTY with a pipe and reintroduces every
+row of the table above. The README documents `script(1)` instead, which allocates a PTY and
+therefore logs *without* destroying interactivity:
+
+```bash
+script -q -e -c 'vizfold install' install.log
+```
 
 Losing the terminal is survivable: `install/setup.sh:14` documents that *"a step seals only after
 finishing, so an interrupted create/clone/download is redone next run, not skipped"* — re-running
 `vizfold install` continues. README gains a `tmux` recommendation for long installs. Nothing reads
 the dropped `install-%j.log`; the path appears exactly once in the repo, at `slurm.sh:79`.
+
+**Step visibility already exists and must be preserved.** `setup.sh:9` defines
+`log() { echo "== $* (+$((SECONDS))s)"; }` and 7 steps announce themselves with elapsed time:
+`activate` (:66), `nvrtc` (:85), `openfold` (:124), `datasets` (:134), `templates` (:163),
+`verify` (:186), `config` (:221). These are what the user watches scroll by. Note `setup::ready`
+only *prints* the example-fold command inside a heredoc — it does not execute it, so
+`vizfold install` is a single job, not a chain of them.
 
 **Fold path (Rust).** Compose the `srun` prefix in `config.rs` from the four persisted keys
 `OPENFOLD_GPU_{ACCOUNT,PARTITION,RESOURCES,GRES}`, mirroring `setup.sh:212`. Note the composed
@@ -329,8 +359,10 @@ interpreter's permutation tests stay with the interpreter (decision 1).
 
 ## Success criteria
 
-1. `vizfold install` on a login node runs via blocking `srun`, streams live, and writes
-   `$PREFIX/install.log`; the real exit code propagates.
+1. **(Primary)** `vizfold install` on a login node runs via blocking `srun --pty`, and every one of
+   `setup.sh`'s 7 steps plus its sub-process output (curl progress, micromamba solve, build output)
+   appears live on the terminal as it happens — not buffered, not after the fact. The real exit
+   code propagates.
 2. `vizfold execute-run` folds on a beefy workstation with no SLURM present, defaulting to all
    cores and streaming progress.
 3. The same command on a cluster prefixes `srun` correctly in all four contexts.
@@ -344,6 +376,7 @@ interpreter's permutation tests stay with the interpreter (decision 1).
 | Risk | Mitigation |
 |---|---|
 | `srun` holds the terminal through a queue wait | `srun` prints `job N queued and waiting for resources`; README recommends `tmux`. Install is resumable (`setup.sh:14`). |
+| `srun --pty` is restricted or behaves oddly at some sites | Applied only when `[ -t 1 ]`. If a site rejects it, the install still runs — just line-buffered. Verify on Delta and one PACE cluster before merging. |
 | Streaming loses captured stderr | Accepted; the fallback message already exists and live output is strictly more useful. |
 | PR5 changes bootstrap behaviour | Seeds are existence-guarded today; append-on-change is additive. Verify on a fresh DB and an existing one. |
 | PR7 squash on an existing dev DB | Already the documented workflow: delete the SQLite file and re-create (`science-gateway/README.md:179-224`). |
