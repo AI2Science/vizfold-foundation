@@ -37,6 +37,20 @@ running, picks the site, submits the OpenFold install to the scheduler, and prin
 command to fold a test sequence. Cold: ~8 min on NCSA Delta, ~25 min where the AlphaFold
 databases have to be downloaded.
 
+`vizfold install` holds your terminal and streams every step of the install as it happens. On a
+cluster it runs as a blocking `srun` job, so a queue wait shows as
+`srun: job N queued and waiting for resources`. Use `tmux` or `screen` for long installs — if the
+connection drops, re-run `vizfold install` and it continues from the last completed step.
+
+To keep a log, wrap the whole command rather than piping it:
+
+```bash
+script -q -e -c 'vizfold install' install.log
+```
+
+Do not pipe to `tee` — that replaces the terminal with a pipe, which suppresses download progress
+meters and makes the output arrive in delayed bursts.
+
 ### Uninstall
 
 ```bash
