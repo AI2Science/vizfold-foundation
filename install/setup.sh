@@ -132,11 +132,20 @@ setup::build_openfold() {
 
 setup::link_mirror() {
     log datasets
-    ln -sfn "$AF2"/* "$DATA/"
+    for d in "$AF2"/*; do
+        [ "${d##*/}" = uniclust30 ] && continue
+        ln -sfn "$d" "$DATA/"
+    done
     ln -sfn "$AF2/params" "$REPO/openfold/resources/params"
-    # uniclust30_2018_08: shipped by some mirrors, else aliased from uniref30. have() guard avoids writing a read-only mirror.
-    if ! have "$UNICLUST/uniclust30_2018_08"; then
-        mkdir -p "$UNICLUST"
+    # uniclust30_2018_08 goes in a writable canonical dir (not the read-only mirror symlink): the mirror's real set if present (single- or double-nested), else aliased from uniref30.
+    mkdir -p "$UNICLUST"
+    local src="" c
+    for c in "$AF2/uniclust30/uniclust30_2018_08" "$AF2/uniclust30"; do
+        compgen -G "$c/uniclust30_2018_08_*" >/dev/null 2>&1 && { src=$c; break; }
+    done
+    if [ -n "$src" ]; then
+        ln -sfn "$src"/uniclust30_2018_08_* "$UNICLUST/"
+    else
         for f in "$AF2"/uniref30/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]*; do
             [ -e "$f" ] || continue
             ln -sfn "$f" "$UNICLUST/uniclust30_2018_08${f##*/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]}"
