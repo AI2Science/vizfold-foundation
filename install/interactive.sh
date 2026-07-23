@@ -1,10 +1,4 @@
-# interactive.sh -- ask before guessing. Library; source it, do not run it.
-#
-#   . "$REPO/install/interactive.sh"
-#   prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$HOME/openfold")
-#
-# Always echoes a value so the caller proceeds: reports the site's default, or takes an
-# answer at /dev/tty (not stdin, which under `curl | bash` is the script itself).
+# interactive.sh -- library. resolve() echoes a value (the site default, or a /dev/tty answer), so callers always proceed.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "interactive.sh is a library" >&2; exit 1; }
 [ -n "${INTERACTIVE_SH:-}" ] && return 0

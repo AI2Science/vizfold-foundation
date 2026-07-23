@@ -1,11 +1,5 @@
 #!/bin/bash
-# hpc.sh -- shared SLURM site flow. Library. A <site>.sh sources it, loads its
-# <site>.json, resolves its prefix (and non-default accounts), then calls hpc::submit.
-#   . "$(dirname "${BASH_SOURCE[0]}")/../hpc.sh"
-#   config::site_defaults "${BASH_SOURCE[0]}"
-#   hpc::submit "<default prefix>" ["<default account>"]
-# GPU account = build account + OPENFOLD_GPU_ACCOUNT_SUFFIX (Anvil bills GPUs apart);
-# the rest (_GPU_PARTITION, _GPU_RESOURCES, _GPU_GRES, _EXAMPLE) setup.sh reads.
+# hpc.sh -- shared SLURM site flow. Library: a <site>.sh sources it, loads <site>.json, resolves prefix/accounts, then calls hpc::submit.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "hpc.sh is a library" >&2; exit 1; }
 [ -n "${HPC_SH:-}" ] && return 0
@@ -14,9 +8,7 @@ HPC_SH=1
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
-# Pick a per-allocation prefix cluster (Delta-family): scan <root>/*/<user> for dirs
-# whose allocation has every given account suffix, preferring one that already holds
-# an install. $1 = dir root, $2.. = required account suffixes. Echoes the allocation.
+# Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
 hpc::allocation() {
     local root=$1; shift
     local dir alloc accounts s ok found=()

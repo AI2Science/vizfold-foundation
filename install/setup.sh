@@ -40,8 +40,7 @@ BINARIES=(jackhmmer hhblits hhsearch)
 
 step() { echo "== $* (+$((SECONDS))s)"; }
 have() { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
-# A step seals only after finishing, so an interrupted create/clone/download (dir
-# exists but incomplete) is redone next run, not skipped.
+# A step seals only after finishing, so an interrupted create/clone/download is redone next run, not skipped.
 sentinel=$PREFIX/.done
 sealed() { [ -e "$sentinel/$1" ]; }
 seal()   { mkdir -p "$sentinel"; touch "$sentinel/$1"; }
