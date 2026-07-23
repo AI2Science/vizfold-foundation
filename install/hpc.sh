@@ -1,5 +1,5 @@
 #!/bin/bash
-# hpc.sh -- shared SLURM site flow. Library: a <site>.sh sources it, loads <site>.json, resolves prefix/accounts, then calls hpc::submit.
+# hpc.sh -- shared SLURM flow. Base declares site::* hooks as no-ops; a sourced sites/<name>.sh overrides the ones it needs; hpc::run assembles and executes them.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "hpc.sh is a library" >&2; exit 1; }
 [ -n "${HPC_SH:-}" ] && return 0
@@ -7,6 +7,11 @@ HPC_SH=1
 
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
+
+# Hooks a site contributes. Each sets the *_DEFAULT that hpc::run declares (bash dynamic scope); unset ones stay no-ops.
+site::prefix()      { :; }
+site::account()     { :; }
+site::gpu_account() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
 hpc::allocation() {
@@ -26,15 +31,25 @@ hpc::allocation() {
     echo "${found[0]}"
 }
 
-hpc::submit() {
-    local prefix_default=$1 account_default=${2:-}
-    local PREFIX ACCOUNT PARTITION SETUP LAUNCH
+# Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
+hpc::scratch_root() {
+    local s; s=$(readlink -f "$HOME/scratch") || return 1
+    case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
+}
 
-    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$prefix_default")
-    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX"
-    ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" \
-        "${account_default:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}")
-    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}
+# Run the assembled hooks, then submit setup.sh to the scheduler (or run it in place when there is none).
+hpc::run() {
+    if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v sbatch >/dev/null 2>&1; then
+        exec bash "$REPO/install/setup.sh"          # no scheduler: install here
+    fi
+    local PREFIX_DEFAULT= ACCOUNT_DEFAULT= GPU_ACCOUNT_DEFAULT= PREFIX ACCOUNT PARTITION SETUP LAUNCH
+    site::prefix; site::account; site::gpu_account
+
+    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$PREFIX_DEFAULT")
+    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add site::prefix"
+    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)
+    ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "$ACCOUNT_DEFAULT")
+    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${GPU_ACCOUNT_DEFAULT:-$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
     SETUP=$REPO/install/setup.sh
     mkdir -p "$PREFIX"
@@ -52,7 +67,7 @@ hpc::submit() {
             --account="$ACCOUNT" --partition="$PARTITION"
             --nodes=1 --ntasks=1 --cpus-per-task="${OPENFOLD_BUILD_CPUS:-8}"
             --mem="${OPENFOLD_BUILD_MEM:-24G}" --time="${OPENFOLD_BUILD_TIME:-02:00:00}"
-            ${OPENFOLD_BUILD_GRES:+--gres="$OPENFOLD_BUILD_GRES"}   # Delta-AI rejects CPU-only jobs
+            ${OPENFOLD_BUILD_GRES:+--gres="$OPENFOLD_BUILD_GRES"}
             --output="$PREFIX/install-%j.log" --export=ALL
         )
     fi

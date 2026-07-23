@@ -1,5 +1,3 @@
 #!/bin/bash
 
-# No batch scheduler: hand off to setup.sh, which finds the checkout itself.
-set -euo pipefail
-exec bash "$(dirname "${BASH_SOURCE[0]}")/../setup.sh"
+# No batch scheduler: contributes no hooks, so hpc::run finds no sbatch and installs in place via setup.sh.
