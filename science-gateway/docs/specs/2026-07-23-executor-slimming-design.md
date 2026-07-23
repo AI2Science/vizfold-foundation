@@ -205,28 +205,75 @@ structural cleanup.
   (`preflight.rs:70`) — zero non-test callers. **Trap:** `PreflightCheck::passed(name, message)` at
   `preflight.rs:18` is a *different, live* constructor. Do not delete it. `failures()` (`:77`) and
   `has_failures()` (`:57`) are also live.
-- `pub const DEFAULT_DATABASE_URL` (`config.rs:5`) — zero callers.
-- `repository_root()` (`config.rs:119`) — `pub` but called only within `config.rs`; make private.
+- `pub const DEFAULT_DATABASE_URL` (`config.rs:5`) — zero callers, verified repo-wide.
+- `repository_root()` (`config.rs:132`, not `:119`) — **only its `pub` goes away, not the function**:
+  it is the `unwrap_or_else` fallback for `openfold_home()` at `config.rs:57`, which is used
+  throughout `cli.rs`, `seed.rs`, and tests. (The `repository_root()` calls in
+  `examples/run_openfold_workflow.rs` are a *different*, file-local function.)
 - The `local-mock` execution target and `mock` invocation profile seed blocks. Dead twice over:
   nothing names `local-mock` in production, and `openfold.rs:461` rejects its `invocation_kind`.
-  The 3 tests referencing it register their own fixture inline, as `openfold_execution.rs:339`
+  The tests referencing it register their own fixture inline, as `openfold_execution.rs:339`
   already does. **This removes two seeded rows, not the tables** — decision 1 keeps every table;
   decision 2 gives them a job. Unreachable rows are not part of that job.
-- `default-run = "vizfold"` in `Cargo.toml`. Because the package is named `executor` and `main.rs`
-  exists, `cargo run` currently starts the `/health` stub instead of the CLI.
+  Seed blocks: `seed.rs:164, :172, :211, :228-230`. Live test dependencies to fix in the same
+  commit: `tests.rs:87, :127, :148, :175, :195`, including the test named
+  `seeds_local_openfold_target_and_profile_without_removing_mock_seed` (`tests.rs:80`).
+  Unrelated and must not be touched: `output_locations.rs:54` uses `invocation_kind: "mock"` in its
+  own inline fixture.
+- **Add** `default-run = "vizfold"` to `Cargo.toml` (there is no such key today — this is an
+  addition, not a deletion). Because the package is named `executor` and `main.rs` exists, `cargo run`
+  currently starts the `/health` stub instead of the CLI. Note `rest.rs::serve` is the *only* caller
+  of `ExecutionCore::{bootstrap, check_readiness, db}`, which PR6 keeps for Project B.
+
+**PR3 must land before PR4.** `examples/register_openfold_demo_artifacts.rs:82` is the only
+`repositories::` caller outside `src/`, so deleting `repositories/` first breaks that example. CI
+never builds examples (`release.yml` builds `--bin vizfold` only), so the breakage would be
+invisible to CI and surface only under a local `cargo test`, which does build examples.
 
 ### PR4 — Delete `repositories/` (−620 LOC: 269 impl + ~350 tests that go with it)
 
-Every function is a one-line forward: `list` = `Entity::find().all(db)`, `find_by_id` =
-`Entity::find_by_id(id).one(db)`. `mod.rs` already carries `#![allow(dead_code)]`.
+Most functions are a one-line forward: `list` = `Entity::find().all(db)`, `find_by_id` =
+`Entity::find_by_id(id).one(db)`, `find_by_slug` = `.filter(Column::Slug.eq(slug)).one(db)`.
+`mod.rs` already carries `#![allow(dead_code)]`.
 
-Inline SeaORM at the ~15 call sites. The two functions with real bodies — `runs::update_status`
-(field-merge) and `model_invocation_profiles::update_config` — become free functions in
-`services/runs.rs`. Point `cli.rs` at services and entities, eliminating the two-parallel-access-paths
-problem (`cli.rs:11`, and calls at `:323, :333, :444, :447, :450, :595, :614, :633`).
+**There are 43 call sites, not ~15** (corrected from the original audit estimate): 30 in
+`services/`, 9 in `cli.rs`, 3 in `openfold_execution.rs` tests, 1 in `seed.rs`, 1 in `examples/`.
 
-Roughly 9 of `tests.rs`'s 15 tests delete with this — they are SeaORM insert/select round-trips
-testing the framework. Keep the 4 `rejects_*` validation tests.
+Two functions are **not** trivial and must not be inlined naively:
+
+- `runs::update_status` (`repositories/runs.rs:32-58`) is a read-modify-write with **double-Option**
+  semantics — `UpdateRunStatusInput.{started_at,completed_at,error_message}` are `Option<Option<T>>`
+  (`services/runs.rs:26-28`), where outer `None` means *leave the column alone* and `Some(None)`
+  means *write NULL*. A naive `Set(update.started_at)` collapses the two and silently NULLs columns
+  on a partial update.
+- `model_invocation_profiles::update_config` (`repositories/model_invocation_profiles.rs:37-49`)
+  additionally stamps `updated_at = Set(Utc::now())`. `runs::update_status` deliberately does **not**
+  (the `runs` entity has no `updated_at`; its time columns are `submitted_at`/`started_at`/`completed_at`).
+  Preserve that asymmetry exactly.
+
+`cli.rs` **cannot simply "point at services"**: only 3 of its 9 repository calls have a service
+equivalent (the three `list`s). The other 6 — `model_backends::find_by_id` ×2,
+`model_backends::find_by_slug`, `execution_targets::find_by_slug`,
+`model_invocation_profiles::find_by_id` — have no service function and must become inline SeaORM.
+Note `services::runs` has no `find_by_id`; the nearest is `get_run_with_artifacts`, which also
+loads artifacts.
+
+Correct `cli.rs` sites: `:467, :477, :517, :588, :591, :594, :739, :758, :777`, plus the import at
+`:11`. **Grep trap:** all 9 are *unprefixed* (`model_backends::find_by_id(…)`), so
+`grep -rn 'repositories::'` finds none of them — and the same `use` block imports `services::{…}`,
+so `artifacts::list_artifacts_for_run` (`:485`) and every `runs::*` in `cli.rs` are *service* calls
+that must not be rewritten. **Name collision:** swapping the import for
+`entities::{execution_targets, model_backends, model_invocation_profiles}` clashes with the
+fully-qualified `crate::core::entities::model_invocation_profiles::Model` at `cli.rs:692` and with
+the identically-named service modules — choose aliases deliberately.
+
+`src/core/tests.rs` contains **zero** `repositories::` references — every test goes through
+`services::`. So no test in that file fails to compile; ~9 of its 15 merely become redundant
+round-trips and are removed as a judgement call, not a forced consequence. The only tests that
+break compilation are the 3 in `openfold_execution.rs` (`:423, :444, :464`) and its import at `:201`.
+
+**Drop `#![allow(dead_code)]` from `services/mod.rs`** in this PR — otherwise it silently masks
+every service function that PR4 and PR5 orphan.
 
 ### PR5 — Provenance (−20 LOC net)
 
@@ -293,7 +340,7 @@ while stating no production-safe migration path exists.
 | PR1 workstation | +45 |
 | PR2 `srun` + streaming | +25 |
 | PR3 dead surface | −800 |
-| PR4 `repositories/` | −620 |
+| PR4 `repositories/` | −620 (269 impl + ~350 redundant tests removed by choice) |
 | PR5 provenance | −20 |
 | PR6 ceremony + tests | −585 |
 | PR7 migration squash | −560 |
