@@ -1,10 +1,12 @@
 {
   "OPENFOLD_AF2_ROOT": "/ocean/datasets/community/alphafold/v2.3.2",
+  "OPENFOLD_BASE": "/ocean/projects/$OPENFOLD_ACCOUNT/$USER",
   "OPENFOLD_BUILD_CPUS": "16",
   "OPENFOLD_EXAMPLE": "6KWC_1",
   "OPENFOLD_GPU_GRES": "gpu:v100-32:1",
   "OPENFOLD_GPU_PARTITION": "GPU-shared",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=5 --mem=32G",
   "OPENFOLD_MAX_CUDA": "12.8",
-  "OPENFOLD_PARTITION": "RM-shared"
+  "OPENFOLD_PARTITION": "RM-shared",
+  "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"
 }

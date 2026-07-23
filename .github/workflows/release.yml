@@ -1,0 +1,50 @@
+name: release
+
+# Push a version tag (e.g. v0.1.0) to build the vizfold CLI and publish it as
+# release assets that install.sh downloads. Static musl binaries so they run on
+# HPC login nodes regardless of the host glibc.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: vizfold-linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: vizfold-linux-aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust and the musl target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build vizfold
+        working-directory: science-gateway/apps/executor
+        run: cargo build --release --target ${{ matrix.target }} --bin vizfold
+
+      - name: Stage asset
+        run: |
+          cp "science-gateway/apps/executor/target/${{ matrix.target }}/release/vizfold" "${{ matrix.asset }}"
+          chmod +x "${{ matrix.asset }}"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}

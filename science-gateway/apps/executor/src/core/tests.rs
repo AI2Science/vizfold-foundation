@@ -115,8 +115,8 @@ async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() ->
         json!({
             "program": "python3",
             "script": "run_pretrained_openfold.py",
-            "working_dir": config::repository_root(),
-            "output_location": config::repository_root().join("science-gateway").join("openfold-demo-output"),
+            "working_dir": config::openfold_home(),
+            "output_location": config::prefix().join("runs"),
         })
     );
     Ok(())

@@ -1,3 +1,4 @@
+use chrono::Utc;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait, Set};
 
 use crate::core::{
@@ -43,5 +44,6 @@ pub async fn update_config(
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let mut active_model: model_invocation_profiles::ActiveModel = model.into();
     active_model.config_json = Set(config_json);
+    active_model.updated_at = Set(Utc::now());
     active_model.update(db).await
 }

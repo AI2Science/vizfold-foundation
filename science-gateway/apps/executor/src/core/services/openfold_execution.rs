@@ -1,10 +1,14 @@
+use std::path::Path;
+
 use chrono::Utc;
 use sea_orm::{DatabaseConnection, DbErr};
 
 use crate::core::{
-    commands::CommandRunner,
+    commands::{CommandRunner, CommandSpec},
+    config,
     execution::{ExecutionWorkflowResult, execute_command_workflow},
     model_runners::openfold::{OpenFoldPreflightRunner, plan_openfold_command},
+    output_locations::resolve_output_location,
     repositories,
 };
 
@@ -20,6 +24,7 @@ pub async fn execute_openfold_run(
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
 
+    let started_at = Utc::now();
     let execution = async {
         let model_backend = repositories::model_backends::find_by_id(db, run.model_backend_id)
             .await?
@@ -33,6 +38,16 @@ pub async fn execute_openfold_run(
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
+        // fold.sh does `mkdir -p "$OUTPUT_DIR"`; create the run workspace (+ attention/)
+        // so a fresh install runs without a manual mkdir and preflight's output_dir check passes.
+        let workspace = resolve_output_location(&invocation_profile, &run)?;
+        std::fs::create_dir_all(workspace.join("attention")).map_err(|error| {
+            DbErr::Custom(format!(
+                "failed to create run output workspace '{}': {error}",
+                workspace.display()
+            ))
+        })?;
+
         let command =
             plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
         let preflight_runner = OpenFoldPreflightRunner {
@@ -41,13 +56,22 @@ pub async fn execute_openfold_run(
             run: &run,
         };
 
-        execute_command_workflow(&command, runner, Some(&preflight_runner)).await
+        // Preflight validates the real python3 command; the runner gets an env-activated
+        // wrapper so torch/openfold resolve without a manual `micromamba activate`. Gated on
+        // micromamba actually being installed at the prefix (so tests/dev run the command bare).
+        let prefix = config::prefix();
+        let exec_command = if prefix.join("bin/micromamba").is_file() {
+            activate_env_command(&command, &prefix, &config::openfold_env_prefix())
+        } else {
+            command.clone()
+        };
+        execute_command_workflow(&exec_command, runner, Some(&preflight_runner)).await
     }
     .await;
 
     match execution {
         Ok(result) if result.command_output.is_none() => {
-            mark_failed(db, run_id, preflight_failure_message(&result)).await?;
+            mark_failed(db, run_id, started_at, preflight_failure_message(&result)).await?;
             Ok(result)
         }
         Ok(result) => {
@@ -61,9 +85,9 @@ pub async fn execute_openfold_run(
                     run_id,
                     UpdateRunStatusInput {
                         status: "completed".into(),
+                        started_at: Some(Some(started_at)),
                         completed_at: Some(Some(Utc::now())),
                         error_message: Some(None),
-                        ..Default::default()
                     },
                 )
                 .await?;
@@ -73,12 +97,13 @@ pub async fn execute_openfold_run(
                 } else {
                     output.stderr.trim().to_owned()
                 };
-                mark_failed(db, run_id, message).await?;
+                mark_failed(db, run_id, started_at, message).await?;
             }
             Ok(result)
         }
         Err(error) => {
-            mark_failed(db, run_id, error.to_string()).await?;
+            // Don't `?`-propagate the DB write: it would mask the real execution error.
+            let _ = mark_failed(db, run_id, started_at, error.to_string()).await;
             Err(error)
         }
     }
@@ -87,6 +112,7 @@ pub async fn execute_openfold_run(
 async fn mark_failed(
     db: &DatabaseConnection,
     run_id: i32,
+    started_at: chrono::DateTime<Utc>,
     error_message: impl Into<String>,
 ) -> Result<(), DbErr> {
     runs::update_run_status(
@@ -94,9 +120,9 @@ async fn mark_failed(
         run_id,
         UpdateRunStatusInput {
             status: "failed".into(),
+            started_at: Some(Some(started_at)),
             completed_at: Some(Some(Utc::now())),
             error_message: Some(Some(error_message.into())),
-            ..Default::default()
         },
     )
     .await?;
@@ -126,6 +152,36 @@ fn preflight_failure_message(result: &ExecutionWorkflowResult) -> String {
     }
 }
 
+/// Wrap a planned local OpenFold command so it runs inside the installed micromamba env:
+/// activate the env, source the installer's activate.d hook (CUTLASS_PATH / LD_LIBRARY_PATH /
+/// NVRTC LD_PRELOAD), and point TRITON_CACHE_DIR node-local (overridable). `exec "$@"` runs the
+/// original program+args passed positionally, so no argument re-quoting is needed.
+fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path) -> CommandSpec {
+    let prefix = prefix.display();
+    let env_prefix = env_prefix.display();
+    let script = format!(
+        "export MAMBA_ROOT_PREFIX='{prefix}/mamba'; \
+         eval \"$('{prefix}/bin/micromamba' shell hook -s bash)\"; \
+         micromamba activate '{env_prefix}'; \
+         [ -f '{env_prefix}/etc/conda/activate.d/openfold.sh' ] && . '{env_prefix}/etc/conda/activate.d/openfold.sh'; \
+         export TRITON_CACHE_DIR=\"${{TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}}\"; \
+         exec \"$@\""
+    );
+    let mut args = vec![
+        "-c".to_owned(),
+        script,
+        "vizfold-openfold".to_owned(),
+        command.program.clone(),
+    ];
+    args.extend(command.args.iter().cloned());
+    CommandSpec {
+        program: "bash".to_owned(),
+        args,
+        current_dir: command.current_dir.clone(),
+        env: command.env.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -151,7 +207,43 @@ mod tests {
         },
     };
 
-    use super::execute_openfold_run;
+    use super::{activate_env_command, execute_openfold_run};
+
+    #[test]
+    fn activate_env_command_wraps_planned_command_in_micromamba_activation() {
+        let command = CommandSpec {
+            program: "python3".into(),
+            args: vec!["-u".into(), "run_openfold.py".into(), "6KWC_1".into()],
+            current_dir: Some(PathBuf::from("/repo")),
+            ..Default::default()
+        };
+        let wrapped = activate_env_command(
+            &command,
+            &PathBuf::from("/work/of"),
+            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+        );
+
+        assert_eq!(wrapped.program, "bash");
+        assert_eq!(wrapped.args[0], "-c");
+        let script = &wrapped.args[1];
+        assert!(script.contains("'/work/of/bin/micromamba' shell hook -s bash"));
+        assert!(script.contains("micromamba activate '/work/of/mamba/envs/openfold-env'"));
+        assert!(script.contains("activate.d/openfold.sh"));
+        assert!(script.contains("TRITON_CACHE_DIR"));
+        assert!(script.trim_end().ends_with("exec \"$@\""));
+        // Original program+args are passed positionally for `exec "$@"` (no re-quoting).
+        assert_eq!(
+            &wrapped.args[2..],
+            &[
+                "vizfold-openfold",
+                "python3",
+                "-u",
+                "run_openfold.py",
+                "6KWC_1"
+            ]
+        );
+        assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
+    }
 
     struct TestRunner {
         output: CommandOutput,
@@ -332,8 +424,13 @@ mod tests {
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
+        assert!(updated.started_at.is_some());
         assert!(updated.completed_at.is_some());
         assert_eq!(updated.error_message, None);
+        // The run workspace and its attention/ subdir are created before execution.
+        let workspace = layout.output_location.join(run.id.to_string());
+        assert!(workspace.is_dir());
+        assert!(workspace.join("attention").is_dir());
         Ok(())
     }
 

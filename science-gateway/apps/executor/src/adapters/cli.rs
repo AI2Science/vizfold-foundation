@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
-    db,
+    config, db,
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
     repositories::{execution_targets, model_backends, model_invocation_profiles},
@@ -25,6 +25,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Install a model backend (OpenFold) on this machine.
+    Init,
+    /// Start the workbench dashboard.
+    Serve(ServeArgs),
     /// Seed the default executor records.
     Seed,
     /// List executor records.
@@ -37,6 +41,13 @@ enum Command {
     ExecuteRun { run_id: i32 },
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
+}
+
+#[derive(Debug, Args)]
+struct ServeArgs {
+    /// Port for the dashboard dev server (defaults to 3000).
+    #[arg(long)]
+    port: Option<u16>,
 }
 
 #[derive(Debug, Args)]
@@ -91,13 +102,16 @@ struct OpenfoldQueueArgs {
     input_id: String,
     #[arg(long)]
     input_sequence: String,
+    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id> (fold.sh convention).
     #[arg(long)]
-    fasta_dir: String,
+    fasta_dir: Option<String>,
+    /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
     #[arg(long)]
-    data_dir: String,
+    data_dir: Option<String>,
+    /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
-    #[arg(long, default_value = "cpu")]
+    #[arg(long, default_value = "cuda:0")]
     model_device: String,
     #[arg(long, default_value_t = 1)]
     cpus: i64,
@@ -109,14 +123,29 @@ struct OpenfoldQueueArgs {
     save_outputs: bool,
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
-    #[arg(long)]
+    /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
+    /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
 
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
-    let database = db::connect_and_migrate().await?;
 
+    // `init` is the bootstrap; everything else requires an initialized config.
+    if !matches!(cli.command, Command::Init) && !config::is_initialized() {
+        eprintln!("run `vizfold init` first");
+        std::process::exit(1);
+    }
+
+    // init and serve are subprocess launchers; they need no database connection.
+    match cli.command {
+        Command::Init => return run_init(),
+        Command::Serve(args) => return run_serve(args),
+        _ => {}
+    }
+
+    let database = db::connect_and_migrate().await?;
     match cli.command {
         Command::Seed => {
             seed_defaults(&database).await?;
@@ -136,9 +165,145 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
+        Command::Init | Command::Serve(_) => unreachable!("handled before DB connect"),
     }
 
     Ok(())
+}
+
+/// Install a model backend (OpenFold) by running the checkout's `install/init.sh` with
+/// inherited stdio. The release binary ships only itself, so the checkout is cloned on
+/// first init. Idempotent: its steps are sentinel-guarded, so re-running is safe.
+fn run_init() -> Result<(), DbErr> {
+    let src = config::vizfold_src();
+    let installer = src.join("install/init.sh");
+    if !installer.is_file() {
+        clone_checkout(&src)?;
+    }
+    if !installer.is_file() {
+        return Err(DbErr::Custom(format!(
+            "no vizfold checkout at {}; set VIZFOLD_SRC to a checkout",
+            src.display()
+        )));
+    }
+    println!("Running model install: bash {}", installer.display());
+    let status = std::process::Command::new("bash")
+        .arg(&installer)
+        .env("OPENFOLD_HOME", &src)
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to launch model install: {error}")))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
+}
+
+/// Clone the vizfold checkout `vizfold init` runs its scripts (and serves the dashboard)
+/// from -- the release binary ships only itself. Pins the binary's own version tag
+/// (`VIZFOLD_REF` overrides), falling back to the repo default branch.
+fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
+    let repo =
+        std::env::var("VIZFOLD_REPO").unwrap_or_else(|_| "AI2Science/vizfold-foundation".into());
+    let url = format!("https://github.com/{repo}.git");
+    let dest = src.to_string_lossy().into_owned();
+    let pinned = match std::env::var("VIZFOLD_REF") {
+        Ok(r) if !r.is_empty() => Some(r),
+        _ => Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
+    };
+    println!("Fetching the vizfold checkout into {dest} ...");
+    let clone = |args: &[&str]| std::process::Command::new("git").args(args).status();
+    if let Some(r) = &pinned
+        && let Ok(s) = clone(&["clone", "--depth", "1", "--branch", r, &url, &dest])
+        && s.success()
+    {
+        return Ok(());
+    }
+    match clone(&["clone", "--depth", "1", &url, &dest]) {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err(DbErr::Custom(format!(
+            "failed to clone {url} into {dest}; set VIZFOLD_SRC to an existing checkout"
+        ))),
+    }
+}
+
+/// Start the workbench dashboard, streaming its output to this shell.
+fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
+    let workbench = serve_dir()?;
+
+    let node_modules = workbench.join("node_modules");
+    let empty =
+        std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
+    if empty {
+        println!("Installing workbench dependencies (npm install)...");
+        run_npm(&workbench, &["install"])?;
+    }
+
+    let port = args.port.unwrap_or(3000);
+    println!("Starting workbench at http://localhost:{port}");
+    let port_arg = port.to_string();
+    let mut npm_args = vec!["run", "dev"];
+    if args.port.is_some() {
+        npm_args.extend(["--", "--port", &port_arg]);
+    }
+    run_npm(&workbench, &npm_args)
+}
+
+/// Directory the dashboard runs from. A cluster home is inode-quota-capped NFS, so on a real
+/// install (prefix on a separate work fs) run the dashboard from a copy on that work fs — then
+/// npm's node_modules/.next land there, never on home. Dev checkout (prefix == home): run in
+/// place. The copy skips node_modules/.next (build artifacts) and preserves any already staged
+/// in the destination.
+fn serve_dir() -> Result<PathBuf, DbErr> {
+    let src = config::openfold_home().join("science-gateway/apps/workbench");
+    if config::prefix() == config::openfold_home() {
+        return Ok(src);
+    }
+    let dest = config::prefix().join("workbench");
+    copy_tree(&src, &dest, &["node_modules", ".next"]).map_err(|error| {
+        DbErr::Custom(format!(
+            "failed to stage workbench at '{}': {error}",
+            dest.display()
+        ))
+    })?;
+    Ok(dest)
+}
+
+/// Recursively copy `src` into `dst`, overwriting files and merging directories, but skip the
+/// given names at the top level (build artifacts we neither copy nor clobber in `dst`).
+fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_str().is_some_and(|n| skip.contains(&n)) {
+            continue;
+        }
+        let (from, to) = (entry.path(), dst.join(&name));
+        if entry.file_type()?.is_dir() {
+            copy_tree(&from, &to, &[])?; // skip applies only at the workbench root
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_npm(dir: &Path, args: &[&str]) -> Result<(), DbErr> {
+    let status = std::process::Command::new("npm")
+        .current_dir(dir)
+        .args(args)
+        .status()
+        .map_err(|error| {
+            DbErr::Custom(format!(
+                "failed to run npm (is Node.js installed and on PATH?): {error}"
+            ))
+        })?;
+    status.success().then_some(()).ok_or_else(|| {
+        DbErr::Custom(format!(
+            "npm {} exited with status {status}",
+            args.join(" ")
+        ))
+    })
 }
 
 async fn register_artifacts(
@@ -276,12 +441,6 @@ async fn queue_openfold_run(
     database: &sea_orm::DatabaseConnection,
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
-    if args.use_precomputed_alignments && args.alignment_dir.is_none() {
-        return Err(DbErr::Custom(
-            "--alignment-dir is required when --use-precomputed-alignments is set".into(),
-        ));
-    }
-
     let backend = model_backends::find_by_slug(database, "openfold")
         .await?
         .ok_or_else(seed_required_error)?;
@@ -298,13 +457,32 @@ async fn queue_openfold_run(
         })
         .ok_or_else(seed_required_error)?;
     let working_dir = local_openfold_working_dir(&profile)?;
-    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir, &working_dir)?;
-    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir, &working_dir)?;
-    let alignment_dir = args
-        .alignment_dir
-        .as_deref()
-        .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
-        .transpose()?;
+    let fasta_dir_input = args
+        .fasta_dir
+        .clone()
+        .unwrap_or_else(|| default_fasta_dir(&args.input_id));
+    let data_dir_input = args
+        .data_dir
+        .clone()
+        .unwrap_or_else(|| config::data_dir().to_string_lossy().into_owned());
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &fasta_dir_input, &working_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, &working_dir)?;
+    let alignment_dir = if args.use_precomputed_alignments {
+        let input = args
+            .alignment_dir
+            .clone()
+            .unwrap_or_else(default_alignment_dir);
+        Some(canonicalize_local_path(
+            "--alignment-dir",
+            &input,
+            &working_dir,
+        )?)
+    } else {
+        args.alignment_dir
+            .as_deref()
+            .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
+            .transpose()?
+    };
 
     let mut execution_parameters = serde_json::Map::from_iter([
         ("fasta_dir".into(), json!(fasta_dir)),
@@ -347,6 +525,23 @@ async fn queue_openfold_run(
     println!("\nNext:");
     println!("  vizfold execute-run {}", run.id);
     Ok(())
+}
+
+/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching fold.sh's `${INPUT_ID%_*}`.
+fn default_fasta_dir(input_id: &str) -> String {
+    let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
+    config::openfold_home()
+        .join("examples/monomer")
+        .join(format!("fasta_dir_{stem}"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_alignment_dir() -> String {
+    config::openfold_home()
+        .join("examples/monomer/alignments")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn local_openfold_working_dir(
@@ -618,11 +813,12 @@ mod tests {
                     fasta_dir,
                     data_dir,
                     demo_attn: false,
-                    use_precomputed_alignments: false,
+                    use_precomputed_alignments: true,
                     cpus: 1,
                     ..
                 })
-            }) if input_id == "6KWC_1" && input_sequence == "GSTI" && fasta_dir == "fasta" && data_dir == "data"
+            }) if input_id == "6KWC_1" && input_sequence == "GSTI"
+                && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
         ));
     }
 
@@ -643,7 +839,7 @@ mod tests {
             "--cpus",
             "4",
             "--demo-attn",
-            "--use-precomputed-alignments",
+            "--use-precomputed-alignments=false",
         ])
         .expect("queue-run command should parse");
 
@@ -653,10 +849,51 @@ mod tests {
                 model: QueueRunModel::Openfold(OpenfoldQueueArgs {
                     cpus: 4,
                     demo_attn: true,
-                    use_precomputed_alignments: true,
+                    use_precomputed_alignments: false,
                     ..
                 })
             })
+        ));
+    }
+
+    #[test]
+    fn parses_init() {
+        let cli = Cli::try_parse_from(["vizfold", "init"]).expect("init command should parse");
+        assert!(matches!(cli.command, Command::Init));
+    }
+
+    #[test]
+    fn copy_tree_excludes_build_artifacts_and_preserves_dest() {
+        let base = std::env::temp_dir().join(format!("vizfold-copytree-{}", std::process::id()));
+        let (src, dst) = (base.join("src"), base.join("dst"));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(src.join("node_modules")).unwrap();
+        std::fs::create_dir_all(src.join(".next")).unwrap();
+        std::fs::create_dir_all(src.join("app")).unwrap();
+        std::fs::write(src.join("package.json"), "{}").unwrap();
+        std::fs::write(src.join("node_modules/dep.js"), "src").unwrap();
+        std::fs::write(src.join("app/page.tsx"), "x").unwrap();
+        // A node_modules already staged in the destination must survive the copy.
+        std::fs::create_dir_all(dst.join("node_modules")).unwrap();
+        std::fs::write(dst.join("node_modules/installed.js"), "keep").unwrap();
+
+        super::copy_tree(&src, &dst, &["node_modules", ".next"]).unwrap();
+
+        assert!(dst.join("package.json").is_file());
+        assert!(dst.join("app/page.tsx").is_file());
+        assert!(!dst.join(".next").exists()); // excluded at top level
+        assert!(dst.join("node_modules/installed.js").is_file()); // preserved
+        assert!(!dst.join("node_modules/dep.js").exists()); // src node_modules not copied
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn parses_serve_with_port() {
+        let cli = Cli::try_parse_from(["vizfold", "serve", "--port", "3001"])
+            .expect("serve command should parse");
+        assert!(matches!(
+            cli.command,
+            Command::Serve(ServeArgs { port: Some(3001) })
         ));
     }
 
@@ -681,8 +918,8 @@ mod tests {
 
     #[tokio::test]
     async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
-        let local_path = std::fs::canonicalize(crate::core::config::repository_root())
-            .expect("repository root should be canonicalizable")
+        let local_path = std::fs::canonicalize(crate::core::config::openfold_home())
+            .expect("OpenFold home should be canonicalizable")
             .display()
             .to_string();
         let database = Database::connect("sqlite::memory:").await?;
@@ -700,8 +937,8 @@ mod tests {
             OpenfoldQueueArgs {
                 input_id: "6KWC_1".into(),
                 input_sequence: "GSTI".into(),
-                fasta_dir: ".".into(),
-                data_dir: ".".into(),
+                fasta_dir: Some(".".into()),
+                data_dir: Some(".".into()),
                 alignment_dir: Some(".".into()),
                 model_device: "cpu".into(),
                 cpus: 1,
@@ -749,8 +986,8 @@ mod tests {
             OpenfoldQueueArgs {
                 input_id: "6KWC_1".into(),
                 input_sequence: "GSTI".into(),
-                fasta_dir: missing_path.into(),
-                data_dir: ".".into(),
+                fasta_dir: Some(missing_path.into()),
+                data_dir: Some(".".into()),
                 alignment_dir: None,
                 model_device: "cpu".into(),
                 cpus: 1,
@@ -770,7 +1007,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains(&crate::core::config::repository_root().display().to_string())
+                .contains(&crate::core::config::openfold_home().display().to_string())
         );
         Ok(())
     }

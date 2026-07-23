@@ -107,7 +107,9 @@ cargo run --bin vizfold -- show run <run-id>
 
 ### Installing the CLI
 
-Build the development binary from `science-gateway/apps/executor`:
+End users install the prebuilt release binary via the bootstrap in the repo-root
+[README](../README.md#install) (`curl … install.sh | bash`). For development, build from source
+in `science-gateway/apps/executor`:
 
 ```bash
 cargo build --bin vizfold

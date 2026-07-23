@@ -42,9 +42,6 @@ export function HomePageClient({
   const [selectedExecutionTargetSlug, setSelectedExecutionTargetSlug] = useState(
   executionTargets[0]?.slug ?? ""
   );
-  const selectedExecutionTarget = executionTargets.find(
-    (target) => target.slug === selectedExecutionTargetSlug
-  );
   const [sequence, setSequence] = useState(DEFAULT_SEQUENCE);
   const [jobName, setJobName] = useState("");
   const [result, setResult] = useState<MockRunResult | null>(null);

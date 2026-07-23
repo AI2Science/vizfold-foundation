@@ -661,40 +661,49 @@ fn validate_execution_parameters_against_available_resources(
         return Ok(());
     };
 
-    if let Some(declaration) = properties.get("model_device") {
-        if let Some(model_device) = optional_string(execution_parameters, "model_device") {
-            if let Some(allowed_values) = declaration.get("enum").and_then(Value::as_array) {
-                let allowed = allowed_values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>();
+    // A present field is validated against its raw JSON type, not skipped when the
+    // type is wrong: emission (json_value_to_string) stringifies numbers/bools, so a
+    // wrong-typed value would otherwise bypass the enum/range guard yet still be emitted.
+    if let Some(declaration) = properties.get("model_device")
+        && let Some(value) = execution_parameters.get("model_device")
+    {
+        let model_device = value
+            .as_str()
+            .ok_or_else(|| DbErr::Custom("model_device must be a string".into()))?;
+        if let Some(allowed_values) = declaration.get("enum").and_then(Value::as_array) {
+            let allowed = allowed_values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
 
-                if !allowed.contains(&model_device.as_str()) {
-                    return Err(DbErr::Custom(format!(
-                        "model_device '{model_device}' is not allowed by execution target available resources"
-                    )));
-                }
+            if !allowed.contains(&model_device) {
+                return Err(DbErr::Custom(format!(
+                    "model_device '{model_device}' is not allowed by execution target available resources"
+                )));
             }
         }
     }
 
-    if let Some(cpus) = optional_i64(execution_parameters, "cpus") {
-        if let Some(declaration) = properties.get("cpus") {
-            if let Some(minimum) = optional_i64(declaration, "minimum") {
-                if cpus < minimum {
-                    return Err(DbErr::Custom(format!(
-                        "cpus {cpus} is below execution target resource minimum {minimum}"
-                    )));
-                }
-            }
+    if let Some(declaration) = properties.get("cpus")
+        && let Some(value) = execution_parameters.get("cpus")
+    {
+        let cpus = value
+            .as_i64()
+            .ok_or_else(|| DbErr::Custom("cpus must be an integer".into()))?;
+        if let Some(minimum) = optional_i64(declaration, "minimum")
+            && cpus < minimum
+        {
+            return Err(DbErr::Custom(format!(
+                "cpus {cpus} is below execution target resource minimum {minimum}"
+            )));
+        }
 
-            if let Some(maximum) = optional_i64(declaration, "maximum") {
-                if cpus > maximum {
-                    return Err(DbErr::Custom(format!(
-                        "cpus {cpus} exceeds execution target resource maximum {maximum}"
-                    )));
-                }
-            }
+        if let Some(maximum) = optional_i64(declaration, "maximum")
+            && cpus > maximum
+        {
+            return Err(DbErr::Custom(format!(
+                "cpus {cpus} exceeds execution target resource maximum {maximum}"
+            )));
         }
     }
 
@@ -1312,6 +1321,22 @@ mod tests {
         .expect_err("too many cpus should fail");
 
         assert!(error.to_string().contains("cpus 15 exceeds"));
+    }
+
+    #[test]
+    fn rejects_wrong_typed_cpus_that_would_bypass_range_guard() {
+        let mut execution = execution_parameters();
+        execution["cpus"] = json!("999");
+
+        let error = plan_openfold_command(
+            &model_backend(),
+            &execution_target(),
+            &invocation_profile(config()),
+            &run(json!({}).to_string(), execution.to_string()),
+        )
+        .expect_err("string cpus must not bypass the integer range guard");
+
+        assert!(error.to_string().contains("cpus must be an integer"));
     }
 
     #[test]

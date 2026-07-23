@@ -74,9 +74,7 @@ impl FakeCommandRunner {
 #[async_trait::async_trait]
 impl CommandRunner for FakeCommandRunner {
     async fn run(&self, _spec: CommandSpec) -> Result<CommandOutput, DbErr> {
-        self.output
-            .clone()
-            .map_err(|message| DbErr::Custom(message))
+        self.output.clone().map_err(DbErr::Custom)
     }
 }
 
