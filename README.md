@@ -23,6 +23,37 @@ It clones a checkout, picks the site, submits itself to the scheduler, and print
 command to fold a test sequence. Cold: ~8 min on NCSA Delta, ~25 min where the AlphaFold
 databases have to be downloaded.
 
+### Supported clusters
+
+Dispatch is on the SLURM `ClusterName`, so on these machines the one command above needs no
+arguments. Accounts and the install prefix are worked out live (your project space, the
+accounts you can charge); the values below are what a fresh install settles on.
+
+| `ClusterName` (cluster) | Arch | Install prefix | AF2 databases | Build → fold partition (GPU) | Verified |
+| --- | --- | --- | --- | --- | --- |
+| `delta` (NCSA Delta) | x86-64 | `/work/nvme/<alloc>/<user>/openfold` | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | ✅ install + fold |
+| `delta-gh` (NCSA Delta-AI) | aarch64 (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² | downloaded | `ghx4` → `ghx4-interactive` (GH200) | ✅ install + fold³ |
+| `nexus-dev` (Nexus) | x86-64 | `/projects/<user>/openfold` | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | ◐ install |
+| `anvil` (Purdue Anvil) | x86-64 | `$PROJECT/<user>/openfold` | downloaded | `shared` → `gpu` (A100) | ⚙️ profile |
+| `bridges2` (PSC Bridges-2) | x86-64 | `/ocean/projects/<acct>/<user>/openfold` | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | ⚙️ profile |
+| `expanse` (SDSC Expanse) | x86-64 | `/expanse/lustre/projects/<acct>/<user>/openfold` | downloaded | `shared` → `gpu-shared` (V100) | ⚙️ profile |
+| `ice-slurm` (GT PACE ICE) | x86-64 | `~/scratch` real root (`/storage/ice1/…`) | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | ⚙️ profile |
+| `phoenix-slurm` (GT PACE Phoenix) | x86-64 | `~/scratch` real root (`/storage/scratch1/…`) | downloaded | `cpu-small` → `gpu-a100` (A100) | ⚙️ profile |
+
+Legend — ✅ install + fold verified end-to-end from the one command (fold `6KWC_1` → 2839-atom
+relaxed structure); ◐ install verified; ⚙️ site profile written, full run still pending.
+
+1. AF2 mirrors: Delta `/sw/external/alphafold2/data_hyun_official`, Bridges-2
+   `/ocean/datasets/community/alphafold/v2.3.2`, ICE `/storage/ice1/shared/d-pace_community/…`.
+   Where there is no mirror the install downloads the ~4 GB parameters + the example's templates.
+2. Delta and Delta-AI share `/work/nvme`, so the aarch64 site uses an `-gh` suffix — otherwise the
+   two architectures' environments would clobber each other.
+3. The aarch64 conda OpenMM ships no CUDA platform, so relaxation falls back to CPU (~15 s for the
+   example) and yields the same structure as the x86 CUDA path.
+4. Nexus's 535 driver is older than the env's NVRTC, so the install pins a matching NVRTC via
+   `LD_PRELOAD`; the 10 GB vGPU gets the smaller `1UBQ_1` example. CUDA is capped at 12.8 on every
+   x86 site and 12.9 on aarch64 (the 13.x build won't compile OpenFold's extension).
+
 ### Settings
 
 Three layers, highest first. Each only fills what the one above left unset, so you override
