@@ -19,6 +19,9 @@ ENV_PREFIX=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME}
 if [ -z "${OPENFOLD_CLEAN_ENV:-}" ]; then
     clean=(HOME="$HOME" PATH="$ENV_PREFIX/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
     [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
+    # torch/DeepSpeed autotune their JIT kernels here; on NFS $HOME it is glacial
+    # (79 s vs 8 s inference). Keep it on node-local disk.
+    clean+=("TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/openfold-triton-$(id -u)}")
     while IFS= read -r kv; do clean+=("$kv"); done < <(
         env | grep -E '^(OPENFOLD_[A-Z0-9_]*|SLURM_[A-Z0-9_]*|CUDA_VISIBLE_DEVICES|GPU_DEVICE_ORDINAL|NVIDIA_VISIBLE_DEVICES)=')
     exec env -i "${clean[@]}" bash "$0" "$@"
