@@ -14,6 +14,26 @@ HPC_SH=1
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
+# Pick a per-allocation prefix cluster (Delta-family): scan <root>/*/<user> for dirs
+# whose allocation has every given account suffix, preferring one that already holds
+# an install. $1 = dir root, $2.. = required account suffixes. Echoes the allocation.
+hpc::allocation() {
+    local root=$1; shift
+    local dir alloc accounts s ok found=()
+    accounts=$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | sort -u)
+    for dir in "$root"/*/"$USER"; do
+        [ -d "$dir" ] || continue
+        alloc=$(basename "$(dirname "$dir")"); ok=1
+        for s in "$@"; do grep -qx "$alloc$s" <<<"$accounts" || ok=0; done
+        [ "$ok" = 1 ] && found+=("$alloc")
+    done
+    [ ${#found[@]} -gt 0 ] || return 1
+    for alloc in "${found[@]}"; do
+        [ -d "$root/$alloc/$USER/openfold" ] && { echo "$alloc"; return 0; }
+    done
+    echo "${found[0]}"
+}
+
 hpc::submit() {
     local prefix_default=$1 account_default=${2:-}
     local PREFIX ACCOUNT PARTITION SETUP LAUNCH
