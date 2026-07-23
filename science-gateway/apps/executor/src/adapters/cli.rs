@@ -111,7 +111,7 @@ struct OpenfoldQueueArgs {
     /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
-    #[arg(long, default_value = "cpu")]
+    #[arg(long, default_value = "cuda:0")]
     model_device: String,
     #[arg(long, default_value_t = 1)]
     cpus: i64,
@@ -123,7 +123,9 @@ struct OpenfoldQueueArgs {
     save_outputs: bool,
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
-    #[arg(long)]
+    /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
+    /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
 
@@ -195,32 +197,67 @@ fn run_init() -> Result<(), DbErr> {
 /// Start the workbench dashboard, streaming its output to this shell.
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let workbench = config::openfold_home().join("science-gateway/apps/workbench");
-    if !workbench.join("node_modules").is_dir() {
+
+    // A cluster home is inode-quota-capped NFS, where `npm ci` dies with EDQUOT; keep the heavy
+    // node_modules/.next on the roomy work filesystem (the prefix) via symlinks.
+    for name in ["node_modules", ".next"] {
+        relocate_to_prefix(&workbench, name)?;
+    }
+
+    let node_modules = workbench.join("node_modules");
+    let empty =
+        std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
+    if empty {
         println!("Installing workbench dependencies (npm ci)...");
-        let status = std::process::Command::new("npm")
-            .current_dir(&workbench)
-            .arg("ci")
-            .status()
-            .map_err(|error| DbErr::Custom(format!("failed to run npm ci: {error}")))?;
-        if !status.success() {
-            return Err(DbErr::Custom("npm ci failed".into()));
-        }
+        run_npm(&workbench, &["ci"])?;
     }
 
     let port = args.port.unwrap_or(3000);
     println!("Starting workbench at http://localhost:{port}");
-    let mut command = std::process::Command::new("npm");
-    command.current_dir(&workbench).args(["run", "dev"]);
+    let port_arg = port.to_string();
+    let mut npm_args = vec!["run", "dev"];
     if args.port.is_some() {
-        command.args(["--", "--port", &port.to_string()]);
+        npm_args.extend(["--", "--port", &port_arg]);
     }
-    let status = command
+    run_npm(&workbench, &npm_args)
+}
+
+/// Symlink `<workbench>/<name>` to `<prefix>/workbench/<name>` (creating the target), unless an
+/// entry already exists there (e.g. a real dir on a dev checkout) — keeps writes off NFS home.
+fn relocate_to_prefix(workbench: &Path, name: &str) -> Result<(), DbErr> {
+    let link = workbench.join(name);
+    if link.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+    let target = config::prefix().join("workbench").join(name);
+    std::fs::create_dir_all(&target).map_err(|error| {
+        DbErr::Custom(format!("failed to create '{}': {error}", target.display()))
+    })?;
+    std::os::unix::fs::symlink(&target, &link).map_err(|error| {
+        DbErr::Custom(format!(
+            "failed to link '{}' -> '{}': {error}",
+            link.display(),
+            target.display()
+        ))
+    })
+}
+
+fn run_npm(dir: &Path, args: &[&str]) -> Result<(), DbErr> {
+    let status = std::process::Command::new("npm")
+        .current_dir(dir)
+        .args(args)
         .status()
-        .map_err(|error| DbErr::Custom(format!("failed to launch workbench: {error}")))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| DbErr::Custom(format!("workbench exited with status {status}")))
+        .map_err(|error| {
+            DbErr::Custom(format!(
+                "failed to run npm (is Node.js installed and on PATH?): {error}"
+            ))
+        })?;
+    status.success().then_some(()).ok_or_else(|| {
+        DbErr::Custom(format!(
+            "npm {} exited with status {status}",
+            args.join(" ")
+        ))
+    })
 }
 
 async fn register_artifacts(
@@ -730,7 +767,7 @@ mod tests {
                     fasta_dir,
                     data_dir,
                     demo_attn: false,
-                    use_precomputed_alignments: false,
+                    use_precomputed_alignments: true,
                     cpus: 1,
                     ..
                 })
@@ -756,7 +793,7 @@ mod tests {
             "--cpus",
             "4",
             "--demo-attn",
-            "--use-precomputed-alignments",
+            "--use-precomputed-alignments=false",
         ])
         .expect("queue-run command should parse");
 
@@ -766,7 +803,7 @@ mod tests {
                 model: QueueRunModel::Openfold(OpenfoldQueueArgs {
                     cpus: 4,
                     demo_attn: true,
-                    use_precomputed_alignments: true,
+                    use_precomputed_alignments: false,
                     ..
                 })
             })

@@ -5,6 +5,7 @@ use crate::core::{
     commands::CommandRunner,
     execution::{ExecutionWorkflowResult, execute_command_workflow},
     model_runners::openfold::{OpenFoldPreflightRunner, plan_openfold_command},
+    output_locations::resolve_output_location,
     repositories,
 };
 
@@ -33,6 +34,16 @@ pub async fn execute_openfold_run(
             repositories::model_invocation_profiles::find_by_id(db, run.invocation_profile_id)
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+
+        // fold.sh does `mkdir -p "$OUTPUT_DIR"`; create the run workspace (+ attention/)
+        // so a fresh install runs without a manual mkdir and preflight's output_dir check passes.
+        let workspace = resolve_output_location(&invocation_profile, &run)?;
+        std::fs::create_dir_all(workspace.join("attention")).map_err(|error| {
+            DbErr::Custom(format!(
+                "failed to create run output workspace '{}': {error}",
+                workspace.display()
+            ))
+        })?;
 
         let command =
             plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
@@ -338,6 +349,10 @@ mod tests {
         assert!(updated.started_at.is_some());
         assert!(updated.completed_at.is_some());
         assert_eq!(updated.error_message, None);
+        // The run workspace and its attention/ subdir are created before execution.
+        let workspace = layout.output_location.join(run.id.to_string());
+        assert!(workspace.is_dir());
+        assert!(workspace.join("attention").is_dir());
         Ok(())
     }
 
