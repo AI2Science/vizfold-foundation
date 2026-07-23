@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bootstrap the vizfold platform CLI: download the release binary into ~/.local/bin, then `vizfold init` installs a model backend (OpenFold today; the same install/ scripts would host openfold3/boltz/esmfold).
+# Bootstrap the vizfold platform CLI: download the release binary into ~/.local/bin, then `vizfold install` installs a model backend (OpenFold today; the same install/ scripts would host openfold3/boltz/esmfold).
 set -euo pipefail
 
 die() { echo "FATAL: $*" >&2; exit 1; }
@@ -54,6 +54,6 @@ main() {
     bootstrap::asset
     bootstrap::download
     bootstrap::path
-    echo "vizfold installed at $BIN/vizfold. Run \`vizfold init\` to install a model backend (OpenFold)."
+    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install\` to install a model backend (OpenFold)."
 }
 main

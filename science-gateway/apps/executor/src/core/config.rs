@@ -57,7 +57,7 @@ pub fn openfold_home() -> PathBuf {
         .unwrap_or_else(repository_root)
 }
 
-/// Repo checkout holding `install/init.sh` (what `vizfold init` runs, cloning it if absent).
+/// Repo checkout holding `install/init.sh` (what `vizfold install` runs, cloning it if absent).
 /// `VIZFOLD_SRC` env > vizfold.json `OPENFOLD_HOME` > the default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
     if let Ok(v) = std::env::var("VIZFOLD_SRC")
@@ -67,7 +67,13 @@ pub fn vizfold_src() -> PathBuf {
     }
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("{}/vizfold-src", home_dir())))
+        .unwrap_or_else(default_src)
+}
+
+/// Where `vizfold install` clones the checkout when nothing points at an existing one --
+/// the only checkout `vizfold uninstall` may delete.
+pub fn default_src() -> PathBuf {
+    PathBuf::from(format!("{}/vizfold-src", home_dir()))
 }
 
 pub fn data_dir() -> PathBuf {
@@ -111,6 +117,13 @@ pub fn database_url() -> String {
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| format!("{}/.local/share", home_dir()));
     format!("sqlite://{dh}/vizfold/vizfold.db?mode=rwc")
+}
+
+/// File behind `database_url()`, when it is a file-backed sqlite URL.
+pub fn database_path() -> Option<PathBuf> {
+    let url = database_url();
+    let path = url.strip_prefix("sqlite://")?.split('?').next()?;
+    (!path.is_empty() && path != ":memory:").then(|| PathBuf::from(path))
 }
 
 /// Repository root for the local development layout. DEV FALLBACK ONLY: relies on

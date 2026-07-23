@@ -26,7 +26,9 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Install a model backend (OpenFold) on this machine.
-    Init,
+    Install,
+    /// Remove everything the install generated.
+    Uninstall(UninstallArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
     /// Seed the default executor records.
@@ -41,6 +43,13 @@ enum Command {
     ExecuteRun { run_id: i32 },
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
+}
+
+#[derive(Debug, Args)]
+struct UninstallArgs {
+    /// Remove without the confirmation prompt.
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -132,15 +141,18 @@ struct OpenfoldQueueArgs {
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // `init` is the bootstrap; everything else requires an initialized config.
-    if !matches!(cli.command, Command::Init) && !config::is_initialized() {
-        eprintln!("run `vizfold init` first");
+    // `install` is the bootstrap and `uninstall` cleans up after a partial one; everything
+    // else requires an initialized config.
+    if !matches!(cli.command, Command::Install | Command::Uninstall(_)) && !config::is_initialized()
+    {
+        eprintln!("run `vizfold install` first");
         std::process::exit(1);
     }
 
-    // init and serve are subprocess launchers; they need no database connection.
+    // These three touch the filesystem only; they need no database connection.
     match cli.command {
-        Command::Init => return run_init(),
+        Command::Install => return run_install(),
+        Command::Uninstall(args) => return run_uninstall(args),
         Command::Serve(args) => return run_serve(args),
         _ => {}
     }
@@ -165,7 +177,9 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
-        Command::Init | Command::Serve(_) => unreachable!("handled before DB connect"),
+        Command::Install | Command::Uninstall(_) | Command::Serve(_) => {
+            unreachable!("handled before DB connect")
+        }
     }
 
     Ok(())
@@ -173,8 +187,8 @@ pub async fn run() -> Result<(), DbErr> {
 
 /// Install a model backend (OpenFold) by running the checkout's `install/init.sh` with
 /// inherited stdio. The release binary ships only itself, so the checkout is cloned on
-/// first init. Idempotent: its steps are sentinel-guarded, so re-running is safe.
-fn run_init() -> Result<(), DbErr> {
+/// first install. Idempotent: its steps are sentinel-guarded, so re-running is safe.
+fn run_install() -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let installer = src.join("install/init.sh");
     if !installer.is_file() {
@@ -198,7 +212,7 @@ fn run_init() -> Result<(), DbErr> {
         .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
 }
 
-/// Clone the vizfold checkout `vizfold init` runs its scripts (and serves the dashboard)
+/// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
 /// from -- the release binary ships only itself. Pins the binary's own version tag
 /// (`VIZFOLD_REF` overrides), falling back to the repo default branch.
 fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
@@ -224,6 +238,136 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
             "failed to clone {url} into {dest}; set VIZFOLD_SRC to an existing checkout"
         ))),
     }
+}
+
+/// Undo `vizfold install`: the install prefix's generated trees, the caches beside it, what it
+/// planted in the checkout, the run database and the install config. Resolved here rather than
+/// in an `install/uninstall.sh` because the checkout holding that script is itself one of the
+/// things being removed. Kept: fold outputs, a checkout the user pointed at, and this binary.
+fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
+    let prefix = config::prefix();
+    let mut targets = install_paths(&prefix, &config::openfold_home());
+    // Only the clone the install made itself: a checkout the user pointed at is theirs, and one
+    // holding the prefix holds the fold outputs too.
+    let src = config::vizfold_src();
+    if src == config::default_src() && !prefix.starts_with(&src) {
+        targets.push(src);
+    }
+    if let Some(database) = config::database_path() {
+        let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
+        targets.extend([sidecar("-wal"), sidecar("-shm"), database]);
+    }
+    targets.push(config::config_file());
+
+    // Relative paths mean an empty config value resolved into one; never delete off the cwd.
+    targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
+    targets.sort();
+    targets.dedup();
+    // Drop what an outer target already covers (the clone contains the checkout paths), so the
+    // plan is what it removes. ponytail: O(n^2) over ~25 paths.
+    let outer = targets.clone();
+    targets.retain(|path| {
+        !outer
+            .iter()
+            .any(|other| other != path && path.starts_with(other))
+    });
+    if targets.is_empty() {
+        println!("Nothing to remove.");
+        return Ok(());
+    }
+
+    println!("This removes:");
+    for target in &targets {
+        println!("  {}", target.display());
+    }
+    if !args.yes && !confirmed()? {
+        println!("Aborted.");
+        return Ok(());
+    }
+    for target in &targets {
+        match remove_path(target) {
+            Ok(()) => println!("removed {}", target.display()),
+            Err(error) => eprintln!("warning: could not remove {}: {error}", target.display()),
+        }
+    }
+    if let Some(dir) = config::config_file().parent() {
+        let _ = std::fs::remove_dir(dir); // ours, but only if the uninstall emptied it
+    }
+    println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
+    Ok(())
+}
+
+/// What an install writes under the prefix and into the checkout (`install/setup.sh`), minus
+/// `<prefix>/outputs` -- those are run results, not install state.
+fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = [
+        "bin/micromamba",
+        "mamba",
+        "cutlass",
+        "tmp",
+        "data",
+        ".done",
+        "params",
+        "workbench",
+        "vizfold.db",
+    ]
+    .iter()
+    .map(|entry| prefix.join(entry))
+    .collect();
+    // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
+    paths.extend(
+        std::fs::read_dir(prefix)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| file_name(path).starts_with("nvrtc-")),
+    );
+    // Package caches, deliberately parked beside the prefix rather than in it.
+    paths.extend(
+        prefix
+            .parent()
+            .into_iter()
+            .flat_map(|dir| [dir.join(".openfold-pkgs"), dir.join(".openfold-pip")]),
+    );
+    paths.extend(
+        [
+            "openfold/resources/params",
+            "openfold/resources/stereo_chemical_props.txt",
+            "tests/test_data/alphafold/common/stereo_chemical_props.txt",
+            "openfold.egg-info", // both left by the editable install of the checkout
+            "build",
+        ]
+        .map(|entry| home.join(entry)),
+    );
+    paths
+}
+
+fn file_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+}
+
+/// Delete a file, directory tree, or symlink. `symlink_metadata` keeps a symlink to a directory
+/// (the AF2 mirror links under `<prefix>/data`) from being followed into the directory it points at.
+fn remove_path(path: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+fn confirmed() -> Result<bool, DbErr> {
+    use std::io::Write;
+    print!("Remove these? [y/N] ");
+    std::io::stdout().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| DbErr::Custom(format!("could not read confirmation: {error}")))?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
 /// Start the workbench dashboard, streaming its output to this shell.
@@ -857,9 +1001,68 @@ mod tests {
     }
 
     #[test]
-    fn parses_init() {
-        let cli = Cli::try_parse_from(["vizfold", "init"]).expect("init command should parse");
-        assert!(matches!(cli.command, Command::Init));
+    fn parses_install() {
+        let cli =
+            Cli::try_parse_from(["vizfold", "install"]).expect("install command should parse");
+        assert!(matches!(cli.command, Command::Install));
+    }
+
+    #[test]
+    fn parses_uninstall() {
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "uninstall"])
+                .expect("uninstall command should parse")
+                .command,
+            Command::Uninstall(UninstallArgs { yes: false })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "uninstall", "--yes"])
+                .expect("uninstall --yes should parse")
+                .command,
+            Command::Uninstall(UninstallArgs { yes: true })
+        ));
+    }
+
+    #[test]
+    fn install_paths_cover_generated_trees_but_not_run_outputs() {
+        let base = std::env::temp_dir().join(format!("vizfold-uninstall-{}", std::process::id()));
+        let (prefix, home) = (base.join("prefix"), base.join("checkout"));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(prefix.join("nvrtc-12.2")).unwrap();
+        std::fs::create_dir_all(prefix.join("outputs")).unwrap();
+
+        let paths = super::install_paths(&prefix, &home);
+
+        for expected in [
+            prefix.join("mamba"),
+            prefix.join("data"),
+            prefix.join(".done"),
+            prefix.join("nvrtc-12.2"),
+            base.join(".openfold-pkgs"),
+            home.join("openfold/resources/params"),
+        ] {
+            assert!(paths.contains(&expected), "missing {}", expected.display());
+        }
+        assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn remove_path_unlinks_a_symlink_without_touching_its_target() {
+        let base = std::env::temp_dir().join(format!("vizfold-rm-{}", std::process::id()));
+        let (mirror, link) = (base.join("mirror"), base.join("params"));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&mirror).unwrap();
+        std::fs::write(mirror.join("params.npz"), "keep").unwrap();
+        std::os::unix::fs::symlink(&mirror, &link).unwrap();
+
+        super::remove_path(&link).unwrap();
+
+        assert!(link.symlink_metadata().is_err(), "symlink should be gone");
+        assert!(mirror.join("params.npz").is_file(), "target must survive");
+        super::remove_path(&mirror).unwrap();
+        assert!(!mirror.exists(), "a real directory is removed whole");
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

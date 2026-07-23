@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Install a model backend (OpenFold today) on this cluster; dispatch on SLURM ClusterName, add a cluster as install/sites/<ClusterName>.sh. Invoked by `vizfold init`.
+# Install a model backend (OpenFold today) on this cluster; dispatch on SLURM ClusterName, add a cluster as install/sites/<ClusterName>.sh. Invoked by `vizfold install`.
 set -euo pipefail
 
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}   # already cloned by the bootstrap
