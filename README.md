@@ -29,19 +29,20 @@ Dispatch is on the SLURM `ClusterName`, so on these machines the one command abo
 arguments. Accounts and the install prefix are worked out live (your project space, the
 accounts you can charge); the values below are what a fresh install settles on.
 
-| `ClusterName` (cluster) | Arch | Install prefix | AF2 databases | Build → fold partition (GPU) | Verified |
+| `ClusterName` (cluster) | Verified | Arch | AF2 databases | Build → fold partition (GPU) | Install prefix |
 | --- | --- | --- | --- | --- | --- |
-| `delta` (NCSA Delta) | x86-64 | `/work/nvme/<alloc>/<user>/openfold` | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | ✅ install + fold |
-| `delta-gh` (NCSA Delta-AI) | aarch64 (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² | downloaded | `ghx4` → `ghx4-interactive` (GH200) | ✅ install + fold³ |
-| `nexus-dev` (Nexus) | x86-64 | `/projects/<user>/openfold` | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | ◐ install |
-| `anvil` (Purdue Anvil) | x86-64 | `$PROJECT/<user>/openfold` | downloaded | `shared` → `gpu` (A100) | ⚙️ profile |
-| `bridges2` (PSC Bridges-2) | x86-64 | `/ocean/projects/<acct>/<user>/openfold` | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | ⚙️ profile |
-| `expanse` (SDSC Expanse) | x86-64 | `/expanse/lustre/projects/<acct>/<user>/openfold` | downloaded | `shared` → `gpu-shared` (V100) | ⚙️ profile |
-| `ice-slurm` (GT PACE ICE) | x86-64 | `~/scratch` real root (`/storage/ice1/…`) | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | ⚙️ profile |
-| `phoenix-slurm` (GT PACE Phoenix) | x86-64 | `~/scratch` real root (`/storage/scratch1/…`) | downloaded | `cpu-small` → `gpu-a100` (A100) | ⚙️ profile |
+| `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/openfold` |
+| `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | downloaded | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² |
+| `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/openfold` |
+| `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/openfold` |
+| `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/openfold` |
+| `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/openfold` |
+| `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `~/scratch` real root (`/storage/ice1/…`) |
+| `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | downloaded | `cpu-small` → `gpu-a100` (A100) | `~/scratch` real root (`/storage/scratch1/…`) |
 
-Legend — ✅ install + fold verified end-to-end from the one command (fold `6KWC_1` → 2839-atom
-relaxed structure); ◐ install verified; ⚙️ site profile written, full run still pending.
+Legend — ✅ install + fold verified end-to-end from the one command (fold → 2839-atom relaxed
+structure); ◐ install run on the cluster with its site-specific fixes, final fold not re-confirmed
+in this pass⁵; ⚙️ site profile written and its paths probed live, full install not yet run.
 
 1. AF2 mirrors: Delta `/sw/external/alphafold2/data_hyun_official`, Bridges-2
    `/ocean/datasets/community/alphafold/v2.3.2`, ICE `/storage/ice1/shared/d-pace_community/…`.
@@ -53,6 +54,10 @@ relaxed structure); ◐ install verified; ⚙️ site profile written, full run 
 4. Nexus's 535 driver is older than the env's NVRTC, so the install pins a matching NVRTC via
    `LD_PRELOAD`; the 10 GB vGPU gets the smaller `1UBQ_1` example. CUDA is capped at 12.8 on every
    x86 site and 12.9 on aarch64 (the 13.x build won't compile OpenFold's extension).
+5. `◐` detail — nexus: cold-start install completed this session, NVRTC-pinned relaxation confirmed
+   in earlier runs; anvil: install reached the dataset stage (fixed a conda-libcurl mmCIF bug),
+   A100 fold queue-bound; bridges2: build + fold ran through to relaxation (memory / gcc / CUDA-arch
+   / NVRTC fixes applied).
 
 ### Settings
 
