@@ -20,6 +20,7 @@ pub async fn execute_openfold_run(
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
 
+    let started_at = Utc::now();
     let execution = async {
         let model_backend = repositories::model_backends::find_by_id(db, run.model_backend_id)
             .await?
@@ -47,7 +48,7 @@ pub async fn execute_openfold_run(
 
     match execution {
         Ok(result) if result.command_output.is_none() => {
-            mark_failed(db, run_id, preflight_failure_message(&result)).await?;
+            mark_failed(db, run_id, started_at, preflight_failure_message(&result)).await?;
             Ok(result)
         }
         Ok(result) => {
@@ -61,9 +62,9 @@ pub async fn execute_openfold_run(
                     run_id,
                     UpdateRunStatusInput {
                         status: "completed".into(),
+                        started_at: Some(Some(started_at)),
                         completed_at: Some(Some(Utc::now())),
                         error_message: Some(None),
-                        ..Default::default()
                     },
                 )
                 .await?;
@@ -73,12 +74,13 @@ pub async fn execute_openfold_run(
                 } else {
                     output.stderr.trim().to_owned()
                 };
-                mark_failed(db, run_id, message).await?;
+                mark_failed(db, run_id, started_at, message).await?;
             }
             Ok(result)
         }
         Err(error) => {
-            mark_failed(db, run_id, error.to_string()).await?;
+            // Don't `?`-propagate the DB write: it would mask the real execution error.
+            let _ = mark_failed(db, run_id, started_at, error.to_string()).await;
             Err(error)
         }
     }
@@ -87,6 +89,7 @@ pub async fn execute_openfold_run(
 async fn mark_failed(
     db: &DatabaseConnection,
     run_id: i32,
+    started_at: chrono::DateTime<Utc>,
     error_message: impl Into<String>,
 ) -> Result<(), DbErr> {
     runs::update_run_status(
@@ -94,9 +97,9 @@ async fn mark_failed(
         run_id,
         UpdateRunStatusInput {
             status: "failed".into(),
+            started_at: Some(Some(started_at)),
             completed_at: Some(Some(Utc::now())),
             error_message: Some(Some(error_message.into())),
-            ..Default::default()
         },
     )
     .await?;
@@ -332,6 +335,7 @@ mod tests {
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
+        assert!(updated.started_at.is_some());
         assert!(updated.completed_at.is_some());
         assert_eq!(updated.error_message, None);
         Ok(())

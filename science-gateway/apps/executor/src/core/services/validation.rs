@@ -27,15 +27,14 @@ pub fn reject_unknown_keys(field_name: &str, schema: &Value, params: &Value) -> 
                 .collect::<std::collections::HashSet<_>>()
         });
 
-    if let Some(allowed_keys) = allowed_keys {
-        if let Some(unexpected) = params_object
+    if let Some(allowed_keys) = allowed_keys
+        && let Some(unexpected) = params_object
             .keys()
             .find(|key| !allowed_keys.contains(key.as_str()))
-        {
-            return Err(DbErr::Custom(format!(
-                "{field_name} contains unsupported key '{unexpected}'"
-            )));
-        }
+    {
+        return Err(DbErr::Custom(format!(
+            "{field_name} contains unsupported key '{unexpected}'"
+        )));
     }
 
     Ok(())

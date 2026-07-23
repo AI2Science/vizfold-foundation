@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
-    db,
+    config, db,
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
     repositories::{execution_targets, model_backends, model_invocation_profiles},
@@ -25,6 +25,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Initialize VizFold on this machine by running the installer.
+    Init,
+    /// Start the workbench dashboard.
+    Serve(ServeArgs),
     /// Seed the default executor records.
     Seed,
     /// List executor records.
@@ -37,6 +41,13 @@ enum Command {
     ExecuteRun { run_id: i32 },
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
+}
+
+#[derive(Debug, Args)]
+struct ServeArgs {
+    /// Port for the dashboard dev server (defaults to 3000).
+    #[arg(long)]
+    port: Option<u16>,
 }
 
 #[derive(Debug, Args)]
@@ -91,10 +102,13 @@ struct OpenfoldQueueArgs {
     input_id: String,
     #[arg(long)]
     input_sequence: String,
+    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id> (fold.sh convention).
     #[arg(long)]
-    fasta_dir: String,
+    fasta_dir: Option<String>,
+    /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
     #[arg(long)]
-    data_dir: String,
+    data_dir: Option<String>,
+    /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
     #[arg(long, default_value = "cpu")]
@@ -115,8 +129,21 @@ struct OpenfoldQueueArgs {
 
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
-    let database = db::connect_and_migrate().await?;
 
+    // `init` is the bootstrap; everything else requires an initialized config.
+    if !matches!(cli.command, Command::Init) && !config::is_initialized() {
+        eprintln!("run `vizfold init` first");
+        std::process::exit(1);
+    }
+
+    // init and serve are subprocess launchers; they need no database connection.
+    match cli.command {
+        Command::Init => return run_init(),
+        Command::Serve(args) => return run_serve(args),
+        _ => {}
+    }
+
+    let database = db::connect_and_migrate().await?;
     match cli.command {
         Command::Seed => {
             seed_defaults(&database).await?;
@@ -136,9 +163,64 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
+        Command::Init | Command::Serve(_) => unreachable!("handled before DB connect"),
     }
 
     Ok(())
+}
+
+/// Bootstrap this machine by running the installer with inherited stdio. Idempotent:
+/// installer steps are sentinel-guarded, so re-running is safe.
+fn run_init() -> Result<(), DbErr> {
+    let installer = config::openfold_home().join("install.sh");
+    let mut command = std::process::Command::new("bash");
+    if installer.is_file() {
+        println!("Running installer: bash {}", installer.display());
+        command.arg(&installer);
+    } else {
+        println!("No local checkout found; fetching the installer from GitHub.");
+        command.arg("-c").arg(
+            "curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash",
+        );
+    }
+    let status = command
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to launch installer: {error}")))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| DbErr::Custom(format!("installer exited with status {status}")))
+}
+
+/// Start the workbench dashboard, streaming its output to this shell.
+fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
+    let workbench = config::openfold_home().join("science-gateway/apps/workbench");
+    if !workbench.join("node_modules").is_dir() {
+        println!("Installing workbench dependencies (npm ci)...");
+        let status = std::process::Command::new("npm")
+            .current_dir(&workbench)
+            .arg("ci")
+            .status()
+            .map_err(|error| DbErr::Custom(format!("failed to run npm ci: {error}")))?;
+        if !status.success() {
+            return Err(DbErr::Custom("npm ci failed".into()));
+        }
+    }
+
+    let port = args.port.unwrap_or(3000);
+    println!("Starting workbench at http://localhost:{port}");
+    let mut command = std::process::Command::new("npm");
+    command.current_dir(&workbench).args(["run", "dev"]);
+    if args.port.is_some() {
+        command.args(["--", "--port", &port.to_string()]);
+    }
+    let status = command
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to launch workbench: {error}")))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| DbErr::Custom(format!("workbench exited with status {status}")))
 }
 
 async fn register_artifacts(
@@ -276,12 +358,6 @@ async fn queue_openfold_run(
     database: &sea_orm::DatabaseConnection,
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
-    if args.use_precomputed_alignments && args.alignment_dir.is_none() {
-        return Err(DbErr::Custom(
-            "--alignment-dir is required when --use-precomputed-alignments is set".into(),
-        ));
-    }
-
     let backend = model_backends::find_by_slug(database, "openfold")
         .await?
         .ok_or_else(seed_required_error)?;
@@ -298,13 +374,32 @@ async fn queue_openfold_run(
         })
         .ok_or_else(seed_required_error)?;
     let working_dir = local_openfold_working_dir(&profile)?;
-    let fasta_dir = canonicalize_local_path("--fasta-dir", &args.fasta_dir, &working_dir)?;
-    let data_dir = canonicalize_local_path("--data-dir", &args.data_dir, &working_dir)?;
-    let alignment_dir = args
-        .alignment_dir
-        .as_deref()
-        .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
-        .transpose()?;
+    let fasta_dir_input = args
+        .fasta_dir
+        .clone()
+        .unwrap_or_else(|| default_fasta_dir(&args.input_id));
+    let data_dir_input = args
+        .data_dir
+        .clone()
+        .unwrap_or_else(|| config::data_dir().to_string_lossy().into_owned());
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &fasta_dir_input, &working_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, &working_dir)?;
+    let alignment_dir = if args.use_precomputed_alignments {
+        let input = args
+            .alignment_dir
+            .clone()
+            .unwrap_or_else(default_alignment_dir);
+        Some(canonicalize_local_path(
+            "--alignment-dir",
+            &input,
+            &working_dir,
+        )?)
+    } else {
+        args.alignment_dir
+            .as_deref()
+            .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
+            .transpose()?
+    };
 
     let mut execution_parameters = serde_json::Map::from_iter([
         ("fasta_dir".into(), json!(fasta_dir)),
@@ -347,6 +442,23 @@ async fn queue_openfold_run(
     println!("\nNext:");
     println!("  vizfold execute-run {}", run.id);
     Ok(())
+}
+
+/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching fold.sh's `${INPUT_ID%_*}`.
+fn default_fasta_dir(input_id: &str) -> String {
+    let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
+    config::openfold_home()
+        .join("examples/monomer")
+        .join(format!("fasta_dir_{stem}"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_alignment_dir() -> String {
+    config::openfold_home()
+        .join("examples/monomer/alignments")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn local_openfold_working_dir(
@@ -622,7 +734,8 @@ mod tests {
                     cpus: 1,
                     ..
                 })
-            }) if input_id == "6KWC_1" && input_sequence == "GSTI" && fasta_dir == "fasta" && data_dir == "data"
+            }) if input_id == "6KWC_1" && input_sequence == "GSTI"
+                && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
         ));
     }
 
@@ -661,6 +774,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_init() {
+        let cli = Cli::try_parse_from(["vizfold", "init"]).expect("init command should parse");
+        assert!(matches!(cli.command, Command::Init));
+    }
+
+    #[test]
+    fn parses_serve_with_port() {
+        let cli = Cli::try_parse_from(["vizfold", "serve", "--port", "3001"])
+            .expect("serve command should parse");
+        assert!(matches!(
+            cli.command,
+            Command::Serve(ServeArgs { port: Some(3001) })
+        ));
+    }
+
+    #[test]
     fn parses_execute_run() {
         let cli = Cli::try_parse_from(["vizfold", "execute-run", "1"])
             .expect("execute-run command should parse");
@@ -681,8 +810,8 @@ mod tests {
 
     #[tokio::test]
     async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
-        let local_path = std::fs::canonicalize(crate::core::config::repository_root())
-            .expect("repository root should be canonicalizable")
+        let local_path = std::fs::canonicalize(crate::core::config::openfold_home())
+            .expect("OpenFold home should be canonicalizable")
             .display()
             .to_string();
         let database = Database::connect("sqlite::memory:").await?;
@@ -700,8 +829,8 @@ mod tests {
             OpenfoldQueueArgs {
                 input_id: "6KWC_1".into(),
                 input_sequence: "GSTI".into(),
-                fasta_dir: ".".into(),
-                data_dir: ".".into(),
+                fasta_dir: Some(".".into()),
+                data_dir: Some(".".into()),
                 alignment_dir: Some(".".into()),
                 model_device: "cpu".into(),
                 cpus: 1,
@@ -749,8 +878,8 @@ mod tests {
             OpenfoldQueueArgs {
                 input_id: "6KWC_1".into(),
                 input_sequence: "GSTI".into(),
-                fasta_dir: missing_path.into(),
-                data_dir: ".".into(),
+                fasta_dir: Some(missing_path.into()),
+                data_dir: Some(".".into()),
                 alignment_dir: None,
                 model_device: "cpu".into(),
                 cpus: 1,
@@ -770,7 +899,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains(&crate::core::config::repository_root().display().to_string())
+                .contains(&crate::core::config::openfold_home().display().to_string())
         );
         Ok(())
     }

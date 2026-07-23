@@ -272,12 +272,11 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
 }
 
 fn local_openfold_config_json() -> String {
-    let repository_root = config::repository_root();
     json!({
         "program": "python3",
         "script": "run_pretrained_openfold.py",
-        "working_dir": repository_root,
-        "output_location": repository_root.join("science-gateway").join("openfold-demo-output"),
+        "working_dir": config::openfold_home(),
+        "output_location": config::prefix().join("runs"),
     })
     .to_string()
 }
