@@ -43,20 +43,23 @@ accounts you can charge); the values below are what a fresh install settles on.
 | `ClusterName` (cluster) | Verified | Arch | AF2 databases | Build → fold partition (GPU) | Install prefix |
 | --- | --- | --- | --- | --- | --- |
 | `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/openfold` |
-| `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | downloaded | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² |
+| `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/openfold-gh`² |
 | `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/openfold` |
 | `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/openfold` |
 | `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/openfold` |
 | `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/openfold` |
 | `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `~/scratch` real root (`/storage/ice1/…`) |
-| `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | downloaded | `cpu-small` → `gpu-a100` (A100) | `~/scratch` real root (`/storage/scratch1/…`) |
+| `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `~/scratch` real root (`/storage/scratch1/…`) |
 
 Legend — ✅ install + fold verified end-to-end from `vizfold init` (fold → 2839-atom relaxed
 structure); ◐ install run on the cluster with its site-specific fixes, final fold not re-confirmed
 in this pass⁵; ⚙️ site profile written and its paths probed live, full install not yet run.
 
-1. AF2 mirrors: Delta `/sw/external/alphafold2/data_hyun_official`, Bridges-2
-   `/ocean/datasets/community/alphafold/v2.3.2`, ICE `/storage/ice1/shared/d-pace_community/…`.
+1. AF2 mirrors: Delta & Delta-AI (shared `/work/hdd`) `/work/hdd/data/alphafold2/database`,
+   Phoenix `/storage/coda1/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data`, ICE
+   `/storage/ice1/shared/d-pace_community/…`, Bridges-2 `/ocean/datasets/community/alphafold/v2.3.2`.
+   Each mirror lays out `uniclust30` differently (real single- or double-nested set, or none), so
+   the install stages it into a canonical dir — real set if present, else aliased from uniref30.
    Where there is no mirror the install downloads the ~4 GB parameters + the example's templates.
 2. Delta and Delta-AI share `/work/nvme`, so the aarch64 site uses an `-gh` suffix — otherwise the
    two architectures' environments would clobber each other.
@@ -85,7 +88,7 @@ exactly what you care about and nothing else:
 
 ```json
 {
-  "OPENFOLD_AF2_ROOT": "/sw/external/alphafold2/data_hyun_official",
+  "OPENFOLD_AF2_ROOT": "/work/hdd/data/alphafold2/database",
   "OPENFOLD_EXAMPLE": "6KWC_1",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=32G",
