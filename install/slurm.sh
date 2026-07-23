@@ -7,7 +7,6 @@ SLURM_SH=1
 
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
-export PATH="$(dirname "${BASH_SOURCE[0]}"):$PATH"
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
 # ($ALLOC, OPENFOLD_ACCOUNT, OPENFOLD_SCRATCH, ...). No-op by default; runs before <site>.json is filled.

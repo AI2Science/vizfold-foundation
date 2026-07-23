@@ -3,6 +3,7 @@
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 REPO=$(cd .. && pwd); export REPO
+VIZFOLD_CONFIG=/nonexistent/vizfold-test.json; export VIZFOLD_CONFIG  # hermetic: no dev's real config, no config: line
 . ./slurm.sh
 
 fail=0
@@ -24,12 +25,12 @@ got=$(SLURM_JOB_ID=1 slurm::launch_args acct part --pty | tr '\n' ' ')
 check "srun --ntasks=1 " "$got" "job id means plain srun"
 
 # No allocation: full srun with resources, pty requested.
-got=$(env -u SLURM_STEP_ID -u SLURM_JOB_ID slurm::launch_args acct part --pty | tr '\n' ' ')
+got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part --pty) | tr '\n' ' ')
 want="srun -u --pty --job-name=vizfold-install --account=acct --partition=part --nodes=1 --ntasks=1 --cpus-per-task=8 --mem=24G --time=02:00:00 "
 check "$want" "$got" "no allocation means full srun with pty"
 
 # Not a terminal: identical but without --pty.
-got=$(env -u SLURM_STEP_ID -u SLURM_JOB_ID slurm::launch_args acct part "" | tr '\n' ' ')
+got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part "") | tr '\n' ' ')
 want="srun -u --job-name=vizfold-install --account=acct --partition=part --nodes=1 --ntasks=1 --cpus-per-task=8 --mem=24G --time=02:00:00 "
 check "$want" "$got" "no tty means no pty"
 
