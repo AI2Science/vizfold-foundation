@@ -474,7 +474,7 @@ to:
 - [ ] **Step 8: Run the full suite**
 
 Run: `cargo test`
-Expected: PASS, 111 passed (103 baseline + 8 new), 0 failed.
+Expected: PASS, 0 failed (count rises by ~8 from the 103 baseline).
 
 - [ ] **Step 9: Commit**
 
@@ -540,8 +540,10 @@ fn model_device_defaults_to_cuda_with_a_gpu() {
 }
 
 #[test]
-fn cpus_default_is_at_least_one() {
-    assert!(super::default_cpus() >= 1);
+fn cpus_default_follows_available_parallelism() {
+    let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
+    assert_eq!(super::default_cpus(), expected);
+    assert!(super::default_cpus() > 1, "a dev machine should report more than one core");
 }
 ```
 
@@ -618,7 +620,7 @@ to:
 - [ ] **Step 5: Run to verify they pass**
 
 Run: `cargo test`
-Expected: PASS, 116 passed, 0 failed.
+Expected: PASS, 0 failed.
 
 - [ ] **Step 6: Verify the CLI help renders the resolved defaults**
 
@@ -745,7 +747,7 @@ In `src/core/services/openfold_execution.rs`, immediately after the `srun_comman
 - [ ] **Step 5: Run to verify**
 
 Run: `cargo test`
-Expected: PASS, 117 passed, 0 failed.
+Expected: PASS, 0 failed.
 
 - [ ] **Step 6: Commit**
 
