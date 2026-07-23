@@ -18,9 +18,9 @@ setup::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
     ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
-    # aarch64 (Grace-Hopper) needs its own env: CUDA 13 / py3.13 generation, GH200-only sm_90.
+    # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
-        aarch64|arm64) ENV_YML=$REPO/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-13.9} ;;
+        aarch64|arm64) ENV_YML=$REPO/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
         *)             ENV_YML=$REPO/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
     esac
     DATA=$PREFIX/data
