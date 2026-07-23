@@ -116,9 +116,13 @@ step openfold
 # No build isolation: the extension must link against this env's torch. Build in a
 # curated env -- a site's modules leak CC/CXX/CPATH/LD_LIBRARY_PATH for their own
 # gcc, and nvcc then cannot drive this env's toolchain (cc1plus/crt not found).
-# env -i drops all of that; PATH puts the env's compiler first. Runtime is untouched.
+# env -i drops all of that; CC/CXX name this env's gcc 12 explicitly, or torch falls
+# back to a RHEL8 system gcc 8 that is too old for it. Runtime is untouched.
+CONDA_CC=$(echo "$CONDA_PREFIX"/bin/*-conda-linux-gnu-gcc)
+CONDA_CXX=$(echo "$CONDA_PREFIX"/bin/*-conda-linux-gnu-g++)
 python3 -c 'import torch, openfold, attn_core_inplace_cuda' 2>/dev/null ||
     env -i HOME="$HOME" PATH="$CONDA_PREFIX/bin:/usr/bin:/bin" \
+        CC="$CONDA_CC" CXX="$CONDA_CXX" \
         CUDA_HOME="$CONDA_PREFIX" TMPDIR="$TMPDIR" MAX_JOBS="$MAX_JOBS" \
         TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST" \
         pip install --no-build-isolation -e "$REPO"
