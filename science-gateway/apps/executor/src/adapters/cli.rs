@@ -198,8 +198,8 @@ fn run_init() -> Result<(), DbErr> {
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let workbench = config::openfold_home().join("science-gateway/apps/workbench");
 
-    // A cluster home is inode-quota-capped NFS, where `npm ci` dies with EDQUOT; keep the heavy
-    // node_modules/.next on the roomy work filesystem (the prefix) via symlinks.
+    // A cluster home is inode-quota-capped NFS; keep the heavy node_modules/.next physically on
+    // the roomy work filesystem (the prefix) via symlinks.
     for name in ["node_modules", ".next"] {
         relocate_to_prefix(&workbench, name)?;
     }
@@ -208,8 +208,10 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let empty =
         std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
     if empty {
-        println!("Installing workbench dependencies (npm ci)...");
-        run_npm(&workbench, &["ci"])?;
+        // `npm install` (not `npm ci`) reconciles in place, following the symlink so the install
+        // lands on the work fs; `npm ci` would delete node_modules and recreate it on home (EDQUOT).
+        println!("Installing workbench dependencies (npm install)...");
+        run_npm(&workbench, &["install"])?;
     }
 
     let port = args.port.unwrap_or(3000);
@@ -222,17 +224,27 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     run_npm(&workbench, &npm_args)
 }
 
-/// Symlink `<workbench>/<name>` to `<prefix>/workbench/<name>` (creating the target), unless an
-/// entry already exists there (e.g. a real dir on a dev checkout) — keeps writes off NFS home.
+/// Make `<workbench>/<name>` a symlink to `<prefix>/workbench/<name>` (created on the work fs),
+/// so `npm install`/`next dev` write there instead of the inode-capped home. No-op when the
+/// prefix isn't a separate filesystem (dev checkout); replaces a real leftover dir (e.g. a prior
+/// failed install on home) with the symlink.
 fn relocate_to_prefix(workbench: &Path, name: &str) -> Result<(), DbErr> {
-    let link = workbench.join(name);
-    if link.symlink_metadata().is_ok() {
-        return Ok(());
+    if config::prefix() == config::openfold_home() {
+        return Ok(()); // no separate work fs to relocate onto
     }
+    let link = workbench.join(name);
     let target = config::prefix().join("workbench").join(name);
     std::fs::create_dir_all(&target).map_err(|error| {
         DbErr::Custom(format!("failed to create '{}': {error}", target.display()))
     })?;
+
+    match std::fs::symlink_metadata(&link) {
+        Ok(meta) if meta.file_type().is_symlink() => return Ok(()), // already relocated
+        Ok(_) => std::fs::remove_dir_all(&link).map_err(|error| {
+            DbErr::Custom(format!("failed to clear '{}': {error}", link.display()))
+        })?,
+        Err(_) => {}
+    }
     std::os::unix::fs::symlink(&target, &link).map_err(|error| {
         DbErr::Custom(format!(
             "failed to link '{}' -> '{}': {error}",

@@ -1,8 +1,11 @@
+use std::path::Path;
+
 use chrono::Utc;
 use sea_orm::{DatabaseConnection, DbErr};
 
 use crate::core::{
-    commands::CommandRunner,
+    commands::{CommandRunner, CommandSpec},
+    config,
     execution::{ExecutionWorkflowResult, execute_command_workflow},
     model_runners::openfold::{OpenFoldPreflightRunner, plan_openfold_command},
     output_locations::resolve_output_location,
@@ -53,7 +56,16 @@ pub async fn execute_openfold_run(
             run: &run,
         };
 
-        execute_command_workflow(&command, runner, Some(&preflight_runner)).await
+        // Preflight validates the real python3 command; the runner gets an env-activated
+        // wrapper so torch/openfold resolve without a manual `micromamba activate`. Gated on
+        // micromamba actually being installed at the prefix (so tests/dev run the command bare).
+        let prefix = config::prefix();
+        let exec_command = if prefix.join("bin/micromamba").is_file() {
+            activate_env_command(&command, &prefix, &config::openfold_env_prefix())
+        } else {
+            command.clone()
+        };
+        execute_command_workflow(&exec_command, runner, Some(&preflight_runner)).await
     }
     .await;
 
@@ -140,6 +152,36 @@ fn preflight_failure_message(result: &ExecutionWorkflowResult) -> String {
     }
 }
 
+/// Wrap a planned local OpenFold command so it runs inside the installed micromamba env:
+/// activate the env, source the installer's activate.d hook (CUTLASS_PATH / LD_LIBRARY_PATH /
+/// NVRTC LD_PRELOAD), and point TRITON_CACHE_DIR node-local (overridable). `exec "$@"` runs the
+/// original program+args passed positionally, so no argument re-quoting is needed.
+fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path) -> CommandSpec {
+    let prefix = prefix.display();
+    let env_prefix = env_prefix.display();
+    let script = format!(
+        "export MAMBA_ROOT_PREFIX='{prefix}/mamba'; \
+         eval \"$('{prefix}/bin/micromamba' shell hook -s bash)\"; \
+         micromamba activate '{env_prefix}'; \
+         [ -f '{env_prefix}/etc/conda/activate.d/openfold.sh' ] && . '{env_prefix}/etc/conda/activate.d/openfold.sh'; \
+         export TRITON_CACHE_DIR=\"${{TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}}\"; \
+         exec \"$@\""
+    );
+    let mut args = vec![
+        "-c".to_owned(),
+        script,
+        "vizfold-openfold".to_owned(),
+        command.program.clone(),
+    ];
+    args.extend(command.args.iter().cloned());
+    CommandSpec {
+        program: "bash".to_owned(),
+        args,
+        current_dir: command.current_dir.clone(),
+        env: command.env.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -165,7 +207,43 @@ mod tests {
         },
     };
 
-    use super::execute_openfold_run;
+    use super::{activate_env_command, execute_openfold_run};
+
+    #[test]
+    fn activate_env_command_wraps_planned_command_in_micromamba_activation() {
+        let command = CommandSpec {
+            program: "python3".into(),
+            args: vec!["-u".into(), "run_openfold.py".into(), "6KWC_1".into()],
+            current_dir: Some(PathBuf::from("/repo")),
+            ..Default::default()
+        };
+        let wrapped = activate_env_command(
+            &command,
+            &PathBuf::from("/work/of"),
+            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+        );
+
+        assert_eq!(wrapped.program, "bash");
+        assert_eq!(wrapped.args[0], "-c");
+        let script = &wrapped.args[1];
+        assert!(script.contains("'/work/of/bin/micromamba' shell hook -s bash"));
+        assert!(script.contains("micromamba activate '/work/of/mamba/envs/openfold-env'"));
+        assert!(script.contains("activate.d/openfold.sh"));
+        assert!(script.contains("TRITON_CACHE_DIR"));
+        assert!(script.trim_end().ends_with("exec \"$@\""));
+        // Original program+args are passed positionally for `exec "$@"` (no re-quoting).
+        assert_eq!(
+            &wrapped.args[2..],
+            &[
+                "vizfold-openfold",
+                "python3",
+                "-u",
+                "run_openfold.py",
+                "6KWC_1"
+            ]
+        );
+        assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
+    }
 
     struct TestRunner {
         output: CommandOutput,

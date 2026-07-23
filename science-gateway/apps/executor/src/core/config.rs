@@ -63,6 +63,14 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| openfold_home().join("data"))
 }
 
+/// micromamba env prefix for local OpenFold execution (matches fold.sh's
+/// `${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/openfold-env}`).
+pub fn openfold_env_prefix() -> PathBuf {
+    resolved("OPENFOLD_ENV_PREFIX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| prefix().join("mamba/envs/openfold-env"))
+}
+
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
