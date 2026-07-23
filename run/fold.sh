@@ -9,15 +9,13 @@ set -euo pipefail
 fold::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
     ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
-    ENV_PREFIX=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME}
-    MM=$PREFIX/bin/micromamba
 }
 
 # torch/DeepSpeed JIT-compile at import; a site's leaked toolchain env breaks it. Re-exec in a curated env (HOME, clean PATH, SLURM/CUDA binding, OPENFOLD_*).
 fold::reexec() {
     [ -n "${OPENFOLD_CLEAN_ENV:-}" ] && return
-    local clean kv
-    clean=(HOME="$HOME" PATH="$ENV_PREFIX/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
+    local env_prefix=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME} clean kv
+    clean=(HOME="$HOME" PATH="$env_prefix/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
     [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
     # JIT autotune cache: node-local, not NFS $HOME (79 s vs 8 s inference).
     clean+=("TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/openfold-triton-$(id -u)}")
@@ -37,12 +35,10 @@ fold::paths() {
 }
 
 fold::activate() {
-    [ -x "$MM" ] || die "nothing installed at $PREFIX; run install.sh first"
+    local mm=$PREFIX/bin/micromamba
+    [ -x "$mm" ] || die "nothing installed at $PREFIX; run install.sh first"
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
-    set +u   # the conda gcc hook reads SYS_SYSROOT unset
-    eval "$("$MM" shell hook --shell bash)"
-    micromamba activate "$ENV_NAME"
-    set -u
+    mamba::activate "$mm" "$ENV_NAME"
 }
 
 fold::preflight() {

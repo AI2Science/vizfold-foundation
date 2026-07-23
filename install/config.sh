@@ -33,6 +33,9 @@ for k, v in items:
     return 0
 }
 
+# Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
+mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
+
 config::load() { config::fill "$(config::file)" "config"; }
 
 # <site>.sh loads its own <site>.json: same basename, beside it.

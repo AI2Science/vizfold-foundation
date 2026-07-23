@@ -41,16 +41,6 @@ setup::config() {
     export CONDA_OVERRIDE_CUDA=${OPENFOLD_MAX_CUDA:-12.8}
 
     MIRROR=$([ -n "$AF2" ] && [ -d "$AF2" ] && echo yes || echo no)
-    REQUIRED=("$REPO/openfold/resources/params/params_model_1_ptm.npz" "$STEREO"
-              "$DATA/pdb_mmcif/mmcif_files")
-    [ "$MIRROR" = yes ] && REQUIRED+=(
-        "$DATA/uniref90/uniref90.fasta"
-        "$DATA/mgnify/mgy_clusters_2022_05.fa"
-        "$DATA/pdb70/pdb70"
-        "$UNICLUST/uniclust30_2018_08"
-        "$DATA/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt"
-    )
-    BINARIES=(jackhmmer hhblits hhsearch)
 }
 
 setup::preflight() {
@@ -74,10 +64,7 @@ setup::env() {
 
 setup::activate() {
     log activate
-    set +u   # the conda gcc hook reads SYS_SYSROOT unset
-    eval "$("$MM" shell hook --shell bash)"
-    micromamba activate "$ENV_DIR"
-    set -u
+    mamba::activate "$MM" "$ENV_DIR"
     mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
     cat > "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh" <<ACTIVATE
 export CUTLASS_PATH=$CUTLASS
@@ -193,9 +180,16 @@ assert util.find_spec("flash_attn"), "flash_attn is not importable"
 assert os.path.isdir(os.environ.get("CUTLASS_PATH", "")), "CUTLASS_PATH is unset"
 print("flash_attn ok, CUTLASS_PATH", os.environ["CUTLASS_PATH"])
 PY
-    local b p
-    for b in "${BINARIES[@]}"; do command -v "$b" >/dev/null || die "missing binary: $b"; done
-    for p in "${REQUIRED[@]}"; do have "$p" || die "missing: $p"; done
+    local b p required=("$REPO/openfold/resources/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
+    [ "$MIRROR" = yes ] && required+=(
+        "$DATA/uniref90/uniref90.fasta"
+        "$DATA/mgnify/mgy_clusters_2022_05.fa"
+        "$DATA/pdb70/pdb70"
+        "$UNICLUST/uniclust30_2018_08"
+        "$DATA/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt"
+    )
+    for b in jackhmmer hhblits hhsearch; do command -v "$b" >/dev/null || die "missing binary: $b"; done
+    for p in "${required[@]}"; do have "$p" || die "missing: $p"; done
 }
 
 setup::fold_vars() {
@@ -259,4 +253,7 @@ main() {
     setup::config_save
     setup::ready
 }
+
+# A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
+[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/install/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/install/sites/$OPENFOLD_SITE.sh"
 main "$@"

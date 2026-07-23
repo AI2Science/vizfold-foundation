@@ -31,6 +31,16 @@ hpc::allocation() {
     echo "${found[0]}"
 }
 
+# Resolve, prompt for, and memoize (in ALLOC) the /work/nvme allocation whose accounts (suffixes $@) all exist.
+hpc::nvme_alloc() {
+    [ -n "${ALLOC:-}" ] && return
+    ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(hpc::allocation /work/nvme "$@" || true)")
+    [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
+}
+
+# The user's Slurm default account, overridable inline.
+hpc::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
+
 # Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
 hpc::scratch_root() {
     local s; s=$(readlink -f "$HOME/scratch") || return 1
@@ -47,7 +57,7 @@ hpc::run() {
 
     PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$PREFIX_DEFAULT")
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add site::prefix"
-    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)
+    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(hpc::default_account)
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "$ACCOUNT_DEFAULT")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${GPU_ACCOUNT_DEFAULT:-$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
