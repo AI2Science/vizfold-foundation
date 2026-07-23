@@ -43,7 +43,7 @@ bootstrap::sync_checkout() {
 bootstrap::libs() {
     test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
     export OPENFOLD_HOME=$REPO
-    . "$REPO/install/hpc.sh"          # pulls in config.sh + interactive.sh; declares the site::* hooks and hpc::run
+    . "$REPO/install/slurm.sh"          # pulls in config.sh + interactive.sh; declares the slurm::* hooks and slurm::run
     SITES=$REPO/install/sites
 }
 
@@ -60,7 +60,7 @@ bootstrap::pick_site() {
 bootstrap::dispatch() {
     config::site_defaults "$SITES/$SITE.sh"   # <site>.json defaults (fills unset)
     . "$SITES/$SITE.sh"                        # register this site's hook overrides
-    hpc::run                                   # execute the assembled function set
+    slurm::run                                   # execute the assembled function set
 }
 
 main() {

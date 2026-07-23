@@ -1,20 +1,20 @@
 #!/bin/bash
-# hpc.sh -- shared SLURM flow. Base declares site::* hooks as no-ops; a sourced sites/<name>.sh overrides the ones it needs; hpc::run assembles and executes them.
+# slurm.sh -- shared SLURM flow. Base declares slurm::* hooks as no-ops; a sourced sites/<name>.sh overrides the ones it needs; slurm::run assembles and executes them.
 
-[ "${BASH_SOURCE[0]}" = "$0" ] && { echo "hpc.sh is a library" >&2; exit 1; }
-[ -n "${HPC_SH:-}" ] && return 0
-HPC_SH=1
+[ "${BASH_SOURCE[0]}" = "$0" ] && { echo "slurm.sh is a library" >&2; exit 1; }
+[ -n "${SLURM_SH:-}" ] && return 0
+SLURM_SH=1
 
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
-# Hooks a site contributes. Each sets the *_DEFAULT that hpc::run declares (bash dynamic scope); unset ones stay no-ops.
-site::prefix()      { :; }
-site::account()     { :; }
-site::gpu_account() { :; }
+# Hooks a site contributes. Each sets the *_DEFAULT that slurm::run declares (bash dynamic scope); unset ones stay no-ops.
+slurm::prefix()      { :; }
+slurm::account()     { :; }
+slurm::gpu_account() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
-hpc::allocation() {
+slurm::allocation() {
     local root=$1; shift
     local dir alloc accounts s ok found=()
     accounts=$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | sort -u)
@@ -32,34 +32,34 @@ hpc::allocation() {
 }
 
 # Resolve, prompt for, and memoize (in ALLOC) the /work/nvme allocation whose accounts (suffixes $@) all exist.
-hpc::nvme_alloc() {
+slurm::nvme_alloc() {
     [ -n "${ALLOC:-}" ] && return
-    ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(hpc::allocation /work/nvme "$@" || true)")
+    ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
     [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
 }
 
 # The user's Slurm default account, overridable inline.
-hpc::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
+slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
 
 # Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
-hpc::scratch_root() {
+slurm::scratch_root() {
     local s; s=$(readlink -f "$HOME/scratch") || return 1
     case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
 }
 
 # Run the assembled hooks, then submit setup.sh to the scheduler (or run it in place when there is none).
-hpc::run() {
+slurm::run() {
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v sbatch >/dev/null 2>&1; then
         exec bash "$REPO/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX_DEFAULT= ACCOUNT_DEFAULT= GPU_ACCOUNT_DEFAULT= PREFIX ACCOUNT PARTITION SETUP LAUNCH
-    [ -n "${OPENFOLD_PREFIX:-}" ]      || site::prefix       # a pinned OPENFOLD_* skips that hook's discovery (and its die)
-    [ -n "${OPENFOLD_ACCOUNT:-}" ]     || site::account
-    [ -n "${OPENFOLD_GPU_ACCOUNT:-}" ] || site::gpu_account
+    [ -n "${OPENFOLD_PREFIX:-}" ]      || slurm::prefix       # a pinned OPENFOLD_* skips that hook's discovery (and its die)
+    [ -n "${OPENFOLD_ACCOUNT:-}" ]     || slurm::account
+    [ -n "${OPENFOLD_GPU_ACCOUNT:-}" ] || slurm::gpu_account
 
     PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "$PREFIX_DEFAULT")
-    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add site::prefix"
-    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(hpc::default_account)
+    [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or add slurm::prefix"
+    [ -n "$ACCOUNT_DEFAULT" ] || ACCOUNT_DEFAULT=$(slurm::default_account)
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "$ACCOUNT_DEFAULT")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${GPU_ACCOUNT_DEFAULT:-$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
