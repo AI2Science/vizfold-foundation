@@ -607,7 +607,7 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
 /// place. The copy skips node_modules/.next (build artifacts) and preserves any already staged
 /// in the destination.
 fn serve_dir() -> Result<PathBuf, DbErr> {
-    let src = config::openfold_home().join("science-gateway/apps/workbench");
+    let src = config::openfold_home().join("workbench");
     if config::prefix() == config::openfold_home() {
         return Ok(src);
     }

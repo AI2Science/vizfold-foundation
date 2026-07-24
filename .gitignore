@@ -57,11 +57,11 @@ pnpm-debug.log*
 # ----------------------------------------------------
 
 # Rust API build artifacts
-science-gateway/apps/executor/target/
-science-gateway/openfold-demo-output/
+cli/target/
+openfold-demo-output/
 
 # Dashboard symlink to run outputs, created at `vizfold serve` (see run_serve)
-science-gateway/apps/workbench/public/runs
+workbench/public/runs
 
 # TypeScript incremental build info
 *.tsbuildinfo

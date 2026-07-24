@@ -36,12 +36,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build vizfold
-        working-directory: science-gateway/apps/executor
+        working-directory: cli
         run: cargo build --release --target ${{ matrix.target }} --bin vizfold
 
       - name: Stage asset
         run: |
-          cp "science-gateway/apps/executor/target/${{ matrix.target }}/release/vizfold" "${{ matrix.asset }}"
+          cp "cli/target/${{ matrix.target }}/release/vizfold" "${{ matrix.asset }}"
           chmod +x "${{ matrix.asset }}"
 
       - name: Attach to release
