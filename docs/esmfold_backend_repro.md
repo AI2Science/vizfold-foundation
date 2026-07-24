@@ -16,12 +16,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install dependencies:
+Install dependencies (torch first from its own wheel index, then the esmfold project, which pulls
+Transformers and installs the `esmfold` package):
 
 ```bash
-pip install -r requirements-esmfold.txt
 pip install torch
-pip install -e . --no-build-isolation
+pip install -e ./backends/esmfold
 ```
 
 ## Structure-Only Inference Test
@@ -29,7 +29,7 @@ pip install -e . --no-build-isolation
 Run:
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -52,7 +52,7 @@ Successful execution confirms:
 Run:
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \
@@ -129,7 +129,7 @@ source .venv/bin/activate
 Run structure inference:
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -139,7 +139,7 @@ python run_pretrained_esmf.py \
 Run trace extraction:
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \

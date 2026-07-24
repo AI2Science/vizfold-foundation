@@ -21,30 +21,24 @@ ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu128 \
   vizfold install esmfold
 ```
 
-**Option B – conda**  
-Use `environment-mac.yml` (Mac) or `environment.yml` (Linux):
+**Option B – pip (manual, after PyTorch is installed)**  
+Install PyTorch first (its own wheel index for a CUDA build), then the esmfold project — which
+pulls Transformers from `backends/esmfold/requirements.txt` and installs the `esmfold` package so
+`import esmfold` resolves:
 
 ```bash
-conda env create -f environment-mac.yml   # or environment.yml on Linux
-conda activate openfold-env
+pip install torch
+pip install ./backends/esmfold
 ```
 
-**Option C – pip (after PyTorch is installed)**  
-From repo root:
-
-```bash
-pip install -r requirements-esmfold.txt
-# Optional: pip install -e .  for vizfold package
-```
-
-`requirements-esmfold.txt` pins `transformers>=4.36.0`. PyTorch must be installed separately.
+`backends/esmfold/requirements.txt` pins `transformers>=4.36.0`; PyTorch is installed separately.
 
 ## Run locally
 
 **Structure only (fast):**
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode none
@@ -53,7 +47,7 @@ python run_pretrained_esmf.py \
 **Structure + attention + activations:**
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --model facebook/esmfold_v1 \
@@ -66,7 +60,7 @@ python run_pretrained_esmf.py \
 **Limit layers/heads (saves memory and disk):**
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention \
@@ -77,7 +71,7 @@ python run_pretrained_esmf.py \
 **Structure + IPA attention + per-recycle backbone (structure module traces):**
 
 ```bash
-python run_pretrained_esmf.py \
+python backends/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention+activations \

@@ -1,4 +1,0 @@
-# ESMFold backend (run_pretrained_esmf.py). Install after PyTorch.
-# Uses HuggingFace Transformers to avoid OpenFold build dependency.
-# Use: pip install torch && pip install -r requirements-esmfold.txt
-transformers>=4.36.0,<5.0.0

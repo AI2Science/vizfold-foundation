@@ -5,7 +5,7 @@
 [ -n "${SLURM_SH:-}" ] && return 0
 SLURM_SH=1
 
-. "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, die
+. "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, OF, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
@@ -70,7 +70,7 @@ slurm::launch_args() {
 # Run the assembled hooks, then run setup.sh on the scheduler (or here when there is none).
 slurm::run() {
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v srun >/dev/null 2>&1; then
-        exec bash "$REPO/install/setup.sh"          # no scheduler: install here
+        exec bash "$OF/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX ACCOUNT PARTITION SETUP PTY
     # OPENFOLD_PREFIX/ACCOUNT come pre-resolved: inline env, or <site>.json templates expanded off slurm::discover's vars.
@@ -79,7 +79,7 @@ slurm::run() {
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
-    SETUP=$REPO/install/setup.sh
+    SETUP=$OF/install/setup.sh
     mkdir -p "$PREFIX"
 
     if [ -z "${SLURM_STEP_ID:-}" ] && [ -z "${SLURM_JOB_ID:-}" ]; then

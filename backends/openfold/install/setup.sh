@@ -3,8 +3,10 @@
 # Install OpenFold into a micromamba env on the node that runs this. Idempotent per step.
 set -euo pipefail
 
-# sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs.
-. "${OPENFOLD_HOME:-$(dirname "${BASH_SOURCE[0]}")/..}/install/config.sh"
+# sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under
+# the backend subtree. The BASH_SOURCE fallback covers a direct local run (libs are siblings here).
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install}
+. "${LIB:-$(dirname "${BASH_SOURCE[0]}")}/config.sh"
 
 log()    { echo "== $* (+$((SECONDS))s)"; }
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
@@ -20,15 +22,15 @@ setup::config() {
     ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
-        aarch64|arm64) ENV_YML=$REPO/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
-        *)             ENV_YML=$REPO/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
+        aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
+        *)             ENV_YML=$OF/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
     esac
     DATA=$PREFIX/data
     ENV_DIR=$PREFIX/mamba/envs/$ENV_NAME
     MM=$PREFIX/bin/micromamba
     CUTLASS=$PREFIX/cutlass
     UNICLUST=$DATA/uniclust30/uniclust30_2018_08
-    STEREO=$REPO/openfold/resources/stereo_chemical_props.txt
+    STEREO=$OF/openfold/resources/stereo_chemical_props.txt
     sentinel=$PREFIX/.done
 
     export CONDA_PKGS_DIRS=${OPENFOLD_PKGS_DIR:-$PREFIX/../.openfold-pkgs}
@@ -44,11 +46,11 @@ setup::config() {
 }
 
 setup::preflight() {
-    mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$REPO/openfold/resources"
+    mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$OF/openfold/resources"
     hostname
     nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
     echo "prefix=$PREFIX repo=$REPO env=$ENV_NAME max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
-    test -f "$REPO/setup.py" || die "$REPO is not an OpenFold checkout"
+    test -f "$OF/setup.py" || die "$REPO is not an OpenFold checkout"
 }
 
 setup::micromamba() {
@@ -127,7 +129,7 @@ setup::build_openfold() {
         CC="$cc" CXX="$cxx" \
         CUDA_HOME="$CONDA_PREFIX" TMPDIR="$TMPDIR" MAX_JOBS="$MAX_JOBS" \
         TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST" \
-        pip install --no-build-isolation -e "$REPO"
+        pip install --no-build-isolation -e "$OF"
 }
 
 setup::link_mirror() {
@@ -136,7 +138,7 @@ setup::link_mirror() {
         [ "${d##*/}" = uniclust30 ] && continue
         ln -sfn "$d" "$DATA/"
     done
-    ln -sfn "$AF2/params" "$REPO/openfold/resources/params"
+    ln -sfn "$AF2/params" "$OF/openfold/resources/params"
     # uniclust30_2018_08 goes in a writable canonical dir (not the read-only mirror symlink): the mirror's real set if present (single- or double-nested), else aliased from uniref30.
     mkdir -p "$UNICLUST"
     local src="" c
@@ -156,12 +158,12 @@ setup::link_mirror() {
 # No mirror: fetch params (4 GB, into the prefix) and the mmCIFs the examples cite.
 setup::fetch_params() {
     rm -rf "$PREFIX/params"   # a half-extracted tar would pass a single-file check
-    bash "$REPO/scripts/download_alphafold_params.sh" "$PREFIX"
+    bash "$OF/scripts/download_alphafold_params.sh" "$PREFIX"
 }
 
 setup::fetch_templates() {
     log templates
-    ln -sfn "$PREFIX/params" "$REPO/openfold/resources/params"
+    ln -sfn "$PREFIX/params" "$OF/openfold/resources/params"
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
     # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. || true tolerates a 404; assert catches total failure.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
@@ -178,8 +180,8 @@ setup::stereo() {
     [ -f "$STEREO" ] || { env -u LD_LIBRARY_PATH curl -Lsf -o "$STEREO.part" \
         https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt &&
         mv "$STEREO.part" "$STEREO"; }
-    mkdir -p "$REPO/tests/test_data/alphafold/common"
-    ln -sfn "$STEREO" "$REPO/tests/test_data/alphafold/common/stereo_chemical_props.txt"
+    mkdir -p "$OF/tests/test_data/alphafold/common"
+    ln -sfn "$STEREO" "$OF/tests/test_data/alphafold/common/stereo_chemical_props.txt"
 }
 
 setup::verify() {
@@ -193,7 +195,7 @@ assert util.find_spec("flash_attn"), "flash_attn is not importable"
 assert os.path.isdir(os.environ.get("CUTLASS_PATH", "")), "CUTLASS_PATH is unset"
 print("flash_attn ok, CUTLASS_PATH", os.environ["CUTLASS_PATH"])
 PY
-    local b p required=("$REPO/openfold/resources/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
+    local b p required=("$OF/openfold/resources/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
     [ "$MIRROR" = yes ] && required+=(
         "$DATA/uniref90/uniref90.fasta"
         "$DATA/mgnify/mgy_clusters_2022_05.fa"
@@ -273,5 +275,5 @@ main() {
 }
 
 # A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
-[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/install/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/install/sites/$OPENFOLD_SITE.sh"
+[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$OF/install/sites/$OPENFOLD_SITE.sh" ] && . "$OF/install/sites/$OPENFOLD_SITE.sh"
 main "$@"
