@@ -115,6 +115,11 @@ impl SlurmContext {
     }
 }
 
+/// Empty string counts as absent, same as an unset env var.
+fn or_default<'a>(value: Option<&'a str>, default: &'a str) -> &'a str {
+    value.filter(|v| !v.is_empty()).unwrap_or(default)
+}
+
 /// SLURM launch prefix for a fold, mirroring `install/setup.sh:212`. Empty means run bare --
 /// either we are already on the node, or no GPU partition is configured (the workstation case).
 pub fn gpu_launch(
@@ -130,8 +135,7 @@ pub fn gpu_launch(
         SlurmContext::InAllocation => return vec!["srun".to_owned(), "--ntasks=1".to_owned()],
         SlurmContext::None => {}
     }
-    let partition = partition.filter(|p| !p.is_empty());
-    let Some(partition) = partition else {
+    let Some(partition) = partition.filter(|p| !p.is_empty()) else {
         return Vec::new();
     };
     let mut args = vec!["srun".to_owned()];
@@ -141,15 +145,15 @@ pub fn gpu_launch(
     }
     args.push("-p".to_owned());
     args.push(partition.to_owned());
-    let gres = gres.filter(|g| !g.is_empty()).unwrap_or("gpu:1");
-    args.push(format!("--gres={gres}"));
+    args.push(format!("--gres={}", or_default(gres, "gpu:1")));
     // Holds several space-separated flags and must split, as setup.sh:212 relies on word splitting.
-    let resources = resources
-        .filter(|r| !r.is_empty())
-        .unwrap_or("--cpus-per-task=8 --mem=32G");
-    args.extend(resources.split_whitespace().map(str::to_owned));
+    args.extend(
+        or_default(resources, "--cpus-per-task=8 --mem=32G")
+            .split_whitespace()
+            .map(str::to_owned),
+    );
     args.push("-t".to_owned());
-    args.push(time.unwrap_or("02:00:00").to_owned());
+    args.push(or_default(time, "02:00:00").to_owned());
     args
 }
 
@@ -209,110 +213,29 @@ pub fn repository_root() -> PathBuf {
 mod tests {
     use super::{SlurmContext, gpu_launch};
 
+    // (name, context, partition, account, gres, resources, time, expected args)
     #[test]
-    fn in_step_runs_bare() {
-        assert!(
-            gpu_launch(
-                SlurmContext::InStep,
-                Some("gpuA100x4"),
-                None,
-                None,
-                None,
-                None
-            )
-            .is_empty()
-        );
-    }
+    #[rustfmt::skip]
+    fn gpu_launch_cases() {
+        let defaults = vec!["srun", "-p", "gpu", "--gres=gpu:1", "--cpus-per-task=8", "--mem=32G", "-t", "02:00:00"];
+        let cases = [
+            ("in_step_runs_bare", SlurmContext::InStep, Some("gpuA100x4"), None, None, None, None, vec![]),
+            ("in_allocation_runs_a_plain_step", SlurmContext::InAllocation, Some("gpuA100x4"), None, None, None, None, vec!["srun", "--ntasks=1"]),
+            ("no_partition_runs_bare", SlurmContext::None, None, Some("acct"), None, None, None, vec![]),
+            ("empty_partition_runs_bare", SlurmContext::None, Some(""), None, None, None, None, vec![]),
+            ("resources_word_split_into_separate_arguments", SlurmContext::None, Some("gpuA100x4"), Some("bbkg-delta-gpu"), Some("gpu:a100:1"), Some("--cpus-per-task=8 --mem=32G"), Some("04:00:00"),
+                vec!["srun", "-A", "bbkg-delta-gpu", "-p", "gpuA100x4", "--gres=gpu:a100:1", "--cpus-per-task=8", "--mem=32G", "-t", "04:00:00"]),
+            ("none_gres_resources_and_time_fall_back_to_defaults", SlurmContext::None, Some("gpu"), None, None, None, None, defaults.clone()),
+            ("empty_gres_and_resources_fall_back_to_the_same_defaults_as_none", SlurmContext::None, Some("gpu"), None, Some(""), Some(""), None, defaults.clone()),
+            ("empty_time_falls_back_to_default", SlurmContext::None, Some("gpu"), None, None, None, Some(""), defaults),
+        ];
 
-    #[test]
-    fn in_allocation_uses_a_plain_step() {
-        assert_eq!(
-            gpu_launch(
-                SlurmContext::InAllocation,
-                Some("gpuA100x4"),
-                None,
-                None,
-                None,
-                None
-            ),
-            vec!["srun", "--ntasks=1"]
-        );
-    }
-
-    #[test]
-    fn no_partition_runs_bare() {
-        assert!(gpu_launch(SlurmContext::None, None, Some("acct"), None, None, None).is_empty());
-    }
-
-    #[test]
-    fn empty_partition_runs_bare() {
-        assert!(gpu_launch(SlurmContext::None, Some(""), None, None, None, None).is_empty());
-    }
-
-    #[test]
-    fn resources_word_split_into_separate_arguments() {
-        assert_eq!(
-            gpu_launch(
-                SlurmContext::None,
-                Some("gpuA100x4"),
-                Some("bbkg-delta-gpu"),
-                Some("gpu:a100:1"),
-                Some("--cpus-per-task=8 --mem=32G"),
-                Some("04:00:00"),
-            ),
-            vec![
-                "srun",
-                "-A",
-                "bbkg-delta-gpu",
-                "-p",
-                "gpuA100x4",
-                "--gres=gpu:a100:1",
-                "--cpus-per-task=8",
-                "--mem=32G",
-                "-t",
-                "04:00:00",
-            ]
-        );
-    }
-
-    #[test]
-    fn none_gres_resources_and_time_fall_back_to_defaults() {
-        assert_eq!(
-            gpu_launch(SlurmContext::None, Some("gpu"), None, None, None, None),
-            vec![
-                "srun",
-                "-p",
-                "gpu",
-                "--gres=gpu:1",
-                "--cpus-per-task=8",
-                "--mem=32G",
-                "-t",
-                "02:00:00"
-            ]
-        );
-    }
-
-    #[test]
-    fn empty_gres_and_resources_fall_back_to_the_same_defaults_as_none() {
-        assert_eq!(
-            gpu_launch(
-                SlurmContext::None,
-                Some("gpu"),
-                None,
-                Some(""),
-                Some(""),
-                None
-            ),
-            vec![
-                "srun",
-                "-p",
-                "gpu",
-                "--gres=gpu:1",
-                "--cpus-per-task=8",
-                "--mem=32G",
-                "-t",
-                "02:00:00"
-            ]
-        );
+        for (name, context, partition, account, gres, resources, time, want) in cases {
+            assert_eq!(
+                gpu_launch(context, partition, account, gres, resources, time),
+                want,
+                "case: {name}"
+            );
+        }
     }
 }
