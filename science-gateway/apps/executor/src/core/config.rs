@@ -160,12 +160,17 @@ pub fn gpu_launch(
 pub fn gpu_launch_args() -> Vec<String> {
     gpu_launch(
         SlurmContext::detect(),
-        resolved("OPENFOLD_GPU_PARTITION").as_deref(),
+        gpu_partition().as_deref(),
         resolved("OPENFOLD_GPU_ACCOUNT").as_deref(),
         resolved("OPENFOLD_GPU_GRES").as_deref(),
         resolved("OPENFOLD_GPU_RESOURCES").as_deref(),
         resolved("OPENFOLD_GPU_TIME").as_deref(),
     )
+}
+
+/// The GPU partition `gpu_launch_args` would srun onto, resolved the same env-var-or-config way.
+pub fn gpu_partition() -> Option<String> {
+    resolved("OPENFOLD_GPU_PARTITION")
 }
 
 pub fn database_url() -> String {

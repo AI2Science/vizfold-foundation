@@ -120,7 +120,8 @@ struct OpenfoldQueueArgs {
     /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
-    /// Torch device. Defaults to cuda:0 when a GPU is visible, otherwise cpu.
+    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
+    /// HPC flow) or a GPU is visible locally, otherwise cpu.
     #[arg(long)]
     model_device: Option<String>,
     #[arg(long, default_value_t = default_cpus())]
@@ -139,16 +140,35 @@ struct OpenfoldQueueArgs {
     use_precomputed_alignments: bool,
 }
 
-fn model_device_for(detected: Option<&str>) -> String {
-    if detected.is_some() {
+/// No allocation held but a GPU partition configured means the fold will be srun'd onto a
+/// GPU node -- the current host (e.g. a login node) is irrelevant in that case.
+fn on_gpu_partition(context: config::SlurmContext, partition: Option<&str>) -> bool {
+    matches!(context, config::SlurmContext::None) && partition.is_some_and(|p| !p.is_empty())
+}
+
+fn model_device_for(
+    context: config::SlurmContext,
+    partition: Option<&str>,
+    detected: Option<&str>,
+) -> String {
+    if on_gpu_partition(context, partition) || detected.is_some() {
         "cuda:0".to_owned()
     } else {
         "cpu".to_owned()
     }
 }
 
+/// Skips the local GPU probe entirely when it wouldn't be consulted anyway (the login node has
+/// no GPU to find), rather than just discarding its result.
 fn default_model_device() -> String {
-    model_device_for(crate::core::model_runners::openfold::detect_gpu().as_deref())
+    let context = config::SlurmContext::detect();
+    let partition = config::gpu_partition();
+    let detected = if on_gpu_partition(context, partition.as_deref()) {
+        None
+    } else {
+        crate::core::model_runners::openfold::detect_gpu()
+    };
+    model_device_for(context, partition.as_deref(), detected.as_deref())
 }
 
 fn default_cpus() -> i64 {
@@ -1238,13 +1258,39 @@ mod tests {
     }
 
     #[test]
-    fn model_device_defaults_to_cpu_without_a_gpu() {
-        assert_eq!(super::model_device_for(None), "cpu");
+    fn model_device_workstation_defaults_to_cpu_without_a_gpu() {
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, None, None),
+            "cpu"
+        );
     }
 
     #[test]
-    fn model_device_defaults_to_cuda_with_a_gpu() {
-        assert_eq!(super::model_device_for(Some("NVIDIA A100")), "cuda:0");
+    fn model_device_workstation_defaults_to_cuda_with_a_gpu() {
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, None, Some("NVIDIA A100")),
+            "cuda:0"
+        );
+    }
+
+    #[test]
+    fn model_device_prefers_the_configured_gpu_partition_without_probing() {
+        // No allocation held + a GPU partition configured: the fold will be srun'd onto a GPU
+        // node, so cuda:0 is correct even though the probe result (None here) says no GPU here.
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, Some("gpuA100x4"), None),
+            "cuda:0"
+        );
+    }
+
+    #[test]
+    fn model_device_inside_an_allocation_trusts_the_local_probe() {
+        // Already on the node the fold runs on, so the local probe -- not the partition config
+        // -- decides, even though a partition is configured.
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::InAllocation, Some("gpuA100x4"), None),
+            "cpu"
+        );
     }
 
     #[test]
