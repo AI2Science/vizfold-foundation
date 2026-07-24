@@ -75,7 +75,7 @@ accounts you can charge); the values below are what a fresh install settles on.
 | --- | --- | --- | --- | --- | --- |
 | `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/vizfold` |
 | `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/vizfold-gh`² |
-| `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | downloaded | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/vizfold` |
+| `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | mirror¹ | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/vizfold` |
 | `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/vizfold` |
 | `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/vizfold` |
 | `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/vizfold` |
@@ -88,7 +88,8 @@ in this pass⁵; ⚙️ site profile written and its paths probed live, full ins
 
 1. AF2 mirrors: Delta & Delta-AI (shared `/work/hdd`) `/work/hdd/data/alphafold2/database`,
    Phoenix `/storage/coda1/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data`, ICE
-   `/storage/ice1/shared/d-pace_community/…`, Bridges-2 `/ocean/datasets/community/alphafold/v2.3.2`.
+   `/storage/ice1/shared/d-pace_community/…`, Bridges-2 `/ocean/datasets/community/alphafold/v2.3.2`,
+   Nexus `/media/volume/nexus-staging-slurm-data/database`.
    Each mirror lays out `uniclust30` differently (real single- or double-nested set, or none), so
    the install stages it into a canonical dir — real set if present, else aliased from uniref30.
    Where there is no mirror the install downloads the ~4 GB parameters + the example's templates.
@@ -100,7 +101,8 @@ in this pass⁵; ⚙️ site profile written and its paths probed live, full ins
    `LD_PRELOAD`; the 10 GB vGPU gets the smaller `1UBQ_1` example. CUDA is capped at 12.8 on every
    x86 site and 12.9 on aarch64 (the 13.x build won't compile OpenFold's extension).
 5. `◐` detail — nexus: cold-start install completed this session, NVRTC-pinned relaxation confirmed
-   in earlier runs; anvil: install reached the dataset stage (fixed a conda-libcurl mmCIF bug),
+   in earlier runs, though that run predates the mirror and no install has yet been run against
+   `OPENFOLD_AF2_ROOT` there; anvil: install reached the dataset stage (fixed a conda-libcurl mmCIF bug),
    A100 fold queue-bound; bridges2: build + fold ran through to relaxation (memory / gcc / CUDA-arch
    / NVRTC fixes applied).
 
@@ -139,12 +141,13 @@ SLURM account, or `OPENFOLD_BASE` (the install directory). `backends/openfold/in
 Here `delta.sh` discovers just `$ALLOC` (the `/work/nvme` allocation, via `sacctmgr`); the
 account, base, and prefix all template off it.
 
-`backends/openfold/install/sites/nexus-dev.json` — no database mirror, so `OPENFOLD_AF2_ROOT` is absent and the
-install fetches the parameters itself. Its GPU is a 10 GB vGPU, hence the smaller example and
-memory:
+`backends/openfold/install/sites/nexus-dev.json` — its GPU is a 10 GB vGPU, hence the smaller
+example and memory. Setting `OPENFOLD_AF2_ROOT` is what makes the install link the staged databases
+instead of downloading the parameters itself:
 
 ```json
 {
+  "OPENFOLD_AF2_ROOT": "/media/volume/nexus-staging-slurm-data/database",
   "OPENFOLD_EXAMPLE": "1UBQ_1",
   "OPENFOLD_GPU_PARTITION": "gpu",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=24G",
@@ -152,6 +155,10 @@ memory:
   "OPENFOLD_PARTITION": "gpu"
 }
 ```
+
+A mirror is all-or-nothing: with `OPENFOLD_AF2_ROOT` set the install stops fetching parameters and
+templates, so the root must also carry `params/` and `pdb_mmcif/mmcif_files` alongside the search
+databases, or the install fails its verify step.
 
 To override for one run, put the variable inline — it wins over both files:
 
