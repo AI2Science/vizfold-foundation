@@ -14,10 +14,10 @@ import tempfile
 import torch
 from pathlib import Path
 
-# Repo root
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# esmfold project dir (parent of tests/), so `import esmfold` works from a source checkout.
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 try:
     import pytest
@@ -37,8 +37,8 @@ def test_esmf_import():
     """Backend and runner can be imported when transformers is present."""
     if not _has_esm():
         return  # skip when no transformers
-    from vizfold.backends.esmfold.inference import ESMFoldRunner
-    from vizfold.backends.esmfold.schema import build_meta, write_meta
+    from esmfold.inference import ESMFoldRunner
+    from esmfold.schema import build_meta, write_meta
     assert ESMFoldRunner is not None
     meta = build_meta(
         backend="esmfold",
@@ -62,8 +62,8 @@ def test_esmf_import():
 def test_cli_help():
     """CLI runs and shows help."""
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "run_pretrained_esmf.py"), "--help"],
-        cwd=REPO_ROOT,
+        [sys.executable, str(PROJECT_DIR / "run_pretrained_esmf.py"), "--help"],
+        cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
     )
@@ -77,11 +77,11 @@ def test_cli_missing_fasta():
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "run_pretrained_esmf.py"),
+            str(PROJECT_DIR / "run_pretrained_esmf.py"),
             "--fasta", "/nonexistent.fasta",
             "--out", "/tmp/out_esmf_smoke",
         ],
-        cwd=REPO_ROOT,
+        cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
     )
@@ -106,13 +106,13 @@ def test_esmf_smoke_run_cpu(tmp_path=None):
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "run_pretrained_esmf.py"),
+            str(PROJECT_DIR / "run_pretrained_esmf.py"),
             "--fasta", str(fasta),
             "--out", str(out_dir),
             "--device", "cpu",
             "--trace_mode", "none",
         ],
-        cwd=REPO_ROOT,
+        cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
         timeout=300,
@@ -145,13 +145,13 @@ def test_esmf_trace_extraction(tmp_path=None):
     result = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "run_pretrained_esmf.py"),
+            str(PROJECT_DIR / "run_pretrained_esmf.py"),
             "--fasta", str(fasta),
             "--out", str(out_dir),
             "--device", "cpu",
             "--trace_mode", "attention+activations",
         ],
-        cwd=REPO_ROOT,
+        cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
         timeout=600,
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     # Schema/build_meta (no ESM needed)
     print("test_schema_build_meta ...", end=" ")
     try:
-        from vizfold.backends.esmfold.schema import build_meta
+        from esmfold.schema import build_meta
         meta = build_meta(
             backend="esmfold", model_name="x", out_dir="/tmp", fasta_path=None,
             device="cpu", dtype="float32", sequence_length=10, fasta_hash="h",

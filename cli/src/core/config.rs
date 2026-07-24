@@ -55,7 +55,7 @@ pub fn openfold_home() -> PathBuf {
         .unwrap_or_else(repository_root)
 }
 
-/// Repo checkout holding `install/init.sh` (what `vizfold install` runs, cloning it if absent).
+/// Repo checkout holding `backends/openfold/install/install.sh` (what `vizfold install` runs, cloning it if absent).
 /// `VIZFOLD_SRC` env > vizfold.json `OPENFOLD_HOME` > the default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
     if let Ok(v) = std::env::var("VIZFOLD_SRC")
@@ -88,7 +88,7 @@ pub fn openfold_env_prefix() -> PathBuf {
         .unwrap_or_else(|| prefix().join("mamba/envs/openfold-env"))
 }
 
-/// venv prefix for the ESMFold backend (matches `install/esmfold.sh`'s
+/// venv prefix for the ESMFold backend (matches `backends/esmfold/install.sh`'s
 /// `${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}`).
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")

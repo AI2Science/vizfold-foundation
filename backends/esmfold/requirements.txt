@@ -1,0 +1,4 @@
+# Runtime deps for the esmfold package (read by pyproject.toml's dynamic dependencies).
+# torch is installed separately first (own wheel index); HuggingFace Transformers avoids the
+# OpenFold build dependency. Manual install: pip install torch && pip install ./backends/esmfold
+transformers>=4.36.0,<5.0.0

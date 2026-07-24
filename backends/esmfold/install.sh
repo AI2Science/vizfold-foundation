@@ -7,19 +7,21 @@
 set -euo pipefail
 
 # OPENFOLD_HOME is exported by `vizfold install`; config.sh also fills unset vars from an existing
-# ~/.config/vizfold/vizfold.json (so an openfold install's PREFIX etc. carry over here).
-. "${OPENFOLD_HOME:-$(dirname "${BASH_SOURCE[0]}")/..}/install/config.sh"
+# ~/.config/vizfold/vizfold.json (so an openfold install's PREFIX etc. carry over here). config.sh
+# is shared install infrastructure that lives with the openfold backend.
+CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install/config.sh}
+. "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../openfold/install" && pwd)/config.sh}"
 
 log() { echo "== $* (+$((SECONDS))s)"; }
 
 REPO=${OPENFOLD_HOME:-$REPO}
+ESM=$REPO/backends/esmfold
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
 ENV=${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}
-REQ=$REPO/requirements-esmfold.txt
-test -f "$REQ" || die "$REQ not found; is $REPO a vizfold checkout?"
+test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
 command -v python3 >/dev/null || die "python3 is required to create the ESMFold venv"
 
-esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers' 2>/dev/null; }
+esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers, esmfold' 2>/dev/null; }
 
 esmfold::install() {
     log "venv $ENV"
@@ -31,8 +33,10 @@ esmfold::install() {
     local index=()
     [ -n "${ESMFOLD_PIP_INDEX_URL:-}" ] && index=(--index-url "$ESMFOLD_PIP_INDEX_URL")
     "$ENV/bin/pip" install ${index[@]+"${index[@]}"} "${ESMFOLD_TORCH_SPEC:-torch}"
-    log requirements
-    "$ENV/bin/pip" install -r "$REQ"
+    # the esmfold project pulls its deps (transformers) from pyproject and installs the `esmfold`
+    # package itself, so `import esmfold` resolves in the venv the run entrypoint executes under.
+    log package
+    "$ENV/bin/pip" install "$ESM"
 }
 
 esmfold::verify() {
@@ -67,7 +71,7 @@ ESMFold env: $ENV
 
 Fold the bundled example (downloads facebook/esmfold_v1 on first run):
 
-  $ENV/bin/python $REPO/run_pretrained_esmf.py \\
+  $ENV/bin/python $ESM/run_pretrained_esmf.py \\
     --fasta $REPO/examples/monomer/fasta_dir_6KWC/6KWC.fasta \\
     --out $PREFIX/outputs/esmf_6KWC --trace_mode none
 EOF

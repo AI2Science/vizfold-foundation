@@ -32,12 +32,12 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 
-from vizfold.backends.esmfold.schema import (
+from esmfold.schema import (
     build_meta,
     write_meta,
     write_trace_index,
 )
-from vizfold.backends.esmfold.hooks import ESMFoldTraceCollector
+from esmfold.hooks import ESMFoldTraceCollector
 
 
 def _save_tensor(path: str, t: torch.Tensor, save_fp16: bool = False) -> None:

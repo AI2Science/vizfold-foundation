@@ -74,12 +74,13 @@ impl Backend {
         }
     }
 
-    /// Installer script, relative to the vizfold checkout. `init.sh` picks a site and dispatches
-    /// OpenFold's cluster install; `esmfold.sh` is a self-contained venv install.
+    /// Installer script, relative to the vizfold checkout. Each backend owns its installer under
+    /// `backends/<name>/`: OpenFold's `install/install.sh` picks a site and dispatches the cluster
+    /// install; ESMFold's `install.sh` is a self-contained venv install.
     fn installer(self) -> &'static str {
         match self {
-            Self::Openfold => "install/init.sh",
-            Self::Esmfold => "install/esmfold.sh",
+            Self::Openfold => "backends/openfold/install/install.sh",
+            Self::Esmfold => "backends/esmfold/install.sh",
         }
     }
 
@@ -323,8 +324,8 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Install a model backend by running the checkout's installer for it (`install/init.sh` for
-/// OpenFold, `install/esmfold.sh` for ESMFold) with inherited stdio. The release binary ships
+/// Install a model backend by running the checkout's installer for it (`backends/openfold/install/install.sh` for
+/// OpenFold, `backends/esmfold/install.sh` for ESMFold) with inherited stdio. The release binary ships
 /// only itself, so the checkout is cloned on first install. Idempotent: the installers are
 /// sentinel- or import-guarded, so re-running is safe.
 fn run_install(backend: Backend) -> Result<(), DbErr> {

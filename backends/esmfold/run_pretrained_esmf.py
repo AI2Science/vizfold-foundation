@@ -117,7 +117,7 @@ def main() -> int:
             args.device = "cpu"
 
     try:
-        from vizfold.backends.esmfold.inference import ESMFoldRunner
+        from esmfold.inference import ESMFoldRunner
     except ImportError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

@@ -314,7 +314,10 @@ async fn seed_esmfold(db: &DatabaseConnection) -> Result<(), DbErr> {
 fn local_openfold_config_json() -> String {
     json!({
         "program": "python3",
-        "script": "run_pretrained_openfold.py",
+        // The backend subtree is in the script path, not working_dir: python adds the script's
+        // directory to sys.path (so `import openfold`/`scripts` resolve), while working_dir stays
+        // the checkout root so relative run inputs (examples/, ...) resolve there.
+        "script": "backends/openfold/run_pretrained_openfold.py",
         "working_dir": config::openfold_home(),
         "output_location": config::prefix().join("runs"),
     })
@@ -324,7 +327,7 @@ fn local_openfold_config_json() -> String {
 fn local_esmfold_config_json() -> String {
     json!({
         "program": "python3",
-        "script": "run_pretrained_esmf.py",
+        "script": "backends/esmfold/run_pretrained_esmf.py",
         "working_dir": config::openfold_home(),
         "output_location": config::prefix().join("runs"),
     })

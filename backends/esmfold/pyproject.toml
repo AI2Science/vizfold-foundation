@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esmfold"
+version = "0.1.0"
+description = "ESMFold backend for vizfold: HuggingFace EsmForProteinFolding with attention/activation tracing."
+requires-python = ">=3.10"
+license = { text = "Apache License, Version 2.0" }
+# torch is deliberately absent: install.sh installs it first from its own wheel index (a CUDA
+# build) so the package install below links against it rather than pulling a PyPI copy.
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+# only the esmfold package; the run_pretrained_esmf.py entrypoint stays a plain script.
+namespaces = false
+include = ["esmfold*"]

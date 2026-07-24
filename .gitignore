@@ -11,8 +11,8 @@ build/
 dist/
 
 # files from script downloads
-openfold/resources/
-tests/test_data/
+backends/openfold/openfold/resources/
+backends/openfold/tests/test_data/
 cutlass/
 *.txt
 *.pdb

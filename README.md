@@ -9,12 +9,9 @@ The `vizfold` CLI is the platform; a model backend plugs in underneath it. Insta
 `vizfold install <backend>` — **OpenFold** (the full cluster install: micromamba env, CUDA
 extension build, AlphaFold2 databases) or **ESMFold** (a lightweight venv with PyTorch +
 Transformers, weights pulled from HuggingFace at run time). `vizfold status` shows the resolved
-config and which backends are installed. The same `install/` scripts are built to host others
-(openfold3, boltz) as they land.
-
----
-
-Link to Openfold implimentation - [README_vizfold_openfold.md](https://github.com/vizfold/vizfold-foundation/blob/main/README_vizfold_openfold.md)
+config and which backends are installed. Each backend is a self-contained project under
+`backends/<name>/` (its installer, environment, and Python package), so others (openfold3, boltz)
+slot in the same way as they land.
 
 ---
 
@@ -116,12 +113,12 @@ exactly what you care about and nothing else:
 | --- | --- | --- |
 | 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold install openfold` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
-| 3 | `install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
+| 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
 A `<site>.json` carries every variable and templates paths off `$VAR` references, resolved
 recursively (`$VAR` against the environment first, then other keys in the same file). The site's
 `<site>.sh` discovers only the one login-specific atom the templates need — the allocation, the
-SLURM account, or `OPENFOLD_BASE` (the install directory). `install/sites/delta.json`:
+SLURM account, or `OPENFOLD_BASE` (the install directory). `backends/openfold/install/sites/delta.json`:
 
 ```json
 {
@@ -141,7 +138,7 @@ SLURM account, or `OPENFOLD_BASE` (the install directory). `install/sites/delta.
 Here `delta.sh` discovers just `$ALLOC` (the `/work/nvme` allocation, via `sacctmgr`); the
 account, base, and prefix all template off it.
 
-`install/sites/nexus-dev.json` — no database mirror, so `OPENFOLD_AF2_ROOT` is absent and the
+`backends/openfold/install/sites/nexus-dev.json` — no database mirror, so `OPENFOLD_AF2_ROOT` is absent and the
 install fetches the parameters itself. Its GPU is a 10 GB vGPU, hence the smaller example and
 memory:
 
@@ -168,10 +165,10 @@ ended up instead of guessing.
 
 ### Adding a cluster
 
-Two files in `install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
+Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
 single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
 declares everything else and templates paths/accounts off that atom (and `$USER`). `vizfold
-init` (via `install/init.sh`) dispatches on `ClusterName`, so nothing else needs to change.
+init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, so nothing else needs to change.
 
 ---
 
@@ -181,9 +178,10 @@ The repository is laid out as:
 
 - `cli/` — the Rust `vizfold` CLI and executor core (SeaORM entities, migrations, services, and seed). This is the primary active implementation path.
 - `workbench/` — a Next.js dashboard prototype. Currently runs on static mock data and is not wired to the executor yet.
-- `install/` — per-cluster backend install scripts dispatched by `vizfold install`.
+- `backends/<name>/` — one self-contained project per model backend, each with its own installer, environment, run entrypoint, and pip-installable Python package:
+  - `backends/openfold/` — the OpenFold model package + `scripts/`, its cluster installer (`install/`), `environment*.yml`, `run_pretrained_openfold.py`, and the attention-visualization demo (`viz/`). Installs as `import openfold`.
+  - `backends/esmfold/` — the ESMFold package, `run_pretrained_esmf.py`, and a self-contained venv installer (`install.sh`). Installs as `import esmfold`.
 - `docs/` — architecture notes, specs, and backlog.
-- `openfold/`, `run_pretrained_*.py`, `train_openfold.py`, … — the OpenFold model code the backends run.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from source.
 
@@ -246,6 +244,82 @@ cargo test
 These exercise the in-memory SQLite path, SeaORM migrations, and the core registration/run/artifact services.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branching and contribution guidance.
+
+---
+
+## Attention visualization (OpenFold)
+
+A lightweight extension of [OpenFold](https://github.com/aqlaboratory/openfold) for interactive
+visualization of attention in protein structure prediction. It renders MSA-row and triangle
+attention scores as **arc diagrams** (sequence space) and **3D PyMOL overlays** (structure space).
+The code lives with the OpenFold backend under `backends/openfold/viz/`.
+
+### Key features
+
+- Compatible with OpenFold outputs (`.pdb`, attention text dumps)
+- Layer- and head-specific visualizations
+- Integrated residue highlighting
+- Notebook-friendly and HPC-friendly workflow
+
+### Architecture
+
+AttentionViz layers three lightweight components on top of upstream OpenFold:
+
+- **Workflow assets** (docs, scripts, notebooks) provide reproducible configs and runnable examples.
+- **Instrumented CLIs** wrap OpenFold inference/training so attention tensors are siphoned off without modifying the scientific core.
+- **Visualization helpers** read the exported metadata and generate PyMOL overlays plus sequence-space plots.
+
+![AttentionViz architecture](./backends/openfold/docs/imgs/AttentionViz_Architecture.png)
+
+- [High-res PDF](./backends/openfold/docs/imgs/AttentionViz_Architecture.pdf) for zooming/printing
+- [Editable SVG](./backends/openfold/docs/imgs/AttentionViz_Architecture.svg) when updating the diagram source
+
+### Installation
+
+Assumes OpenFold is installed (`vizfold install openfold`, or see
+[OpenFold's install docs](https://openfold.readthedocs.io/en/latest/Installation.html)), or that
+you are using CyberShuttle (see `cybershuttle.yml`). The visualization helpers also need `PyMOL`
+(open-source is fine), `matplotlib`, `numpy`, `scipy`, `pandas`, and `biopython`. You can install
+the full dependency set (OpenFold included) directly from `cybershuttle.yml`. Verify the
+repo-specific dependencies with:
+
+```python
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import csv
+from pymol import cmd
+from pymol.cgo import CYLINDER, SPHERE
+```
+
+### Interactive demo
+
+`backends/openfold/viz/viz_attention_demo_base.ipynb` demonstrates the full pipeline: it runs
+OpenFold inference with precomputed alignments, extracts top-k residue-residue attention scores per
+layer and head, saves them to text files, and visualizes **MSA row attention** and **triangle
+start attention** as arc diagrams and 3D PyMOL overlays. Line thickness encodes attention strength.
+(On CyberShuttle, use `backends/openfold/viz/viz_attention_demo.ipynb` instead.)
+
+**MSA row attention (layer 47, protein 6KWC)** — pairwise attention inferred from the MSA, across
+all heads at a selected layer:
+
+![msa_row_arc](./outputs/attention_images_6KWC_demo_tri_18/msa_row_attention_plots/msa_row_head_2_layer_47_6KWC_arc.png)
+![msa_row_subplot](./outputs/attention_images_6KWC_demo_tri_18/msa_row_attention_plots/msa_row_heads_layer_47_6KWC_subplot.png)
+
+**Triangle start attention (layer 47, residue 18)** — attention from a single (highlighted) residue
+to others, as part of triangle-based geometric reasoning:
+
+![triangle_start_arc](./outputs/attention_images_6KWC_demo_tri_18/tri_start_attention_plots/tri_start_res_18_head_0_layer_47_6KWC_arc.png)
+![triangle_start_subplot](./outputs/attention_images_6KWC_demo_tri_18/tri_start_attention_plots/triangle_start_residue_18_layer_47_6KWC_subplot.png)
+
+### Acknowledgements
+
+Based on [**OpenFold**](https://github.com/aqlaboratory/openfold), an open-source reimplementation
+of AlphaFold, distributed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+This repository extends OpenFold with attention-map visualization tools (3D + arc diagrams), demo
+scripts and configuration, and inference-pipeline modifications for simplified usage, and includes
+source originally developed by the OpenFold contributors with all original rights and attributions
+retained under the Apache 2.0 License.
 
 ---
 

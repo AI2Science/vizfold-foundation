@@ -1,17 +1,19 @@
 #!/bin/bash
 
-# Install a model backend (OpenFold today) on this cluster; dispatch on SLURM ClusterName, add a cluster as install/sites/<ClusterName>.sh. Invoked by `vizfold install`.
+# Install a model backend (OpenFold today) on this cluster; dispatch on SLURM ClusterName, add a cluster as backends/openfold/install/sites/<ClusterName>.sh. Invoked by `vizfold install`.
 set -euo pipefail
 
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}   # already cloned by the bootstrap
+# Checkout root (already cloned by the bootstrap) and the OpenFold backend subtree it lives in.
+REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
+OF=$REPO/backends/openfold
 die() { echo "FATAL: $*" >&2; exit 1; }
 
 # Pin REPO for the libraries (config.sh reads OPENFOLD_HOME) before sourcing them.
 init::libs() {
-    test -f "$REPO/setup.py" || die "$REPO is not a vizfold checkout; re-run the bootstrap installer"
+    test -f "$OF/setup.py" || die "$REPO is not a vizfold checkout; re-run the bootstrap installer"
     export OPENFOLD_HOME=$REPO
-    . "$REPO/install/slurm.sh"          # pulls in config.sh + interactive.sh; declares the slurm::* hooks and slurm::run
-    SITES=$REPO/install/sites
+    . "$OF/install/slurm.sh"          # pulls in config.sh + interactive.sh; declares the slurm::* hooks and slurm::run
+    SITES=$OF/install/sites
 }
 
 init::pick_site() {

@@ -9,9 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from vizfold.backends.esmfold.hooks import ESMFoldTraceCollector, StructureModuleTraceCollector
-from vizfold.backends.esmfold.schema import _read_fasta_and_hash
-from vizfold.backends.esmfold.trace_adapter import (
+from esmfold.hooks import ESMFoldTraceCollector, StructureModuleTraceCollector
+from esmfold.schema import _read_fasta_and_hash
+from esmfold.trace_adapter import (
     build_and_write_meta,
     write_structure,
     write_traces,
