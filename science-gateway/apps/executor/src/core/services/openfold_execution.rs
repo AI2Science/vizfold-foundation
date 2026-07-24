@@ -80,6 +80,19 @@ pub async fn execute_openfold_run(
                 output: None,
             });
         }
+        // Mark running (with started_at) before the fold blocks, so `show run`/the dashboard
+        // reflect an in-flight run instead of a stale `submitted`/started_at=NULL.
+        runs::update_run_status(
+            db,
+            run_id,
+            UpdateRunStatusInput {
+                status: "running".into(),
+                started_at: Some(Some(started_at)),
+                completed_at: None,
+                error_message: None,
+            },
+        )
+        .await?;
         let output = runner.run(exec_command).await?;
         Ok(ExecutionOutcome {
             report,
@@ -121,6 +134,9 @@ pub async fn execute_openfold_run(
                     },
                 )
                 .await?;
+                // Register produced output directories inline so a completed run has its
+                // artifacts without a separate `register-artifacts` command. Idempotent.
+                super::openfold_artifacts::register_known_openfold_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
                     format!("OpenFold command exited with code {}", output.exit_code)
@@ -375,6 +391,7 @@ mod tests {
         ))
         .await?;
         db::migrate_database(&db).await?;
+        crate::core::seed::seed_defaults(&db).await?;
         Ok(db)
     }
 
@@ -493,6 +510,10 @@ mod tests {
         let workspace = layout.output_location.join(run.id.to_string());
         assert!(workspace.is_dir());
         assert!(workspace.join("attention").is_dir());
+        // A completed run registers its output directories inline (no separate command).
+        let artifacts =
+            crate::core::services::artifacts::list_artifacts_for_run(&db, run.id).await?;
+        assert_eq!(artifacts.len(), 2);
         Ok(())
     }
 

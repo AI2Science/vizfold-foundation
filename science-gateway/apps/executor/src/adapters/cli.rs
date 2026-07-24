@@ -426,6 +426,26 @@ fn confirmed() -> Result<bool, DbErr> {
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let workbench = serve_dir()?;
 
+    // Serve run outputs to the browser by linking the seeded output_location under the
+    // dashboard's public/, so Next serves <prefix>/runs/<id>/... at /runs/<id>/... with no
+    // file-serving code of our own.
+    // ponytail: targets the seeded output_location (prefix/runs). A profile with a different
+    // output_location isn't reachable this way -- read it from the run's provenance if that ever
+    // happens.
+    let runs_dir = config::prefix().join("runs");
+    std::fs::create_dir_all(&runs_dir).ok();
+    // public/ may not exist (a workbench with no static assets); the symlink's parent must.
+    std::fs::create_dir_all(workbench.join("public")).ok();
+    match std::os::unix::fs::symlink(&runs_dir, workbench.join("public/runs")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(DbErr::Custom(format!(
+                "failed to link run outputs into the dashboard: {error}"
+            )));
+        }
+    }
+
     let node_modules = workbench.join("node_modules");
     let empty =
         std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
@@ -474,8 +494,14 @@ fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
         if name.to_str().is_some_and(|n| skip.contains(&n)) {
             continue;
         }
+        let file_type = entry.file_type()?;
+        // Never copy a symlink (e.g. public/runs -> the run outputs): fs::copy would follow it,
+        // and following a link-to-directory hits EISDIR. The link is recreated at serve time.
+        if file_type.is_symlink() {
+            continue;
+        }
         let (from, to) = (entry.path(), dst.join(&name));
-        if entry.file_type()?.is_dir() {
+        if file_type.is_dir() {
             copy_tree(&from, &to, &[])?; // skip applies only at the workbench root
         } else {
             std::fs::copy(&from, &to)?;
@@ -485,15 +511,18 @@ fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
 }
 
 fn run_npm(dir: &Path, args: &[&str]) -> Result<(), DbErr> {
-    let status = std::process::Command::new("npm")
-        .current_dir(dir)
-        .args(args)
-        .status()
-        .map_err(|error| {
-            DbErr::Custom(format!(
-                "failed to run npm (is Node.js installed and on PATH?): {error}"
-            ))
-        })?;
+    let mut command = std::process::Command::new("npm");
+    command.current_dir(dir).args(args);
+    // The dashboard reads the sqlite file directly; hand it the plain path (database_url() carries
+    // a sqlite://...?mode=rwc wrapper that node:sqlite can't open).
+    if let Some(database) = config::database_path() {
+        command.env("VIZFOLD_DB", database);
+    }
+    let status = command.status().map_err(|error| {
+        DbErr::Custom(format!(
+            "failed to run npm (is Node.js installed and on PATH?): {error}"
+        ))
+    })?;
     status.success().then_some(()).ok_or_else(|| {
         DbErr::Custom(format!(
             "npm {} exited with status {status}",
@@ -1143,6 +1172,25 @@ mod tests {
         assert!(!dst.join(".next").exists()); // excluded at top level
         assert!(dst.join("node_modules/installed.js").is_file()); // preserved
         assert!(!dst.join("node_modules/dep.js").exists()); // src node_modules not copied
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn copy_tree_skips_a_symlinked_directory() {
+        // public/runs is a symlink to the run outputs; fs::copy would follow it into a directory
+        // and fail with EISDIR. The stage must skip it, not choke on it.
+        let base = std::env::temp_dir().join(format!("vizfold-copytree-link-{}", std::process::id()));
+        let (src, dst, outputs) = (base.join("src"), base.join("dst"), base.join("outputs"));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(src.join("public")).unwrap();
+        std::fs::create_dir_all(&outputs).unwrap();
+        std::fs::write(src.join("package.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(&outputs, src.join("public/runs")).unwrap();
+
+        super::copy_tree(&src, &dst, &[]).unwrap();
+
+        assert!(dst.join("package.json").is_file());
+        assert!(!dst.join("public/runs").exists()); // the symlink is not staged
         std::fs::remove_dir_all(&base).ok();
     }
 
