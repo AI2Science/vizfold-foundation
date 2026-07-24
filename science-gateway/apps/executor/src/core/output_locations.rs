@@ -27,6 +27,11 @@ pub fn output_location_from(
         && let Ok(value) = serde_json::from_str::<serde_json::Value>(raw)
         && let Some(location) = value["profile"]["config"]["output_location"].as_str()
     {
+        if location.trim().is_empty() {
+            return Err(DbErr::Custom(
+                "provenance snapshot output_location must be non-empty".into(),
+            ));
+        }
         return Ok(location.to_owned());
     }
 
@@ -152,6 +157,21 @@ mod tests {
             super::output_location_from(snapshot.as_deref(), profile_config).expect("resolved");
 
         assert_eq!(resolved, "/work/original");
+    }
+
+    #[test]
+    fn rejects_empty_output_location_in_snapshot() {
+        let snapshot = Some(r#"{"profile":{"config":{"output_location":"   "}}}"#.to_owned());
+
+        let error =
+            super::output_location_from(snapshot.as_deref(), r#"{"output_location":"/work/live"}"#)
+                .expect_err("empty snapshot output location should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("provenance snapshot output_location must be non-empty")
+        );
     }
 
     #[test]

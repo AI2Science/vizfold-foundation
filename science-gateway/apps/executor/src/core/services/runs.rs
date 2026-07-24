@@ -1,8 +1,9 @@
+use std::path::Path;
+
 use chrono::Utc;
 use sea_orm::{DatabaseConnection, DbErr};
 
 use crate::core::{
-    config,
     entities::{artifacts, runs},
     repositories,
 };
@@ -41,12 +42,18 @@ pub async fn list_runs(db: &DatabaseConnection) -> Result<Vec<runs::Model>, DbEr
 }
 
 /// Immutable record of what produced a run. Catalog rows can be edited later; this cannot.
+/// Takes resolved paths as parameters rather than resolving them itself, matching the
+/// `gpu_launch`/`gpu_launch_args` split -- callers resolve from the environment.
+#[allow(clippy::too_many_arguments)]
 pub fn provenance_snapshot(
     backend_slug: &str,
     backend_version: Option<&str>,
     target_slug: &str,
     invocation_kind: &str,
     profile_config_json: &str,
+    openfold_home: &Path,
+    prefix: &Path,
+    env_prefix: &Path,
 ) -> String {
     let config: serde_json::Value =
         serde_json::from_str(profile_config_json).unwrap_or(serde_json::Value::Null);
@@ -55,9 +62,9 @@ pub fn provenance_snapshot(
         "target": { "slug": target_slug },
         "profile": { "invocation_kind": invocation_kind, "config": config },
         "resolved": {
-            "openfold_home": config::openfold_home().display().to_string(),
-            "prefix": config::prefix().display().to_string(),
-            "env_prefix": config::openfold_env_prefix().display().to_string(),
+            "openfold_home": openfold_home.display().to_string(),
+            "prefix": prefix.display().to_string(),
+            "env_prefix": env_prefix.display().to_string(),
         },
     })
     .to_string()
@@ -142,6 +149,8 @@ pub async fn get_run_with_artifacts(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     #[test]
     fn snapshot_records_every_catalog_payload_and_the_resolved_paths() {
         let snapshot = super::provenance_snapshot(
@@ -150,6 +159,9 @@ mod tests {
             "local-openfold",
             "local_subprocess",
             r#"{"output_location":"/work/runs"}"#,
+            Path::new("/opt/openfold"),
+            Path::new("/opt/prefix"),
+            Path::new("/opt/prefix/mamba/envs/openfold-env"),
         );
         let value: serde_json::Value = serde_json::from_str(&snapshot).expect("valid json");
 
@@ -158,5 +170,11 @@ mod tests {
         assert_eq!(value["target"]["slug"], "local-openfold");
         assert_eq!(value["profile"]["invocation_kind"], "local_subprocess");
         assert_eq!(value["profile"]["config"]["output_location"], "/work/runs");
+        assert_eq!(value["resolved"]["openfold_home"], "/opt/openfold");
+        assert_eq!(value["resolved"]["prefix"], "/opt/prefix");
+        assert_eq!(
+            value["resolved"]["env_prefix"],
+            "/opt/prefix/mamba/envs/openfold-env"
+        );
     }
 }

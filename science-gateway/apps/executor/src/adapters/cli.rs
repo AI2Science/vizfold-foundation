@@ -643,6 +643,9 @@ async fn queue_openfold_run(
         &target.slug,
         &profile.invocation_kind,
         &profile.config_json,
+        &config::openfold_home(),
+        &config::prefix(),
+        &config::openfold_env_prefix(),
     );
     let working_dir = local_openfold_working_dir(&profile)?;
     let fasta_dir_input = args
