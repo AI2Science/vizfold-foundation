@@ -129,6 +129,7 @@ SLURM account, or `OPENFOLD_BASE` (the install directory). `backends/openfold/in
   "OPENFOLD_GPU_ACCOUNT": "$ALLOC-delta-gpu",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=32G",
+  "OPENFOLD_GPU_TIME": "01:00:00",
   "OPENFOLD_MAX_CUDA": "12.8",
   "OPENFOLD_PARTITION": "cpu",
   "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"
@@ -169,6 +170,31 @@ Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM
 single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
 declares everything else and templates paths/accounts off that atom (and `$USER`). `vizfold
 init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, so nothing else needs to change.
+
+---
+
+## Commands
+
+`vizfold <command>`. After a backend is installed, the fold lifecycle is: `seed` the executor
+records once, then `queue-run` → `execute-run` → `register-artifacts` → `show run` for each
+fold; `serve` opens the dashboard over the results. `vizfold <command> --help` details any one.
+
+```text
+install                  Install a model backend (openfold or esmfold) on this machine
+download                 Download a backend's data (OpenFold AlphaFold2 databases/params)
+status                   Show resolved config and which backends are installed
+uninstall                Remove everything the install generated
+seed                     Seed the default executor records
+queue-run                Queue a run for a backend (queue-run openfold|esmfold ...)
+execute-run <id>         Execute a queued run
+register-artifacts <id>  Register known artifacts for a completed run
+list                     List executor records (list models|targets|profiles|runs)
+show                     Show one executor record (show run <id>)
+serve                    Start the workbench dashboard
+```
+
+For a full end-to-end walkthrough on a cluster — queue a sequence, fold it on a GPU, register
+and view the outputs, with real commands and results — see [DEMO.md](DEMO.md).
 
 ---
 
