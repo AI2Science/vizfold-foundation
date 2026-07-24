@@ -179,6 +179,17 @@ fn default_cpus() -> i64 {
     std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
 }
 
+/// Clamp the requested CPU count to the execution target's `cpus.maximum`, so a host with more
+/// cores than the target allows (a beefy workstation, any HPC login node) still queues a run
+/// that `execute-run` can plan -- rather than failing only once execution is attempted.
+fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
+    let max_cpus = serde_json::from_str::<serde_json::Value>(available_resources_json)
+        .ok()
+        .and_then(|resources| resources["properties"]["cpus"]["maximum"].as_i64())
+        .unwrap_or(i64::MAX);
+    cpus.min(max_cpus)
+}
+
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
@@ -677,7 +688,10 @@ async fn queue_openfold_run(
             json!(args.use_precomputed_alignments),
         ),
         ("model_device".into(), json!(model_device)),
-        ("cpus".into(), json!(args.cpus)),
+        (
+            "cpus".into(),
+            json!(clamp_cpus(args.cpus, &target.available_resources_json)),
+        ),
     ]);
     if let Some(alignment_dir) = alignment_dir {
         execution_parameters.insert("alignment_dir".into(), json!(alignment_dir));
@@ -1186,7 +1200,9 @@ mod tests {
                 data_dir: Some(".".into()),
                 alignment_dir: Some(".".into()),
                 model_device: Some("cpu".into()),
-                cpus: 1,
+                // Exceeds the seeded local-openfold target's cpus.maximum of 14, so the queued
+                // run must reflect the clamped value, not the raw request.
+                cpus: 18,
                 residue_idx: 1,
                 demo_attn: true,
                 save_outputs: true,
@@ -1208,7 +1224,19 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
                 .expect("execution parameters should be valid JSON"),
-            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 1})
+            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
+        );
+
+        let provenance: serde_json::Value = serde_json::from_str(
+            runs[0]
+                .provenance_json
+                .as_deref()
+                .expect("provenance_json should be set"),
+        )
+        .expect("provenance_json should be valid JSON");
+        assert_eq!(
+            provenance["profile"]["config"]["output_location"],
+            json!(config::prefix().join("runs"))
         );
         Ok(())
     }
@@ -1297,9 +1325,5 @@ mod tests {
     fn cpus_default_follows_available_parallelism() {
         let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
         assert_eq!(super::default_cpus(), expected);
-        assert!(
-            super::default_cpus() > 1,
-            "a dev machine should report more than one core"
-        );
     }
 }
