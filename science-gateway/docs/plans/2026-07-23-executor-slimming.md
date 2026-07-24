@@ -614,21 +614,41 @@ Change the clap attributes at `cli.rs:123-126` from:
 to:
 
 ```rust
-    #[arg(long, default_value_t = default_model_device())]
-    model_device: String,
+    /// Torch device. Defaults to cuda:0 when a GPU is visible, otherwise cpu.
+    #[arg(long)]
+    model_device: Option<String>,
     #[arg(long, default_value_t = default_cpus())]
     cpus: i64,
 ```
+
+**`model_device` is resolved lazily, not via `default_value_t`.** A `default_value_t` expression is
+evaluated every time clap builds the command, so probing the GPU there would spawn `nvidia-smi` on
+*every* invocation — `vizfold list runs`, `vizfold --help`, all of them. Resolve it where the run is
+queued instead:
+
+```rust
+    let model_device = args.model_device.clone().unwrap_or_else(default_model_device);
+```
+
+`cpus` keeps `default_value_t` because `available_parallelism()` is a cheap in-process call with no
+subprocess.
+
+**Trap:** three fields in this struct carry `default_value_t = 1` — `cpus` (:125), `residue_idx`
+(:127), and `num_recycles_save` (:133). Change only `cpus`.
 
 - [ ] **Step 5: Run to verify they pass**
 
 Run: `cargo test`
 Expected: PASS, 0 failed.
 
-- [ ] **Step 6: Verify the CLI help renders the resolved defaults**
+- [ ] **Step 6: Verify the defaults and that help does not probe the GPU**
 
 Run: `cargo run -q --bin vizfold -- queue-run openfold --help | grep -E 'model-device|cpus'`
-Expected: shows `[default: cpu]` (or `cuda:0` on a GPU host) and `[default: <core count>]`.
+Expected: `--cpus` shows `[default: <core count>]`; `--model-device` shows no default, and its help
+text states the cuda:0/cpu rule.
+
+Confirm the probe is not wired into a clap attribute — `detect_gpu` must have exactly one caller and
+it must be the queue path: `grep -rn 'detect_gpu' src/ | grep -v 'fn detect_gpu'`
 
 - [ ] **Step 7: Commit**
 
