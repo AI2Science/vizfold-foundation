@@ -149,7 +149,7 @@ fn or_default<'a>(value: Option<&'a str>, default: &'a str) -> &'a str {
     value.filter(|v| !v.is_empty()).unwrap_or(default)
 }
 
-/// SLURM launch prefix for a fold, mirroring `install/setup.sh:212`. Empty means run bare --
+/// SLURM launch prefix for a fold, mirroring `setup::fold_vars`. Empty means run bare --
 /// either we are already on the node, or no GPU partition is configured (the workstation case).
 pub fn gpu_launch(
     context: SlurmContext,
@@ -175,7 +175,7 @@ pub fn gpu_launch(
     args.push("-p".to_owned());
     args.push(partition.to_owned());
     args.push(format!("--gres={}", or_default(gres, "gpu:1")));
-    // Holds several space-separated flags and must split, as setup.sh:212 relies on word splitting.
+    // Several space-separated flags in one value: setup::fold_vars relies on word splitting too.
     args.extend(
         or_default(resources, "--cpus-per-task=8 --mem=32G")
             .split_whitespace()

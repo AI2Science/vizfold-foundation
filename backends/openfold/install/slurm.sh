@@ -31,16 +31,24 @@ slurm::allocation() {
     echo "${found[0]}"
 }
 
-# Resolve, prompt for, and memoize (in ALLOC) the /work/nvme allocation whose accounts (suffixes $@) all exist.
+# Resolve, prompt for, and memoize (in ALLOC) the /work/nvme allocation whose accounts (suffixes $@)
+# all exist -- and name those accounts here, off the same suffixes, so they cannot drift from them.
 slurm::nvme_alloc() {
-    [ -n "${ALLOC:-}" ] && return
-    ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
-    [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
+    if [ -z "${ALLOC:-}" ]; then
+        ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
+        [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
+    fi
     export ALLOC
+    export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$ALLOC$1}
+    [ -n "${2:-}" ] && export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$ALLOC$2}
+    return 0
 }
 
 # The user's Slurm default account, overridable inline.
 slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
+
+# Only delta-gh overrides this: it shares /work/nvme with x86 Delta and must not share the env.
+slurm::default_prefix() { echo "${OPENFOLD_BASE:+$OPENFOLD_BASE/vizfold}"; }
 
 # Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
 slurm::scratch_root() {
@@ -74,8 +82,8 @@ slurm::run() {
         exec bash "$OF/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX ACCOUNT PARTITION SETUP PTY
-    # OPENFOLD_PREFIX/ACCOUNT come pre-resolved: inline env, or <site>.json templates expanded off slurm::discover's vars.
-    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "${OPENFOLD_PREFIX:-}")
+    # Both may already be set: inline env, slurm::discover, or a <site>.json template off its vars.
+    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "${OPENFOLD_PREFIX:-$(slurm::default_prefix)}")
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}

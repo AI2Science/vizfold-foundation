@@ -1,0 +1,12 @@
+name: install tests
+on: [pull_request, push]
+jobs:
+  install-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backends/openfold
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash install/tests/launch_args.sh
+      - run: bash install/tests/site_config.sh
