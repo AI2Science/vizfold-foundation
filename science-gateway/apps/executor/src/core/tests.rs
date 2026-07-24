@@ -77,14 +77,13 @@ async fn seeds_artifact_type_catalog() -> Result<(), DbErr> {
 }
 
 #[tokio::test]
-async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() -> Result<(), DbErr> {
+async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
     let db = test_db().await?;
 
     seed::seed_defaults(&db).await?;
     seed::seed_defaults(&db).await?;
 
     let targets = execution_targets::list_execution_targets(&db).await?;
-    assert!(targets.iter().any(|target| target.slug == "local-mock"));
     let openfold_target = targets
         .iter()
         .find(|target| target.slug == "local-openfold")
@@ -124,7 +123,7 @@ async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() ->
 
 fn sample_execution_target_input() -> RegisterExecutionTargetInput {
     RegisterExecutionTargetInput {
-        slug: "local-mock".into(),
+        slug: "test-target".into(),
         target_type: "local".into(),
         description: Some("Test execution target".into()),
         available_resources_json: json!({
@@ -145,7 +144,7 @@ fn sample_invocation_profile_input(
     RegisterModelInvocationProfileInput {
         model_backend_id,
         execution_target_id,
-        invocation_kind: "mock".into(),
+        invocation_kind: "test".into(),
         config_json: json!({"mode": "test"}).to_string(),
     }
 }
@@ -172,7 +171,7 @@ async fn creates_execution_target() -> Result<(), DbErr> {
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
 
-    assert_eq!(target.slug, "local-mock");
+    assert_eq!(target.slug, "test-target");
     assert_eq!(target.target_type, "local");
     Ok(())
 }
@@ -192,7 +191,7 @@ async fn creates_model_invocation_profile() -> Result<(), DbErr> {
 
     assert_eq!(profile.model_backend_id, backend.id);
     assert_eq!(profile.execution_target_id, target.id);
-    assert_eq!(profile.invocation_kind, "mock");
+    assert_eq!(profile.invocation_kind, "test");
     Ok(())
 }
 

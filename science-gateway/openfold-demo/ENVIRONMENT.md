@@ -56,30 +56,7 @@ cd <workspace>
 unzip vizfold_data.zip
 ```
 
-## 5. Run the OpenFold workflow example
-
-From the executor directory:
-
-```bash
-cd science-gateway/apps/executor
-```
-
-Set the required environment variables:
-
-```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
-export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
-```
-
-Then run:
-
-```bash
-cargo run --example run_openfold_workflow
-```
-
-The example uses repo-aware defaults for the OpenFold script, FASTA input, precomputed alignments, and base output location.
-
-## 6. Optional environment variable overrides
+## 5. Optional environment variable overrides
 
 Most users only need `VIZFOLD_OPENFOLD_DATA_DIR`.
 
@@ -109,19 +86,7 @@ the FASTA header should resolve to `6KWC_1`, and precomputed alignments should e
 
 `VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is written to `ModelInvocationProfile.config_json.output_location`. The run workspace is `<output_location>/<run.id>`; OpenFold receives it as `--output_dir`, and attention output is derived under `<output_location>/<run.id>/attention`.
 
-## 7. Register known demo artifacts
-
-After the workflow runs, register the known output directories as artifacts:
-
-```bash
-cargo run --example register_openfold_demo_artifacts
-```
-
-This example indexes known output locations into the executor database using `ARTIFACT` and `ARTIFACT_TYPE`.
-
-It does not recursively scan all files, generate visualizations, serve files, or register reused precomputed alignments as produced artifacts.
-
-## 8. Notes
+## 6. Notes
 
 For local execution, researchers still need a working OpenFold environment. This is a local-execution limitation, not a core executor limitation.
 
