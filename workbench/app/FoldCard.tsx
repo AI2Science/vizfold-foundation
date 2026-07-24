@@ -70,13 +70,13 @@ export default function FoldCard({ examples }: { examples: Example[] }) {
         </label>
 
         <label className="field">
-          <span>
+          <span className="check">
             <input
               type="checkbox"
               checked={attn}
               onChange={(event) => setAttn(event.target.checked)}
               disabled={folding}
-            />{" "}
+            />
             Dump attention maps
           </span>
           <p className="field-note">

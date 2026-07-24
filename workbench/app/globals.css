@@ -110,6 +110,12 @@ textarea {
   font-weight: 600;
 }
 
+.field .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .field-note {
   margin: 0;
   color: var(--text-soft);
@@ -117,7 +123,8 @@ textarea {
   font-size: 0.95rem;
 }
 
-.field input,
+/* Checkboxes keep their intrinsic box; the full-width treatment is for text-ish controls. */
+.field input:not([type="checkbox"]),
 .field select,
 .field textarea {
   width: 100%;

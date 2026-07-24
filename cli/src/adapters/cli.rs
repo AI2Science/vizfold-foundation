@@ -436,7 +436,8 @@ fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<
     status
         .success()
         .then_some(())
-        .ok_or_else(|| DbErr::Custom(format!("{what} exited with status {status}")))
+        // ExitStatus already renders as "exit status: N", so no "exited with status" prefix.
+        .ok_or_else(|| DbErr::Custom(format!("{what}: {status}")))
 }
 
 /// Download a backend's data by running the checkout's downloader for the requested dataset into
