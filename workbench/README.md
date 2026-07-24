@@ -2,12 +2,12 @@
 
 This is the Next.js workbench app for the VizFold science gateway prototype.
 
-The primary active implementation path is now the Rust executor in `science-gateway/apps/executor`.
+The primary active implementation path is now the Rust executor in `cli/`.
 This workbench is intentionally work-in-progress and currently runs on static mock data only.
 
 ## Getting Started
 
-Run the development server from `science-gateway/apps/workbench`:
+Run the development server from `workbench/`:
 
 ```bash
 npm run dev
@@ -26,8 +26,8 @@ No database setup is required for the current prototype.
 
 ## Current Status
 
-- `apps/executor` is the primary active backend path.
-- `apps/workbench` is a frontend prototype with mock data.
+- `cli/` is the primary active backend path.
+- `workbench/` is a frontend prototype with mock data.
 - The workbench is not wired to the Rust executor yet.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

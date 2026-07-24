@@ -84,10 +84,10 @@ The output location is not a per-run flag: it comes from the seeded `local-openf
 
 The `vizfold` CLI is the development path for testing the full persisted workflow: seeded model/target/profile records, queued runs, execution status, and registered output artifacts.
 
-Run these commands from the executor crate:
+Run these commands from the CLI crate:
 
 ```bash
-cd vizfold-foundation/science-gateway/apps/executor
+cd vizfold-foundation/cli
 ```
 
 ### Set up the local output workspace
@@ -95,19 +95,19 @@ cd vizfold-foundation/science-gateway/apps/executor
 The seeded `local-openfold` profile uses the repository root as its working directory and writes runs below:
 
 ```text
-<repo-root>/science-gateway/openfold-demo-output/<run-id>
+<repo-root>/openfold-demo-output/<run-id>
 ```
 
 Create the output parent before executing a run:
 
 ```bash
-mkdir -p ../../../science-gateway/openfold-demo-output
+mkdir -p ../openfold-demo-output
 ```
 
 In PowerShell:
 
 ```powershell
-New-Item -ItemType Directory -Force -Path ../../../science-gateway/openfold-demo-output
+New-Item -ItemType Directory -Force -Path ../openfold-demo-output
 ```
 
 ### Seed and inspect the local records
@@ -165,7 +165,7 @@ Activate the Python/OpenFold environment first, as described above, then execute
 cargo run --bin vizfold -- execute-run <run-id>
 ```
 
-The command prints every preflight check and either launches the configured OpenFold command or reports why execution was skipped. On a successful run, the output workspace is `<repo-root>/science-gateway/openfold-demo-output/<run-id>`.
+The command prints every preflight check and either launches the configured OpenFold command or reports why execution was skipped. On a successful run, the output workspace is `<repo-root>/openfold-demo-output/<run-id>`.
 
 Register the known output directories after execution:
 
@@ -204,13 +204,13 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 Set:
 
 ```bash
-export OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
+export OPENFOLD_DATA_DIR="$(realpath ../../vizfold_data)"
 ```
 
 from:
 
 ```text
-vizfold-foundation/science-gateway/apps/executor
+vizfold-foundation/cli
 ```
 
 ### FASTA/input ID mismatch

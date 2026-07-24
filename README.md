@@ -175,6 +175,80 @@ init` (via `install/init.sh`) dispatches on `ClusterName`, so nothing else needs
 
 ---
 
+## Development
+
+The repository is laid out as:
+
+- `cli/` — the Rust `vizfold` CLI and executor core (SeaORM entities, migrations, services, and seed). This is the primary active implementation path.
+- `workbench/` — a Next.js dashboard prototype. Currently runs on static mock data and is not wired to the executor yet.
+- `install/` — per-cluster backend install scripts dispatched by `vizfold install`.
+- `docs/` — architecture notes, specs, and backlog.
+- `openfold/`, `run_pretrained_*.py`, `train_openfold.py`, … — the OpenFold model code the backends run.
+
+End users install the prebuilt release binary (see [Install](#install)); the steps below build from source.
+
+### Prerequisites
+
+- Rust toolchain (`cargo`, `rustc`)
+- Node.js 22 LTS or later, and npm (for the workbench)
+
+### CLI and executor
+
+Build and run the `vizfold` CLI from `cli/` (it is the crate's `default-run`, so `cargo run` alone runs it):
+
+```bash
+cd cli
+cargo run -- seed          # create/migrate the SQLite DB and seed default records
+cargo run -- list models
+```
+
+`seed` is safe to repeat and existence-guarded: it ensures the local OpenFold and ESMFold
+backends, their `local-*` targets, and matching invocation profiles exist. SeaORM migrations run
+automatically on every connect.
+
+To install just the CLI binary into `~/.cargo/bin`:
+
+```bash
+cargo install --path . --bin vizfold --force
+vizfold --help
+```
+
+The seeded local profiles assume the checked-out repository layout, so build and run against the
+checkout rather than treating this as a standalone install. For a full end-to-end OpenFold run,
+see [DEMO.md](DEMO.md).
+
+#### Database
+
+The executor uses SQLite. `config::database_url()` resolves the file in order: `DATABASE_URL`,
+then `VIZFOLD_DB` (env or install config), then `<OPENFOLD_PREFIX>/vizfold.db`, then
+`$XDG_DATA_HOME/vizfold/vizfold.db` (`~/.local/share/vizfold/vizfold.db` by default). Parent
+directories are created automatically. The migration history was collapsed into a single baseline
+on 2026-07-23; an older executor database fails with an actionable error naming the file to
+delete — remove it and let the executor recreate it (seeding repopulates the defaults).
+
+### Workbench
+
+```bash
+cd workbench
+npm install
+npm run dev            # http://localhost:3000
+```
+
+The workbench currently uses mock data only; no database setup is required.
+
+### Tests
+
+```bash
+cd cli
+cargo test
+```
+
+These exercise the in-memory SQLite path, SeaORM migrations, and the core registration/run/artifact services.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branching and contribution guidance.
+
+---
+
 ## License
 
 This project is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).  
