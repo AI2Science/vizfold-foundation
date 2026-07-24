@@ -15,8 +15,8 @@ use crate::core::{
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
-        openfold_artifacts::register_known_openfold_artifacts,
-        openfold_execution::execute_openfold_run, runs,
+        openfold_artifacts::register_known_openfold_artifacts, openfold_execution::execute_run,
+        runs,
     },
 };
 
@@ -153,6 +153,41 @@ struct QueueRunArgs {
 enum QueueRunModel {
     /// Queue an OpenFold run.
     Openfold(OpenfoldQueueArgs),
+    /// Queue an ESMFold run.
+    Esmfold(EsmfoldQueueArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+struct EsmfoldQueueArgs {
+    #[arg(long)]
+    input_id: String,
+    #[arg(long)]
+    input_sequence: String,
+    /// Single-sequence FASTA file to fold (ESMFold takes a file, not a directory).
+    #[arg(long)]
+    fasta: String,
+    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
+    /// HPC flow) or a GPU is visible locally, otherwise cpu.
+    #[arg(long)]
+    model_device: Option<String>,
+    /// HuggingFace model id.
+    #[arg(long, default_value = "facebook/esmfold_v1")]
+    model: String,
+    /// What to extract: none, attention, activations, or attention+activations.
+    #[arg(long, default_value = "attention+activations")]
+    trace_mode: String,
+    /// Layers to save: 'all' or a comma/colon list.
+    #[arg(long, default_value = "all")]
+    layers: String,
+    /// Model dtype.
+    #[arg(long, default_value = "float32")]
+    dtype: String,
+    /// Save trace tensors in fp16 to reduce size.
+    #[arg(long)]
+    save_fp16: bool,
+    /// Capture IPA attention and per-recycle backbone from the structure module.
+    #[arg(long)]
+    structure_traces: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -276,8 +311,9 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::QueueRun(queue) => match queue.model {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
+            QueueRunModel::Esmfold(args) => queue_esmfold_run(&database, args).await?,
         },
-        Command::ExecuteRun { run_id } => execute_openfold(&database, run_id).await?,
+        Command::ExecuteRun { run_id } => execute(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
         Command::Install(_) | Command::Status | Command::Uninstall(_) | Command::Serve(_) => {
             unreachable!("handled before DB connect")
@@ -650,9 +686,9 @@ async fn register_artifacts(
         .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
-    if backend.slug != "openfold" {
+    if !matches!(backend.slug.as_str(), "openfold" | "esmfold") {
         return Err(DbErr::Custom(format!(
-            "artifact registration is currently only implemented for OpenFold runs (run {run_id} uses backend '{}')",
+            "artifact registration is currently only implemented for OpenFold and ESMFold runs (run {run_id} uses backend '{}')",
             backend.slug
         )));
     }
@@ -693,12 +729,9 @@ async fn register_artifacts(
     Ok(())
 }
 
-async fn execute_openfold(
-    database: &sea_orm::DatabaseConnection,
-    run_id: i32,
-) -> Result<(), DbErr> {
-    println!("Executing OpenFold run {run_id}");
-    let outcome = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
+async fn execute(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
+    println!("Executing run {run_id}");
+    let outcome = execute_run(database, run_id, &LocalCommandRunner).await?;
 
     let label = if outcome.report.has_failures() {
         "failed"
@@ -777,7 +810,7 @@ async fn queue_openfold_run(
         &config::prefix(),
         &config::openfold_env_prefix(),
     );
-    let working_dir = local_openfold_working_dir(&profile)?;
+    let working_dir = local_working_dir(&profile)?;
     let fasta_dir_input = args
         .fasta_dir
         .clone()
@@ -856,6 +889,82 @@ async fn queue_openfold_run(
     Ok(())
 }
 
+async fn queue_esmfold_run(
+    database: &sea_orm::DatabaseConnection,
+    args: EsmfoldQueueArgs,
+) -> Result<(), DbErr> {
+    let backend = model_backend_entity::Entity::find()
+        .filter(model_backend_entity::Column::Slug.eq("esmfold"))
+        .one(database)
+        .await?
+        .ok_or_else(seed_required_error)?;
+    let target = execution_target_entity::Entity::find()
+        .filter(execution_target_entity::Column::Slug.eq("local-esmfold"))
+        .one(database)
+        .await?
+        .ok_or_else(seed_required_error)?;
+    let profile = model_invocation_profiles::list_model_invocation_profiles(database)
+        .await?
+        .into_iter()
+        .find(|profile| {
+            profile.model_backend_id == backend.id
+                && profile.execution_target_id == target.id
+                && profile.invocation_kind == "local_subprocess"
+        })
+        .ok_or_else(seed_required_error)?;
+    let provenance = runs::provenance_snapshot(
+        &backend.slug,
+        backend.version.as_deref(),
+        &target.slug,
+        &profile.invocation_kind,
+        &profile.config_json,
+        &config::openfold_home(),
+        &config::prefix(),
+        &config::esmfold_env_prefix(),
+    );
+    let working_dir = local_working_dir(&profile)?;
+    let fasta = canonicalize_local_path("--fasta", &args.fasta, &working_dir)?;
+    let model_device = args
+        .model_device
+        .clone()
+        .unwrap_or_else(default_model_device);
+
+    let run = runs::submit_run(
+        database,
+        runs::SubmitRunInput {
+            model_backend_id: backend.id,
+            execution_target_id: target.id,
+            invocation_profile_id: profile.id,
+            status: "submitted".into(),
+            input_id: args.input_id,
+            input_sequence: args.input_sequence,
+            model_parameters_json: json!({
+                "model": args.model,
+                "trace_mode": args.trace_mode,
+                "layers": args.layers,
+                "dtype": args.dtype,
+                "save_fp16": args.save_fp16,
+                "structure_traces": args.structure_traces,
+            })
+            .to_string(),
+            execution_parameters_json: json!({
+                "fasta": fasta,
+                "model_device": model_device,
+            })
+            .to_string(),
+            provenance_json: Some(provenance),
+        },
+    )
+    .await?;
+
+    println!("Queued ESMFold run {}", run.id);
+    println!("status: {}", run.status);
+    println!("input_id: {}", run.input_id);
+    println!("\nNext:");
+    println!("  vizfold execute-run {}", run.id);
+    Ok(())
+}
+
 /// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching fold.sh's `${INPUT_ID%_*}`.
 fn default_fasta_dir(input_id: &str) -> String {
     let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
@@ -873,13 +982,13 @@ fn default_alignment_dir() -> String {
         .into_owned()
 }
 
-fn local_openfold_working_dir(
+fn local_working_dir(
     profile: &crate::core::entities::model_invocation_profiles::Model,
 ) -> Result<String, DbErr> {
     let config: serde_json::Value =
         serde_json::from_str(&profile.config_json).map_err(|error| {
             DbErr::Custom(format!(
-                "local OpenFold invocation profile config_json must be valid JSON: {error}"
+                "local invocation profile config_json must be valid JSON: {error}"
             ))
         })?;
     config
@@ -889,8 +998,7 @@ fn local_openfold_working_dir(
         .map(str::to_owned)
         .ok_or_else(|| {
             DbErr::Custom(
-                "local OpenFold invocation profile config_json requires a non-empty working_dir"
-                    .into(),
+                "local invocation profile config_json requires a non-empty working_dir".into(),
             )
         })
 }
@@ -915,7 +1023,7 @@ fn canonicalize_local_path(field: &str, path: &str, working_dir: &str) -> Result
 
 fn seed_required_error() -> DbErr {
     DbErr::Custom(
-        "OpenFold backend, local-openfold target, or matching profile is missing; run `vizfold seed`"
+        "the run's backend, local execution target, or matching profile is missing; run `vizfold seed`"
             .into(),
     )
 }
@@ -1149,6 +1257,41 @@ mod tests {
             }) if input_id == "6KWC_1" && input_sequence == "GSTI"
                 && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
                 && cpus == default_cpus()
+        ));
+    }
+
+    #[test]
+    fn parses_queue_esmfold_arguments() {
+        let cli = Cli::try_parse_from([
+            "vizfold",
+            "queue-run",
+            "esmfold",
+            "--input-id",
+            "6KWC_1",
+            "--input-sequence",
+            "GSTI",
+            "--fasta",
+            "6KWC.fasta",
+            "--trace-mode",
+            "attention",
+            "--save-fp16",
+        ])
+        .expect("queue-run esmfold command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::QueueRun(QueueRunArgs {
+                model: QueueRunModel::Esmfold(EsmfoldQueueArgs {
+                    input_id,
+                    fasta,
+                    trace_mode,
+                    save_fp16: true,
+                    structure_traces: false,
+                    ref model,
+                    ..
+                })
+            }) if input_id == "6KWC_1" && fasta == "6KWC.fasta" && trace_mode == "attention"
+                && model == "facebook/esmfold_v1"
         ));
     }
 

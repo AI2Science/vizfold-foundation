@@ -94,67 +94,8 @@ pub fn preflight_openfold(
         "run execution_parameters_json",
         &run.execution_parameters_json,
     )?;
-    let mut checks = Vec::new();
-    checks.push(gpu_check(detect_gpu().as_deref()));
-
-    if command.program.trim().is_empty() {
-        checks.push(PreflightCheck::failed(
-            "program configured",
-            "command program is empty",
-        ));
-    } else {
-        checks.push(PreflightCheck::passed(
-            "program configured",
-            format!("program '{}' is configured", command.program),
-        ));
-    }
-
-    let script = script_argument(command);
-    match script {
-        Some(script) => checks.push(PreflightCheck::passed(
-            "script argument configured",
-            format!("script argument '{script}' follows -u"),
-        )),
-        None => checks.push(PreflightCheck::failed(
-            "script argument configured",
-            "command args must include a script argument after -u",
-        )),
-    }
-
-    match &command.current_dir {
-        Some(current_dir) if current_dir.is_dir() => checks.push(PreflightCheck::passed(
-            "working directory",
-            format!("working directory '{}' exists", current_dir.display()),
-        )),
-        Some(current_dir) => checks.push(PreflightCheck::failed(
-            "working directory",
-            format!(
-                "working directory '{}' does not exist or is not a directory",
-                current_dir.display()
-            ),
-        )),
-        None => checks.push(PreflightCheck::warning(
-            "working directory",
-            "no working directory is configured; script resolution may depend on the caller",
-        )),
-    }
-
-    match (script, &command.current_dir) {
-        (Some(script), _) if Path::new(script).is_absolute() => {
-            checks.push(path_exists_check("script file", Path::new(script)));
-        }
-        (Some(script), Some(current_dir)) => {
-            checks.push(path_exists_check("script file", &current_dir.join(script)));
-        }
-        (Some(script), None) => checks.push(PreflightCheck::warning(
-            "script file",
-            format!("relative script '{script}' cannot be resolved without a working directory"),
-        )),
-        (None, _) => checks.push(PreflightCheck::failed(
-            "script file",
-            "script path is unavailable because the -u script argument is missing",
-        )),
-    }
+    let mut checks = vec![gpu_check(detect_gpu().as_deref())];
+    checks.extend(base_command_checks(command));
 
     checks.push(input_id_check(&run.input_id));
     checks.push(fasta_input_check(&execution_parameters, &run.input_id));
@@ -197,6 +138,69 @@ pub fn gpu_check(detected: Option<&str>) -> PreflightCheck {
     }
 }
 
+/// Program/script-argument/working-directory/script-file checks shared by every local_subprocess
+/// backend's preflight (OpenFold, ESMFold): they validate the planned command itself, independent
+/// of a backend's inputs. Callers push these after `gpu_check` and before their own input checks.
+pub(super) fn base_command_checks(command: &CommandSpec) -> Vec<PreflightCheck> {
+    let program = if command.program.trim().is_empty() {
+        PreflightCheck::failed("program configured", "command program is empty")
+    } else {
+        PreflightCheck::passed(
+            "program configured",
+            format!("program '{}' is configured", command.program),
+        )
+    };
+
+    let script = script_argument(command);
+    let script_arg = match script {
+        Some(script) => PreflightCheck::passed(
+            "script argument configured",
+            format!("script argument '{script}' follows -u"),
+        ),
+        None => PreflightCheck::failed(
+            "script argument configured",
+            "command args must include a script argument after -u",
+        ),
+    };
+
+    let working_dir = match &command.current_dir {
+        Some(current_dir) if current_dir.is_dir() => PreflightCheck::passed(
+            "working directory",
+            format!("working directory '{}' exists", current_dir.display()),
+        ),
+        Some(current_dir) => PreflightCheck::failed(
+            "working directory",
+            format!(
+                "working directory '{}' does not exist or is not a directory",
+                current_dir.display()
+            ),
+        ),
+        None => PreflightCheck::warning(
+            "working directory",
+            "no working directory is configured; script resolution may depend on the caller",
+        ),
+    };
+
+    let script_file = match (script, &command.current_dir) {
+        (Some(script), _) if Path::new(script).is_absolute() => {
+            path_exists_check("script file", Path::new(script))
+        }
+        (Some(script), Some(current_dir)) => {
+            path_exists_check("script file", &current_dir.join(script))
+        }
+        (Some(script), None) => PreflightCheck::warning(
+            "script file",
+            format!("relative script '{script}' cannot be resolved without a working directory"),
+        ),
+        (None, _) => PreflightCheck::failed(
+            "script file",
+            "script path is unavailable because the -u script argument is missing",
+        ),
+    };
+
+    vec![program, script_arg, working_dir, script_file]
+}
+
 fn script_argument(command: &CommandSpec) -> Option<&str> {
     command
         .args
@@ -207,7 +211,7 @@ fn script_argument(command: &CommandSpec) -> Option<&str> {
         .filter(|script| !script.is_empty())
 }
 
-fn path_exists_check(name: &str, path: &Path) -> PreflightCheck {
+pub(super) fn path_exists_check(name: &str, path: &Path) -> PreflightCheck {
     if path.exists() {
         PreflightCheck::passed(name, format!("'{}' exists", path.display()))
     } else {
@@ -230,7 +234,7 @@ fn required_directory_check(parameters: &Value, field_name: &str) -> PreflightCh
     }
 }
 
-fn input_id_check(input_id: &str) -> PreflightCheck {
+pub(super) fn input_id_check(input_id: &str) -> PreflightCheck {
     if input_id.trim().is_empty() {
         PreflightCheck::failed("input_id", "run input_id is missing or empty")
     } else {
@@ -401,7 +405,7 @@ fn precomputed_alignment_key_check(parameters: &Value, input_id: &str) -> Prefli
     }
 }
 
-fn output_dir_check(output_path: &Path) -> PreflightCheck {
+pub(super) fn output_dir_check(output_path: &Path) -> PreflightCheck {
     if output_path.exists() {
         return if output_path.is_dir() {
             PreflightCheck::passed(

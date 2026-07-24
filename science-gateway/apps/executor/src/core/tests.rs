@@ -108,6 +108,45 @@ async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
     Ok(())
 }
 
+#[tokio::test]
+async fn seeds_local_esmfold_target_and_profile() -> Result<(), DbErr> {
+    let db = test_db().await?;
+
+    seed::seed_defaults(&db).await?;
+    seed::seed_defaults(&db).await?;
+
+    let backend = model_backends::list_model_backends(&db)
+        .await?
+        .into_iter()
+        .find(|backend| backend.slug == "esmfold")
+        .expect("ESMFold backend should be seeded");
+    let target = execution_targets::list_execution_targets(&db)
+        .await?
+        .into_iter()
+        .find(|target| target.slug == "local-esmfold")
+        .expect("local ESMFold target should be seeded");
+    let profile = model_invocation_profiles::list_model_invocation_profiles(&db)
+        .await?
+        .into_iter()
+        .find(|profile| {
+            profile.model_backend_id == backend.id && profile.execution_target_id == target.id
+        })
+        .expect("local ESMFold profile should be seeded");
+
+    assert_eq!(profile.invocation_kind, "local_subprocess");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&profile.config_json)
+            .map_err(|error| DbErr::Custom(error.to_string()))?,
+        json!({
+            "program": "python3",
+            "script": "run_pretrained_esmf.py",
+            "working_dir": config::openfold_home(),
+            "output_location": config::prefix().join("runs"),
+        })
+    );
+    Ok(())
+}
+
 fn sample_execution_target_input() -> RegisterExecutionTargetInput {
     RegisterExecutionTargetInput {
         slug: "test-target".into(),

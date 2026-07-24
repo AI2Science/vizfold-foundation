@@ -7,22 +7,51 @@ use crate::core::{
     commands::{CommandOutput, CommandRunner, CommandSpec},
     config,
     entities::{execution_targets, model_backends, model_invocation_profiles, runs as run_entity},
-    model_runners::openfold::{plan_openfold_command, preflight_openfold},
+    model_runners::{
+        esmfold::preflight_esmfold,
+        openfold::{plan_openfold_command, preflight_openfold},
+    },
     output_locations::resolve_output_location,
     preflight::PreflightReport,
 };
 
 use super::runs::{self, UpdateRunStatusInput};
 
-/// Outcome of planning, preflighting, and (if preflight passed) executing an OpenFold run.
+/// Which backend a run targets. Selects the preflight and the way the planned command is wrapped
+/// for execution; the schema-driven planner and artifact registration are shared. Unknown slugs
+/// fall through to OpenFold (the default backend, and what the execution tests register).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackendKind {
+    Openfold,
+    Esmfold,
+}
+
+impl BackendKind {
+    fn from_slug(slug: &str) -> Self {
+        match slug {
+            "esmfold" => Self::Esmfold,
+            _ => Self::Openfold,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Openfold => "OpenFold",
+            Self::Esmfold => "ESMFold",
+        }
+    }
+}
+
+/// Outcome of planning, preflighting, and (if preflight passed) executing a run.
 #[derive(Debug)]
 pub struct ExecutionOutcome {
     pub report: PreflightReport,
     pub output: Option<CommandOutput>,
 }
 
-/// Plans and executes an OpenFold run stored in the executor database.
-pub async fn execute_openfold_run(
+/// Plans and executes a run stored in the executor database, dispatching preflight and env
+/// wrapping on the run's model backend (OpenFold or ESMFold).
+pub async fn execute_run(
     db: &DatabaseConnection,
     run_id: i32,
     runner: &dyn CommandRunner,
@@ -33,11 +62,13 @@ pub async fn execute_openfold_run(
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
 
     let started_at = Utc::now();
+    let mut kind = BackendKind::Openfold;
     let execution: Result<ExecutionOutcome, DbErr> = async {
         let model_backend = model_backends::Entity::find_by_id(run.model_backend_id)
             .one(db)
             .await?
             .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
+        kind = BackendKind::from_slug(&model_backend.slug);
         let execution_target = execution_targets::Entity::find_by_id(run.execution_target_id)
             .one(db)
             .await?
@@ -48,32 +79,50 @@ pub async fn execute_openfold_run(
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
-        // fold.sh does `mkdir -p "$OUTPUT_DIR"`; create the run workspace (+ attention/)
-        // so a fresh install runs without a manual mkdir and preflight's output_dir check passes.
+        // Create the run workspace so a fresh install runs without a manual mkdir and preflight's
+        // output_dir check passes. OpenFold also seeds attention/ (its --attn_map_dir target);
+        // ESMFold's script creates its own subdirs under --out.
         let workspace = resolve_output_location(&invocation_profile, &run)?;
-        std::fs::create_dir_all(workspace.join("attention")).map_err(|error| {
+        let to_create = match kind {
+            BackendKind::Openfold => workspace.join("attention"),
+            BackendKind::Esmfold => workspace.clone(),
+        };
+        std::fs::create_dir_all(&to_create).map_err(|error| {
             DbErr::Custom(format!(
                 "failed to create run output workspace '{}': {error}",
                 workspace.display()
             ))
         })?;
 
+        // The shared schema-driven planner emits either backend's CLI from its parameter schema.
         let command =
             plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
-        // Preflight validates the real python3 command; the runner gets an env-activated
-        // wrapper so torch/openfold resolve without a manual `micromamba activate`. Gated on
-        // micromamba actually being installed at the prefix (so tests/dev run the command bare).
-        let prefix = config::prefix();
-        let exec_command = compose_exec_command(
-            &command,
-            &prefix,
-            &config::openfold_env_prefix(),
-            &config::gpu_launch_args(),
-            prefix.join("bin/micromamba").is_file(),
-        );
+        // Preflight validates the bare command; the runner gets an env-wrapped one so the model's
+        // deps resolve. OpenFold activates its micromamba env; ESMFold runs its venv's python.
+        // Both gate on the env actually being installed, so tests/dev run the command bare.
+        let exec_command = match kind {
+            BackendKind::Openfold => {
+                let prefix = config::prefix();
+                compose_exec_command(
+                    &command,
+                    &prefix,
+                    &config::openfold_env_prefix(),
+                    &config::gpu_launch_args(),
+                    prefix.join("bin/micromamba").is_file(),
+                )
+            }
+            BackendKind::Esmfold => {
+                let env_prefix = config::esmfold_env_prefix();
+                let use_venv = env_prefix.join("bin/python").is_file();
+                compose_esmfold_command(&command, &env_prefix, &config::gpu_launch_args(), use_venv)
+            }
+        };
 
-        let report = preflight_openfold(&command, &invocation_profile, &run)?;
+        let report = match kind {
+            BackendKind::Openfold => preflight_openfold(&command, &invocation_profile, &run)?,
+            BackendKind::Esmfold => preflight_esmfold(&command, &invocation_profile, &run)?,
+        };
         if report.has_failures() {
             return Ok(ExecutionOutcome {
                 report,
@@ -110,9 +159,9 @@ pub async fn execute_openfold_run(
                 .filter_map(|check| check.message.as_deref())
                 .collect::<Vec<_>>();
             let message = if failures.is_empty() {
-                "OpenFold preflight failed".to_owned()
+                format!("{} preflight failed", kind.label())
             } else {
-                format!("OpenFold preflight failed: {}", failures.join("; "))
+                format!("{} preflight failed: {}", kind.label(), failures.join("; "))
             };
             mark_failed(db, run_id, started_at, message).await?;
             Ok(outcome)
@@ -139,7 +188,11 @@ pub async fn execute_openfold_run(
                 super::openfold_artifacts::register_known_openfold_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
-                    format!("OpenFold command exited with code {}", output.exit_code)
+                    format!(
+                        "{} command exited with code {}",
+                        kind.label(),
+                        output.exit_code
+                    )
                 } else {
                     output.stderr.trim().to_owned()
                 };
@@ -227,6 +280,30 @@ fn compose_exec_command(
     }
 }
 
+/// Wrap a planned ESMFold command for execution. ESMFold installs into a plain venv (no
+/// micromamba, no activate.d hook), so running its interpreter directly -- `<env>/bin/python` --
+/// is the whole activation. srun still wraps it so the fold lands on a GPU node when a partition
+/// is configured. `use_venv` is false in tests/dev (no venv installed): the command runs bare.
+fn compose_esmfold_command(
+    command: &CommandSpec,
+    env_prefix: &Path,
+    launch: &[String],
+    use_venv: bool,
+) -> CommandSpec {
+    let command = if use_venv {
+        CommandSpec {
+            program: env_prefix.join("bin/python").display().to_string(),
+            ..command.clone()
+        }
+    } else {
+        command.clone()
+    };
+    CommandSpec {
+        stream: true,
+        ..srun_command(command, launch)
+    }
+}
+
 /// Prefix a command with the SLURM launcher. Applied *outside* the micromamba wrapper so the
 /// environment is activated on the compute node, not the submit host.
 fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
@@ -271,7 +348,7 @@ mod tests {
         test_support::TestLayout,
     };
 
-    use super::{activate_env_command, compose_exec_command, execute_openfold_run};
+    use super::{activate_env_command, compose_exec_command, execute_run};
 
     #[test]
     fn srun_command_wraps_the_whole_activated_command() {
@@ -449,6 +526,54 @@ mod tests {
         .await
     }
 
+    /// An `esmfold` run: slug routes it through the ESMFold preflight/compose path, folding a
+    /// single `--fasta` file with no data_dir. Reuses TestLayout's script + fasta fixtures.
+    async fn create_esmfold_run(
+        db: &sea_orm::DatabaseConnection,
+        layout: &TestLayout,
+    ) -> Result<crate::core::entities::runs::Model, DbErr> {
+        // Reuse the seeded esmfold backend: its slug is what routes execution through the ESMFold
+        // path, and re-registering "esmfold" would violate the unique-slug constraint.
+        let backend = model_backends::list_model_backends(db)
+            .await?
+            .into_iter()
+            .find(|backend| backend.slug == "esmfold")
+            .expect("seeded esmfold backend");
+        let target = execution_targets::register_execution_target(
+            db,
+            RegisterExecutionTargetInput {
+                slug: "local-esmfold-test".into(),
+                target_type: "local".into(),
+                description: None,
+                available_resources_json: json!({"type":"object","properties":{
+                    "model_device":{"type":"string","enum":["cpu","cuda:0"],"default":"cuda:0","cli_flag":"--device"}
+                }}).to_string(),
+            },
+        )
+        .await?;
+        let profile = model_invocation_profiles::register_model_invocation_profile(db, RegisterModelInvocationProfileInput {
+            model_backend_id: backend.id, execution_target_id: target.id, invocation_kind: "local_subprocess".into(),
+            config_json: json!({"program":"python3","script":"run_openfold.py","working_dir":layout.working_dir,"output_location":layout.output_location}).to_string(),
+        }).await?;
+        let fasta = layout.fasta_dir.join("input.fasta");
+        runs::submit_run(
+            db,
+            SubmitRunInput {
+                model_backend_id: backend.id,
+                execution_target_id: target.id,
+                invocation_profile_id: profile.id,
+                status: "submitted".into(),
+                input_id: "test_input".into(),
+                input_sequence: "MSTNPKPQRITF".into(),
+                model_parameters_json: "{}".into(),
+                execution_parameters_json: json!({"fasta": fasta, "model_device": "cpu"})
+                    .to_string(),
+                provenance_json: None,
+            },
+        )
+        .await
+    }
+
     fn runner(
         exit_code: i32,
         stderr: &str,
@@ -474,7 +599,7 @@ mod tests {
     async fn missing_run_returns_clear_error() -> Result<(), DbErr> {
         let db = test_db().await?;
         let (runner, _, _) = runner(0, "");
-        let error = execute_openfold_run(&db, 999, &runner)
+        let error = execute_run(&db, 999, &runner)
             .await
             .expect_err("missing run should error");
         assert!(error.to_string().contains("run 999 does not exist"));
@@ -487,7 +612,7 @@ mod tests {
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, called, command) = runner(0, "");
-        let result = execute_openfold_run(&db, run.id, &runner).await?;
+        let result = execute_run(&db, run.id, &runner).await?;
         assert!(called.load(Ordering::SeqCst));
         assert_eq!(result.output.expect("output").exit_code, 0);
         let command = command
@@ -518,12 +643,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn esmfold_run_completes_via_the_esmfold_path() -> Result<(), DbErr> {
+        let db = test_db().await?;
+        let layout = TestLayout::new("test_input");
+        let run = create_esmfold_run(&db, &layout).await?;
+        let (runner, called, command) = runner(0, "");
+
+        let result = execute_run(&db, run.id, &runner).await?;
+
+        assert!(called.load(Ordering::SeqCst));
+        assert_eq!(result.output.expect("output").exit_code, 0);
+        // The schema-driven planner emitted the ESMFold CLI; no venv installed in tests, so the
+        // program stays bare python3 (not <env>/bin/python).
+        let command = command
+            .lock()
+            .expect("command lock")
+            .clone()
+            .expect("planned command");
+        assert_eq!(command.program, "python3");
+        assert!(command.args.contains(&"--fasta".into()));
+        assert!(command.args.contains(&"--out".into()));
+        assert_pair(&command.args, "--device", "cpu");
+        assert!(command.stream);
+
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
+            .await?
+            .expect("run exists");
+        assert_eq!(updated.status, "completed");
+        // ESMFold creates the workspace itself but not an attention/ subdir up front, so only the
+        // run output directory is registered.
+        let workspace = layout.output_location.join(run.id.to_string());
+        assert!(workspace.is_dir());
+        assert!(!workspace.join("attention").exists());
+        let artifacts =
+            crate::core::services::artifacts::list_artifacts_for_run(&db, run.id).await?;
+        assert_eq!(artifacts.len(), 1);
+        Ok(())
+    }
+
+    fn assert_pair(args: &[String], flag: &str, value: &str) {
+        let index = args
+            .iter()
+            .position(|arg| arg == flag)
+            .unwrap_or_else(|| panic!("{flag} should be present"));
+        assert_eq!(args[index + 1], value);
+    }
+
+    #[tokio::test]
     async fn non_zero_command_fails_run() -> Result<(), DbErr> {
         let db = test_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, _, _) = runner(7, "OpenFold failed");
-        execute_openfold_run(&db, run.id, &runner).await?;
+        execute_run(&db, run.id, &runner).await?;
         let updated = run_entity::Entity::find_by_id(run.id)
             .one(&db)
             .await?
@@ -539,7 +712,7 @@ mod tests {
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, true).await?;
         let (runner, called, _) = runner(0, "");
-        let result = execute_openfold_run(&db, run.id, &runner).await?;
+        let result = execute_run(&db, run.id, &runner).await?;
         assert!(!called.load(Ordering::SeqCst));
         assert!(result.output.is_none());
         assert!(result.report.has_failures());
@@ -564,7 +737,7 @@ mod tests {
         let run = create_run(&db, &layout, false).await?;
         let runner = FakeCommandRunner::fails("boom");
 
-        let error = execute_openfold_run(&db, run.id, &runner)
+        let error = execute_run(&db, run.id, &runner)
             .await
             .expect_err("runner error should propagate");
         assert!(error.to_string().contains("boom"));
