@@ -1,10 +1,10 @@
 # Science Gateway Architecture
 
-![Science Gateway Architecture](img/VizfoldGateway-1.png)
+![Science Gateway Architecture](VizfoldGateway-1.png)
 
 # VizFold Executor MVP Data Model
 
-![Science Gateway Metadata Model](img/ERModel.png)
+![Science Gateway Metadata Model](ERModel.png)
 
 This diagram describes the MVP data model for the Rust executor core. The goal is to separate model definition, execution environment, invocation configuration, concrete runs, artifact classification, and produced artifact instances.
 
@@ -56,7 +56,7 @@ Under this direction, model-specific CLI flags such as OpenFold `--attn_map_dir`
 
 ## Executor Architecture Flow
 
-![Science Gateway Metadata Model](img/ExecutionFlow.png)
+![Science Gateway Metadata Model](ExecutionFlow.png)
 
 The executor separates registration, planning, optional preflight, execution, and artifact recording. `MODEL_BACKEND` defines what model exists, `EXECUTION_TARGET` defines where execution can happen, and `MODEL_INVOCATION_PROFILE` defines how a specific model runs on a specific target.
 

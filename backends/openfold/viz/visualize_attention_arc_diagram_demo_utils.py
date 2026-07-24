@@ -126,7 +126,7 @@ if __name__ == "__main__":
     attention_dir = "/projects/bekh/thayes/demo_attn_saves/6KWC_demo"
     msa_output_dir = "/u/thayes/vizfold/demo_plots_msa_row"
     tri_output_dir = "/u/thayes/vizfold/demo_plots_tri_start"
-    fasta_path = "./examples/monomer/fasta_dir/6kwc.fasta"
+    fasta_path = "./examples/monomer/fasta_dir_6KWC/6KWC.fasta"
     protein = '6KWC'
 
     # Load sequence

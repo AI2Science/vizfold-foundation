@@ -177,11 +177,11 @@ init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, 
 The repository is laid out as:
 
 - `cli/` — the Rust `vizfold` CLI and executor core (SeaORM entities, migrations, services, and seed). This is the primary active implementation path.
-- `workbench/` — a Next.js dashboard prototype. Currently runs on static mock data and is not wired to the executor yet.
+- `workbench/` — a Next.js dashboard that reads the executor's SQLite directly (read-only) and renders each run's outputs: an interactive 3D structure viewer for predicted PDBs plus the attention-map images.
 - `backends/<name>/` — one self-contained project per model backend, each with its own installer, environment, run entrypoint, and pip-installable Python package:
-  - `backends/openfold/` — the OpenFold model package + `scripts/`, its cluster installer (`install/`), `environment*.yml`, `run_pretrained_openfold.py`, and the attention-visualization demo (`viz/`). Installs as `import openfold`.
+  - `backends/openfold/` — the OpenFold model package + `scripts/`, its cluster installer (`install/`), `environment*.yml`, `run_pretrained_openfold.py`, the GPU fold runner (`fold.sh`), and the attention-visualization demo (`viz/`). Installs as `import openfold`.
   - `backends/esmfold/` — the ESMFold package, `run_pretrained_esmf.py`, and a self-contained venv installer (`install.sh`). Installs as `import esmfold`.
-- `docs/` — architecture notes, specs, and backlog.
+- `docs/` — architecture notes and backlog.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from source.
 
@@ -232,7 +232,10 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
-The workbench currently uses mock data only; no database setup is required.
+The workbench reads the executor's SQLite read-only. `vizfold serve` sets `VIZFOLD_DB` and links
+run outputs under `public/runs` so the 3D viewer and attention images can load them; running
+`npm run dev` by hand falls back to `<OPENFOLD_PREFIX>/vizfold.db` and shows an empty list until a
+run exists.
 
 ### Tests
 
@@ -303,14 +306,14 @@ start attention** as arc diagrams and 3D PyMOL overlays. Line thickness encodes 
 **MSA row attention (layer 47, protein 6KWC)** — pairwise attention inferred from the MSA, across
 all heads at a selected layer:
 
-![msa_row_arc](./outputs/attention_images_6KWC_demo_tri_18/msa_row_attention_plots/msa_row_head_2_layer_47_6KWC_arc.png)
-![msa_row_subplot](./outputs/attention_images_6KWC_demo_tri_18/msa_row_attention_plots/msa_row_heads_layer_47_6KWC_subplot.png)
+![msa_row_arc](./docs/attention_plots/msa_row_attention_plots/msa_row_head_2_layer_47_6KWC_arc.png)
+![msa_row_subplot](./docs/attention_plots/msa_row_attention_plots/msa_row_heads_layer_47_6KWC_subplot.png)
 
 **Triangle start attention (layer 47, residue 18)** — attention from a single (highlighted) residue
 to others, as part of triangle-based geometric reasoning:
 
-![triangle_start_arc](./outputs/attention_images_6KWC_demo_tri_18/tri_start_attention_plots/tri_start_res_18_head_0_layer_47_6KWC_arc.png)
-![triangle_start_subplot](./outputs/attention_images_6KWC_demo_tri_18/tri_start_attention_plots/triangle_start_residue_18_layer_47_6KWC_subplot.png)
+![triangle_start_arc](./docs/attention_plots/tri_start_attention_plots/tri_start_res_18_head_0_layer_47_6KWC_arc.png)
+![triangle_start_subplot](./docs/attention_plots/tri_start_attention_plots/triangle_start_residue_18_layer_47_6KWC_subplot.png)
 
 ### Acknowledgements
 
