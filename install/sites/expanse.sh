@@ -1,5 +1,5 @@
 #!/bin/bash
 
-# SDSC Expanse ("expanse"). No mirror; no default account, so the first association is used for both the account and the /expanse dir the prefix templates off.
+# SDSC Expanse ("expanse"). No mirror; no default account, so the first association is the atom: expanse.json templates both the slurm account and the /expanse project dir off $ALLOC.
 
-slurm::discover() { export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | grep . | head -1)}; }
+slurm::discover() { ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "${ALLOC:-$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | grep . | head -1)}"); [ -n "$ALLOC" ] || die "no usable allocation; set OPENFOLD_ALLOCATION"; export ALLOC; }
