@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod db;
 pub mod entities;
+pub mod examples;
 pub mod migrations;
 pub mod model_runners;
 pub mod output_locations;

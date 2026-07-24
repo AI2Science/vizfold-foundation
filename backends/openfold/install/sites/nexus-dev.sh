@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Nexus ("nexus-dev"). No mirror; 10 GB A100 vGPU on a 535 driver (setup.sh pins NVRTC); prefix templates off OPENFOLD_BASE = a writable /projects dir, not $HOME.
+# Nexus ("nexus-dev"). AF2 mirror on the staging volume; 10 GB A100 vGPU on a 535 driver (setup.sh pins NVRTC); prefix templates off OPENFOLD_BASE = a writable /projects dir, not $HOME.
 
 slurm::discover() {
     local c
