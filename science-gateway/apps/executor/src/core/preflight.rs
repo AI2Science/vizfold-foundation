@@ -1,5 +1,3 @@
-use sea_orm::DbErr;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PreflightStatus {
     Passed,
@@ -45,10 +43,6 @@ pub struct PreflightReport {
     pub checks: Vec<PreflightCheck>,
 }
 
-pub trait PreflightRunner {
-    fn run_preflight(&self) -> Result<PreflightReport, DbErr>;
-}
-
 impl PreflightReport {
     pub fn new(checks: Vec<PreflightCheck>) -> Self {
         Self { checks }
@@ -58,20 +52,6 @@ impl PreflightReport {
         self.checks
             .iter()
             .any(|check| check.status == PreflightStatus::Failed)
-    }
-
-    pub fn passed(&self) -> Vec<&PreflightCheck> {
-        self.checks
-            .iter()
-            .filter(|check| check.status == PreflightStatus::Passed)
-            .collect()
-    }
-
-    pub fn warnings(&self) -> Vec<&PreflightCheck> {
-        self.checks
-            .iter()
-            .filter(|check| check.status == PreflightStatus::Warning)
-            .collect()
     }
 
     pub fn failures(&self) -> Vec<&PreflightCheck> {
@@ -118,12 +98,9 @@ mod tests {
             PreflightCheck::failed("python", "not found"),
         ]);
 
-        assert_eq!(report.passed().len(), 1);
-        assert_eq!(report.warnings().len(), 1);
         assert_eq!(report.failures().len(), 1);
-        assert_eq!(report.passed()[0].status, PreflightStatus::Passed);
-        assert_eq!(report.warnings()[0].status, PreflightStatus::Warning);
         assert_eq!(report.failures()[0].status, PreflightStatus::Failed);
+        assert!(report.has_failures());
     }
 
     #[test]
@@ -131,8 +108,7 @@ mod tests {
         let report = PreflightReport::default();
 
         assert!(!report.has_failures());
-        assert!(report.passed().is_empty());
-        assert!(report.warnings().is_empty());
         assert!(report.failures().is_empty());
+        assert!(report.checks.is_empty());
     }
 }

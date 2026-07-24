@@ -1,6 +1,9 @@
 use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 
-use crate::core::{entities::artifacts, output_locations::resolve_output_location, repositories};
+use crate::core::{
+    entities::{artifact_types, artifacts, model_invocation_profiles, runs},
+    output_locations::resolve_output_location,
+};
 
 use super::artifacts::{self as artifact_service, RecordArtifactByTypeSlugInput};
 
@@ -10,13 +13,14 @@ pub async fn register_known_openfold_artifacts(
     db: &DatabaseConnection,
     run_id: i32,
 ) -> Result<Vec<artifacts::Model>, DbErr> {
-    let run = repositories::runs::find_by_id(db, run_id)
+    let run = runs::Entity::find_by_id(run_id)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
-    let profile =
-        repositories::model_invocation_profiles::find_by_id(db, run.invocation_profile_id)
-            .await?
-            .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let profile = model_invocation_profiles::Entity::find_by_id(run.invocation_profile_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
 
     register_directory_if_present(db, run_id, "run_output_directory", &workspace).await?;
@@ -41,7 +45,9 @@ async fn register_directory_if_present(
         return Ok(());
     }
 
-    let artifact_type = repositories::artifact_types::find_by_slug(db, artifact_type_slug)
+    let artifact_type = artifact_types::Entity::find()
+        .filter(artifact_types::Column::Slug.eq(artifact_type_slug))
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom(format!("artifact type '{artifact_type_slug}' is missing")))?;
     let storage_uri = path.display().to_string();
@@ -148,6 +154,7 @@ mod tests {
                 input_sequence: "MSTNPKPQRITF".into(),
                 model_parameters_json: "{}".into(),
                 execution_parameters_json: "{}".into(),
+                provenance_json: None,
             },
         )
         .await

@@ -1,6 +1,6 @@
 # Running the OpenFold executor demo
 
-This demo runs the Rust executor workflow example for OpenFold. It uses repo-aware defaults for the OpenFold script, FASTA input, precomputed alignments, and output directory.
+This demo runs the OpenFold workflow through the `vizfold` CLI. It uses repo-aware defaults for the OpenFold script, FASTA input, precomputed alignments, and output directory.
 
 The only required external path is the OpenFold data directory.
 
@@ -64,84 +64,25 @@ Expected on a GPU machine:
 True
 ```
 
-## 3. Run the Rust executor example
+## 3. Useful queue-run flags
 
-From the repository:
-
-```bash
-cd vizfold-foundation/science-gateway/apps/executor
-```
-
-Set the OpenFold data directory:
+Every OpenFold-specific input is a `queue-run openfold` flag, not an environment variable -- see the full command in section 4. The one environment override most users need is the data directory, consulted when `--data-dir` is omitted:
 
 ```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
+export OPENFOLD_DATA_DIR="/path/to/vizfold_data"
 ```
 
-For the GPU demo, use:
-
-```bash
-export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
-```
-
-Then run:
-
-```bash
-cargo run --example run_openfold_workflow
-```
-
-## 4. What the example does
-
-The example:
-
-* resolves the repository root automatically;
-* uses the repo-local FASTA input at `examples/monomer/fasta_dir_1UBQ`;
-* uses repo-local precomputed alignments at `examples/monomer/alignments`;
-* validates that the FASTA header matches `input_id = 1UBQ_1`;
-* validates that `alignment_dir/1UBQ_1` exists when precomputed alignments are enabled;
-* plans the OpenFold command;
-* runs preflight checks;
-* launches OpenFold through the Rust `LocalCommandRunner`;
-* writes demo outputs under:
-
-```text
-vizfold-foundation/science-gateway/openfold-demo-output
-```
-
-## 5. Useful environment variable overrides
-
-Most users only need `VIZFOLD_OPENFOLD_DATA_DIR`.
-
-Optional overrides:
-
-```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="/path/to/vizfold_data"
-export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
-export VIZFOLD_OPENFOLD_INPUT_ID="1UBQ_1"
-export VIZFOLD_OPENFOLD_FASTA_DIR="/path/to/fasta_dir"
-export VIZFOLD_OPENFOLD_ALIGNMENT_DIR="/path/to/alignments"
-export VIZFOLD_OPENFOLD_OUTPUT_LOCATION="/path/to/output-root"
-export VIZFOLD_OPENFOLD_RESIDUE_IDX="1"
-export VIZFOLD_OPENFOLD_DEMO_ATTN="true"
-```
-
-If you override `VIZFOLD_OPENFOLD_INPUT_ID`, make sure the FASTA header and precomputed alignment directory match. For example, with:
-
-```bash
-export VIZFOLD_OPENFOLD_INPUT_ID="1UBQ_1"
-```
-
-the FASTA header should resolve to `1UBQ_1`, and precomputed alignments should exist at:
+If you pass `--input-id`, make sure the FASTA header and precomputed alignment directory match. For example, with `--input-id 1UBQ_1`, the FASTA header should resolve to `1UBQ_1`, and precomputed alignments should exist at:
 
 ```text
 alignment_dir/1UBQ_1
 ```
 
-`VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is the base output location. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
+The output location is not a per-run flag: it comes from the seeded `local-openfold` invocation profile. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
 
-## 6. CLI workflow alternative
+## 4. CLI workflow
 
-The example above is useful for exercising the planner directly. The `vizfold` CLI is the better development path for testing the full persisted workflow: seeded model/target/profile records, queued runs, execution status, and registered output artifacts.
+The `vizfold` CLI is the development path for testing the full persisted workflow: seeded model/target/profile records, queued runs, execution status, and registered output artifacts.
 
 Run these commands from the executor crate:
 
@@ -238,11 +179,11 @@ The first registration records the workspace as `run_output_directory` and, if p
 
 Artifact registration does not block failed or incomplete runs: it prints a warning because available output may be partial, then registers only directories that actually exist.
 
-## 7. Common failure modes
+## 5. Common failure modes
 
 ### `ModuleNotFoundError: No module named 'torch'`
 
-The Rust example successfully launched Python, but it used a Python environment without PyTorch/OpenFold dependencies.
+The executor successfully launched Python, but it used a Python environment without PyTorch/OpenFold dependencies.
 
 Activate the correct environment first:
 
@@ -263,7 +204,7 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 Set:
 
 ```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
+export OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
 ```
 
 from:
@@ -302,7 +243,7 @@ For the default demo:
 examples/monomer/alignments/1UBQ_1
 ```
 
-## 8. Notes
+## 6. Notes
 
 This demo does not automatically register newly generated alignments as reusable artifacts.
 

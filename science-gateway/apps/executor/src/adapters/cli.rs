@@ -1,17 +1,21 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
-use sea_orm::DbErr;
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
     config, db,
+    entities::{
+        execution_targets as execution_target_entity, model_backends as model_backend_entity,
+        model_invocation_profiles as model_invocation_profile_entity,
+    },
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
-    repositories::{execution_targets, model_backends, model_invocation_profiles},
     seed::seed_defaults,
     services::{
-        artifacts, openfold_artifacts::register_known_openfold_artifacts,
+        artifacts, execution_targets, model_backends, model_invocation_profiles,
+        openfold_artifacts::register_known_openfold_artifacts,
         openfold_execution::execute_openfold_run, runs,
     },
 };
@@ -120,9 +124,11 @@ struct OpenfoldQueueArgs {
     /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
-    #[arg(long, default_value = "cuda:0")]
-    model_device: String,
-    #[arg(long, default_value_t = 1)]
+    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
+    /// HPC flow) or a GPU is visible locally, otherwise cpu.
+    #[arg(long)]
+    model_device: Option<String>,
+    #[arg(long, default_value_t = default_cpus())]
     cpus: i64,
     #[arg(long, default_value_t = 1)]
     residue_idx: i64,
@@ -136,6 +142,52 @@ struct OpenfoldQueueArgs {
     /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
+}
+
+/// No allocation held but a GPU partition configured means the fold will be srun'd onto a
+/// GPU node -- the current host (e.g. a login node) is irrelevant in that case.
+fn on_gpu_partition(context: config::SlurmContext, partition: Option<&str>) -> bool {
+    matches!(context, config::SlurmContext::None) && partition.is_some_and(|p| !p.is_empty())
+}
+
+fn model_device_for(
+    context: config::SlurmContext,
+    partition: Option<&str>,
+    detected: Option<&str>,
+) -> String {
+    if on_gpu_partition(context, partition) || detected.is_some() {
+        "cuda:0".to_owned()
+    } else {
+        "cpu".to_owned()
+    }
+}
+
+/// Skips the local GPU probe entirely when it wouldn't be consulted anyway (the login node has
+/// no GPU to find), rather than just discarding its result.
+fn default_model_device() -> String {
+    let context = config::SlurmContext::detect();
+    let partition = config::gpu_partition();
+    let detected = if on_gpu_partition(context, partition.as_deref()) {
+        None
+    } else {
+        crate::core::model_runners::openfold::detect_gpu()
+    };
+    model_device_for(context, partition.as_deref(), detected.as_deref())
+}
+
+fn default_cpus() -> i64 {
+    std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
+}
+
+/// Clamp the requested CPU count to the execution target's `cpus.maximum`, so a host with more
+/// cores than the target allows (a beefy workstation, any HPC login node) still queues a run
+/// that `execute-run` can plan -- rather than failing only once execution is attempted.
+fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
+    let max_cpus = serde_json::from_str::<serde_json::Value>(available_resources_json)
+        .ok()
+        .and_then(|resources| resources["properties"]["cpus"]["maximum"].as_i64())
+        .unwrap_or(i64::MAX);
+    cpus.min(max_cpus)
 }
 
 pub async fn run() -> Result<(), DbErr> {
@@ -175,7 +227,7 @@ pub async fn run() -> Result<(), DbErr> {
         Command::QueueRun(queue) => match queue.model {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
         },
-        Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
+        Command::ExecuteRun { run_id } => execute_openfold(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
         Command::Install | Command::Uninstall(_) | Command::Serve(_) => {
             unreachable!("handled before DB connect")
@@ -464,7 +516,8 @@ async fn register_artifacts(
             run.status
         );
     }
-    let backend = model_backends::find_by_id(database, run.model_backend_id)
+    let backend = model_backend_entity::Entity::find_by_id(run.model_backend_id)
+        .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
     if backend.slug != "openfold" {
@@ -474,7 +527,8 @@ async fn register_artifacts(
         )));
     }
 
-    let profile = model_invocation_profiles::find_by_id(database, run.invocation_profile_id)
+    let profile = model_invocation_profile_entity::Entity::find_by_id(run.invocation_profile_id)
+        .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
@@ -509,59 +563,38 @@ async fn register_artifacts(
     Ok(())
 }
 
-async fn execute_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
-    let run = runs::get_run_with_artifacts(database, run_id)
-        .await?
-        .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?
-        .run;
-    let backend = model_backends::find_by_id(database, run.model_backend_id)
-        .await?
-        .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
-
-    if backend.slug != "openfold" {
-        return Err(DbErr::Custom(format!(
-            "run {run_id} uses backend '{}'; only OpenFold runs can be executed",
-            backend.slug
-        )));
-    }
-
-    execute_openfold(database, run_id).await
-}
-
 async fn execute_openfold(
     database: &sea_orm::DatabaseConnection,
     run_id: i32,
 ) -> Result<(), DbErr> {
     println!("Executing OpenFold run {run_id}");
-    let result = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
+    let outcome = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
 
-    if let Some(report) = result.preflight_report {
-        let outcome = if report.has_failures() {
-            "failed"
-        } else {
-            "passed"
-        };
-        println!("\nPreflight: {outcome}");
-        for check in report.checks {
-            let message = check.message.as_deref().unwrap_or("no details");
-            println!(
-                "[{}] {}: {}",
-                preflight_status_label(check.status),
-                check.name,
-                message
-            );
-        }
+    let label = if outcome.report.has_failures() {
+        "failed"
+    } else {
+        "passed"
+    };
+    println!("\nPreflight: {label}");
+    for check in outcome.report.checks {
+        let message = check.message.as_deref().unwrap_or("no details");
+        println!(
+            "[{}] {}: {}",
+            preflight_status_label(check.status),
+            check.name,
+            message
+        );
     }
 
-    if let Some(reason) = result.skipped_execution_reason {
-        println!("\nExecution skipped:\n{reason}");
-    }
-
-    if let Some(output) = result.command_output {
+    if let Some(output) = outcome.output {
         println!("\nCommand output:");
         println!("exit_code: {}", output.exit_code);
-        println!("stdout:\n{}", output.stdout);
-        println!("stderr:\n{}", output.stderr);
+        if !output.stdout.is_empty() {
+            println!("stdout:\n{}", output.stdout);
+        }
+        if !output.stderr.is_empty() {
+            println!("stderr:\n{}", output.stderr);
+        }
     }
 
     if let Some(run) = runs::get_run_with_artifacts(database, run_id)
@@ -585,13 +618,17 @@ async fn queue_openfold_run(
     database: &sea_orm::DatabaseConnection,
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
-    let backend = model_backends::find_by_slug(database, "openfold")
+    let backend = model_backend_entity::Entity::find()
+        .filter(model_backend_entity::Column::Slug.eq("openfold"))
+        .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
-    let target = execution_targets::find_by_slug(database, "local-openfold")
+    let target = execution_target_entity::Entity::find()
+        .filter(execution_target_entity::Column::Slug.eq("local-openfold"))
+        .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
-    let profile = model_invocation_profiles::list(database)
+    let profile = model_invocation_profiles::list_model_invocation_profiles(database)
         .await?
         .into_iter()
         .find(|profile| {
@@ -600,6 +637,16 @@ async fn queue_openfold_run(
                 && profile.invocation_kind == "local_subprocess"
         })
         .ok_or_else(seed_required_error)?;
+    let provenance = runs::provenance_snapshot(
+        &backend.slug,
+        backend.version.as_deref(),
+        &target.slug,
+        &profile.invocation_kind,
+        &profile.config_json,
+        &config::openfold_home(),
+        &config::prefix(),
+        &config::openfold_env_prefix(),
+    );
     let working_dir = local_openfold_working_dir(&profile)?;
     let fasta_dir_input = args
         .fasta_dir
@@ -627,6 +674,10 @@ async fn queue_openfold_run(
             .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
             .transpose()?
     };
+    let model_device = args
+        .model_device
+        .clone()
+        .unwrap_or_else(default_model_device);
 
     let mut execution_parameters = serde_json::Map::from_iter([
         ("fasta_dir".into(), json!(fasta_dir)),
@@ -636,8 +687,11 @@ async fn queue_openfold_run(
             "use_precomputed_alignments".into(),
             json!(args.use_precomputed_alignments),
         ),
-        ("model_device".into(), json!(args.model_device)),
-        ("cpus".into(), json!(args.cpus)),
+        ("model_device".into(), json!(model_device)),
+        (
+            "cpus".into(),
+            json!(clamp_cpus(args.cpus, &target.available_resources_json)),
+        ),
     ]);
     if let Some(alignment_dir) = alignment_dir {
         execution_parameters.insert("alignment_dir".into(), json!(alignment_dir));
@@ -659,6 +713,7 @@ async fn queue_openfold_run(
             })
             .to_string(),
             execution_parameters_json: serde_json::Value::Object(execution_parameters).to_string(),
+            provenance_json: Some(provenance),
         },
     )
     .await?;
@@ -736,7 +791,7 @@ fn seed_required_error() -> DbErr {
 }
 
 async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let models = model_backends::list(database).await?;
+    let models = model_backends::list_model_backends(database).await?;
     print_table(
         &["ID", "SLUG", "LABEL", "VERSION"],
         models
@@ -755,7 +810,7 @@ async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr
 }
 
 async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let targets = execution_targets::list(database).await?;
+    let targets = execution_targets::list_execution_targets(database).await?;
     print_table(
         &["ID", "SLUG", "TYPE", "DESCRIPTION"],
         targets
@@ -774,7 +829,7 @@ async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbEr
 }
 
 async fn list_profiles(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let profiles = model_invocation_profiles::list(database).await?;
+    let profiles = model_invocation_profiles::list_model_invocation_profiles(database).await?;
     print_table(
         &["ID", "MODEL ID", "TARGET ID", "INVOCATION KIND"],
         profiles
@@ -958,11 +1013,12 @@ mod tests {
                     data_dir,
                     demo_attn: false,
                     use_precomputed_alignments: true,
-                    cpus: 1,
+                    cpus,
                     ..
                 })
             }) if input_id == "6KWC_1" && input_sequence == "GSTI"
                 && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
+                && cpus == default_cpus()
         ));
     }
 
@@ -1143,8 +1199,10 @@ mod tests {
                 fasta_dir: Some(".".into()),
                 data_dir: Some(".".into()),
                 alignment_dir: Some(".".into()),
-                model_device: "cpu".into(),
-                cpus: 1,
+                model_device: Some("cpu".into()),
+                // Exceeds the seeded local-openfold target's cpus.maximum of 14, so the queued
+                // run must reflect the clamped value, not the raw request.
+                cpus: 18,
                 residue_idx: 1,
                 demo_attn: true,
                 save_outputs: true,
@@ -1166,7 +1224,19 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
                 .expect("execution parameters should be valid JSON"),
-            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 1})
+            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
+        );
+
+        let provenance: serde_json::Value = serde_json::from_str(
+            runs[0]
+                .provenance_json
+                .as_deref()
+                .expect("provenance_json should be set"),
+        )
+        .expect("provenance_json should be valid JSON");
+        assert_eq!(
+            provenance["profile"]["config"]["output_location"],
+            json!(config::prefix().join("runs"))
         );
         Ok(())
     }
@@ -1192,7 +1262,7 @@ mod tests {
                 fasta_dir: Some(missing_path.into()),
                 data_dir: Some(".".into()),
                 alignment_dir: None,
-                model_device: "cpu".into(),
+                model_device: Some("cpu".into()),
                 cpus: 1,
                 residue_idx: 1,
                 demo_attn: false,
@@ -1213,5 +1283,47 @@ mod tests {
                 .contains(&crate::core::config::openfold_home().display().to_string())
         );
         Ok(())
+    }
+
+    #[test]
+    fn model_device_workstation_defaults_to_cpu_without_a_gpu() {
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, None, None),
+            "cpu"
+        );
+    }
+
+    #[test]
+    fn model_device_workstation_defaults_to_cuda_with_a_gpu() {
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, None, Some("NVIDIA A100")),
+            "cuda:0"
+        );
+    }
+
+    #[test]
+    fn model_device_prefers_the_configured_gpu_partition_without_probing() {
+        // No allocation held + a GPU partition configured: the fold will be srun'd onto a GPU
+        // node, so cuda:0 is correct even though the probe result (None here) says no GPU here.
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::None, Some("gpuA100x4"), None),
+            "cuda:0"
+        );
+    }
+
+    #[test]
+    fn model_device_inside_an_allocation_trusts_the_local_probe() {
+        // Already on the node the fold runs on, so the local probe -- not the partition config
+        // -- decides, even though a partition is configured.
+        assert_eq!(
+            super::model_device_for(config::SlurmContext::InAllocation, Some("gpuA100x4"), None),
+            "cpu"
+        );
+    }
+
+    #[test]
+    fn cpus_default_follows_available_parallelism() {
+        let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
+        assert_eq!(super::default_cpus(), expected);
     }
 }

@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::core::{
     config,
     entities::{artifact_types, execution_targets, model_backends, model_invocation_profiles},
-    repositories, services,
+    services,
 };
 
 pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
@@ -161,26 +161,6 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
     }
 
     if execution_targets::Entity::find()
-        .filter(execution_targets::Column::Slug.eq("local-mock"))
-        .one(db)
-        .await?
-        .is_none()
-    {
-        services::execution_targets::register_execution_target(
-            db,
-            services::execution_targets::RegisterExecutionTargetInput {
-                slug: "local-mock".into(),
-                target_type: "local".into(),
-                description: Some("Local mock execution target for development and tests.".into()),
-                available_resources_json:
-                    r#"{"type":"object","properties":{"model_device":{"type":"string","enum":["cpu","cuda:0"],"default":"cuda:0","cli_flag":"--model_device"},"cpus":{"type":"integer","minimum":1,"maximum":14,"cli_flag":"--cpus"}}}"#
-                        .into(),
-            },
-        )
-        .await?;
-    }
-
-    if execution_targets::Entity::find()
         .filter(execution_targets::Column::Slug.eq("local-openfold"))
         .one(db)
         .await?
@@ -207,32 +187,6 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
         .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom("seeded OpenFold model backend is missing".into()))?;
-    let target = execution_targets::Entity::find()
-        .filter(execution_targets::Column::Slug.eq("local-mock"))
-        .one(db)
-        .await?
-        .ok_or_else(|| DbErr::Custom("seeded local mock execution target is missing".into()))?;
-
-    if model_invocation_profiles::Entity::find()
-        .filter(model_invocation_profiles::Column::ModelBackendId.eq(backend.id))
-        .filter(model_invocation_profiles::Column::ExecutionTargetId.eq(target.id))
-        .one(db)
-        .await?
-        .is_none()
-    {
-        services::model_invocation_profiles::register_model_invocation_profile(
-            db,
-            services::model_invocation_profiles::RegisterModelInvocationProfileInput {
-                model_backend_id: backend.id,
-                execution_target_id: target.id,
-                invocation_kind: "mock".into(),
-                config_json:
-                    r#"{"mode":"local_mock","output_location":"science-gateway/mock-output"}"#
-                        .into(),
-            },
-        )
-        .await?;
-    }
 
     let openfold_target = execution_targets::Entity::find()
         .filter(execution_targets::Column::Slug.eq("local-openfold"))
@@ -248,7 +202,7 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?
     {
         if profile.config_json != local_openfold_config {
-            repositories::model_invocation_profiles::update_config(
+            services::model_invocation_profiles::update_config(
                 db,
                 profile.id,
                 local_openfold_config,

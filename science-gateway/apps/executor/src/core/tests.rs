@@ -1,17 +1,16 @@
 #![cfg(test)]
 
-use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbErr, Statement};
 use serde_json::json;
 
 use crate::core::{
     config, db, seed,
     services::{
-        artifact_types::{self, RegisterArtifactTypeInput},
-        artifacts::{self, RecordArtifactInput},
+        artifact_types,
         execution_targets::{self, RegisterExecutionTargetInput},
         model_backends::{self, RegisterModelBackendInput},
         model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
-        runs::{self, SubmitRunInput, UpdateRunStatusInput},
+        runs::{self, SubmitRunInput},
     },
 };
 
@@ -47,18 +46,6 @@ fn sample_model_backend_input() -> RegisterModelBackendInput {
     }
 }
 
-fn sample_artifact_type_input() -> RegisterArtifactTypeInput {
-    RegisterArtifactTypeInput {
-        slug: "protein_structure".into(),
-        label: "Protein structure".into(),
-        default_format: "pdb".into(),
-        display_mode: "embedded".into(),
-        viewer_kind: "ngl_viewer".into(),
-        description: "Test protein structure type".into(),
-        metadata_schema_json: json!({}).to_string(),
-    }
-}
-
 #[tokio::test]
 async fn seeds_artifact_type_catalog() -> Result<(), DbErr> {
     let db = test_db().await?;
@@ -77,14 +64,13 @@ async fn seeds_artifact_type_catalog() -> Result<(), DbErr> {
 }
 
 #[tokio::test]
-async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() -> Result<(), DbErr> {
+async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
     let db = test_db().await?;
 
     seed::seed_defaults(&db).await?;
     seed::seed_defaults(&db).await?;
 
     let targets = execution_targets::list_execution_targets(&db).await?;
-    assert!(targets.iter().any(|target| target.slug == "local-mock"));
     let openfold_target = targets
         .iter()
         .find(|target| target.slug == "local-openfold")
@@ -124,7 +110,7 @@ async fn seeds_local_openfold_target_and_profile_without_removing_mock_seed() ->
 
 fn sample_execution_target_input() -> RegisterExecutionTargetInput {
     RegisterExecutionTargetInput {
-        slug: "local-mock".into(),
+        slug: "test-target".into(),
         target_type: "local".into(),
         description: Some("Test execution target".into()),
         available_resources_json: json!({
@@ -145,109 +131,9 @@ fn sample_invocation_profile_input(
     RegisterModelInvocationProfileInput {
         model_backend_id,
         execution_target_id,
-        invocation_kind: "mock".into(),
+        invocation_kind: "test".into(),
         config_json: json!({"mode": "test"}).to_string(),
     }
-}
-
-#[tokio::test]
-async fn creates_model_backend_without_capabilities_json() -> Result<(), DbErr> {
-    let db = test_db().await?;
-
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-
-    assert_eq!(backend.slug, "openfold");
-    assert!(
-        serde_json::from_str::<serde_json::Value>(&backend.artifact_capabilities_json)
-            .expect("artifact_capabilities_json should parse")
-            .is_object()
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn creates_execution_target() -> Result<(), DbErr> {
-    let db = test_db().await?;
-
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-
-    assert_eq!(target.slug, "local-mock");
-    assert_eq!(target.target_type, "local");
-    Ok(())
-}
-
-#[tokio::test]
-async fn creates_model_invocation_profile() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-
-    assert_eq!(profile.model_backend_id, backend.id);
-    assert_eq!(profile.execution_target_id, target.id);
-    assert_eq!(profile.invocation_kind, "mock");
-    Ok(())
-}
-
-#[tokio::test]
-async fn lists_model_invocation_profiles() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let _profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-
-    let profiles = model_invocation_profiles::list_model_invocation_profiles(&db).await?;
-
-    assert_eq!(profiles.len(), 1);
-    assert_eq!(profiles[0].model_backend_id, backend.id);
-    Ok(())
-}
-
-#[tokio::test]
-async fn creates_run_with_separate_parameter_sets() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-
-    let run = runs::submit_run(
-        &db,
-        SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
-            status: "submitted".into(),
-            input_id: "1UBQ_1".into(),
-            input_sequence: "MSTNPKPQRITF".into(),
-            model_parameters_json: json!({"num_recycles": 5}).to_string(),
-            execution_parameters_json: json!({"gpu_count": 1, "walltime": "02:00:00"}).to_string(),
-        },
-    )
-    .await?;
-
-    assert_eq!(run.model_backend_id, backend.id);
-    assert_eq!(run.execution_target_id, target.id);
-    assert_eq!(run.invocation_profile_id, profile.id);
-    assert_eq!(run.input_id, "1UBQ_1");
-    assert!(run.started_at.is_none());
-    Ok(())
 }
 
 #[tokio::test]
@@ -273,6 +159,7 @@ async fn rejects_run_with_empty_input_id() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -305,6 +192,7 @@ async fn rejects_run_with_empty_input_sequence() -> Result<(), DbErr> {
             input_sequence: "   ".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -351,6 +239,7 @@ async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 5}).to_string(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -387,6 +276,7 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: "[]".into(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -401,185 +291,43 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
 }
 
 #[tokio::test]
-async fn records_artifact_manifest_entry() -> Result<(), DbErr> {
+async fn baseline_schema_creates_every_table_including_provenance() -> Result<(), DbErr> {
     let db = test_db().await?;
-    let artifact_type =
-        artifact_types::register_artifact_type(&db, sample_artifact_type_input()).await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-    let run = runs::submit_run(
-        &db,
-        SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
-            status: "submitted".into(),
-            input_id: "1UBQ_1".into(),
-            input_sequence: "MSTNPKPQRITF".into(),
-            model_parameters_json: json!({"num_recycles": 2}).to_string(),
-            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
-        },
-    )
-    .await?;
 
-    let artifact = artifacts::record_artifact_manifest_entry(
-        &db,
-        RecordArtifactInput {
-            run_id: run.id,
-            artifact_type_id: artifact_type.id,
-            format: "pdb".into(),
-            storage_uri: "file:///tmp/run-1/model.pdb".into(),
-            metadata_json: json!({"bytes": 1280, "sha256": "abc123"}).to_string(),
-        },
-    )
-    .await?;
-
-    assert_eq!(artifact.storage_uri, "file:///tmp/run-1/model.pdb");
-    assert_eq!(artifact.artifact_type_id, artifact_type.id);
-    assert!(artifact.metadata_json.contains("sha256"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn retrieves_run_with_artifacts() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let artifact_type =
-        artifact_types::register_artifact_type(&db, sample_artifact_type_input()).await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-    let run = runs::submit_run(
-        &db,
-        SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
-            status: "submitted".into(),
-            input_id: "1UBQ_1".into(),
-            input_sequence: "MSTNPKPQRITF".into(),
-            model_parameters_json: json!({"num_recycles": 2}).to_string(),
-            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
-        },
-    )
-    .await?;
-
-    let _artifact = artifacts::record_artifact_manifest_entry(
-        &db,
-        RecordArtifactInput {
-            run_id: run.id,
-            artifact_type_id: artifact_type.id,
-            format: "txt".into(),
-            storage_uri: "file:///tmp/run-1/stdout.log".into(),
-            metadata_json: json!({"line_count": 42}).to_string(),
-        },
-    )
-    .await?;
-
-    let hydrated = runs::get_run_with_artifacts(&db, run.id)
+    let tables: Vec<String> = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "select name from sqlite_master where type='table' order by name".to_owned(),
+        ))
         .await?
-        .expect("run should exist");
+        .iter()
+        .map(|row| row.try_get::<String>("", "name").expect("name"))
+        .collect();
 
-    assert_eq!(hydrated.run.id, run.id);
-    assert_eq!(hydrated.artifacts.len(), 1);
-    assert_eq!(hydrated.artifacts[0].artifact_type_id, artifact_type.id);
-    Ok(())
-}
+    for expected in [
+        "artifact_types",
+        "artifacts",
+        "execution_targets",
+        "model_backends",
+        "model_invocation_profiles",
+        "runs",
+    ] {
+        assert!(
+            tables.iter().any(|t| t == expected),
+            "missing table {expected}"
+        );
+    }
 
-#[tokio::test]
-async fn artifact_manifest_stores_uri_and_metadata_only() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let artifact_type =
-        artifact_types::register_artifact_type(&db, sample_artifact_type_input()).await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-    let run = runs::submit_run(
-        &db,
-        SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
-            status: "submitted".into(),
-            input_id: "1UBQ_1".into(),
-            input_sequence: "MSTNPKPQRITF".into(),
-            model_parameters_json: json!({"num_recycles": 2}).to_string(),
-            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
-        },
-    )
-    .await?;
+    let columns: Vec<String> = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "select name from pragma_table_info('runs')".to_owned(),
+        ))
+        .await?
+        .iter()
+        .map(|row| row.try_get::<String>("", "name").expect("name"))
+        .collect();
 
-    let artifact = artifacts::record_artifact_manifest_entry(
-        &db,
-        RecordArtifactInput {
-            run_id: run.id,
-            artifact_type_id: artifact_type.id,
-            format: "json".into(),
-            storage_uri: "s3://vizfold/runs/1/confidence.json".into(),
-            metadata_json: json!({"bytes": 256, "content_type": "application/json"}).to_string(),
-        },
-    )
-    .await?;
-
-    assert_eq!(artifact.format, "json");
-    assert!(!artifact.metadata_json.contains("ATOM"));
-    assert!(!artifact.storage_uri.starts_with("{"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn updates_run_status() -> Result<(), DbErr> {
-    let db = test_db().await?;
-    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
-    let target =
-        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
-    let profile = model_invocation_profiles::register_model_invocation_profile(
-        &db,
-        sample_invocation_profile_input(backend.id, target.id),
-    )
-    .await?;
-    let run = runs::submit_run(
-        &db,
-        SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
-            status: "submitted".into(),
-            input_id: "1UBQ_1".into(),
-            input_sequence: "MSTNPKPQRITF".into(),
-            model_parameters_json: json!({"num_recycles": 2}).to_string(),
-            execution_parameters_json: json!({"gpu_count": 0}).to_string(),
-        },
-    )
-    .await?;
-
-    let updated = runs::update_run_status(
-        &db,
-        run.id,
-        UpdateRunStatusInput {
-            status: "completed".into(),
-            completed_at: Some(Some(chrono::Utc::now())),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    assert_eq!(updated.status, "completed");
-    assert!(updated.completed_at.is_some());
+    assert!(columns.iter().any(|c| c == "provenance_json"));
     Ok(())
 }

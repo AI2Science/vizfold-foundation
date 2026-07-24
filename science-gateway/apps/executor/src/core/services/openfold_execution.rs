@@ -1,40 +1,50 @@
 use std::path::Path;
 
 use chrono::Utc;
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 
 use crate::core::{
-    commands::{CommandRunner, CommandSpec},
+    commands::{CommandOutput, CommandRunner, CommandSpec},
     config,
-    execution::{ExecutionWorkflowResult, execute_command_workflow},
-    model_runners::openfold::{OpenFoldPreflightRunner, plan_openfold_command},
+    entities::{execution_targets, model_backends, model_invocation_profiles, runs as run_entity},
+    model_runners::openfold::{plan_openfold_command, preflight_openfold},
     output_locations::resolve_output_location,
-    repositories,
+    preflight::PreflightReport,
 };
 
 use super::runs::{self, UpdateRunStatusInput};
+
+/// Outcome of planning, preflighting, and (if preflight passed) executing an OpenFold run.
+#[derive(Debug)]
+pub struct ExecutionOutcome {
+    pub report: PreflightReport,
+    pub output: Option<CommandOutput>,
+}
 
 /// Plans and executes an OpenFold run stored in the executor database.
 pub async fn execute_openfold_run(
     db: &DatabaseConnection,
     run_id: i32,
     runner: &dyn CommandRunner,
-) -> Result<ExecutionWorkflowResult, DbErr> {
-    let run = repositories::runs::find_by_id(db, run_id)
+) -> Result<ExecutionOutcome, DbErr> {
+    let run = run_entity::Entity::find_by_id(run_id)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
 
     let started_at = Utc::now();
-    let execution = async {
-        let model_backend = repositories::model_backends::find_by_id(db, run.model_backend_id)
+    let execution: Result<ExecutionOutcome, DbErr> = async {
+        let model_backend = model_backends::Entity::find_by_id(run.model_backend_id)
+            .one(db)
             .await?
             .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
-        let execution_target =
-            repositories::execution_targets::find_by_id(db, run.execution_target_id)
-                .await?
-                .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
+        let execution_target = execution_targets::Entity::find_by_id(run.execution_target_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
         let invocation_profile =
-            repositories::model_invocation_profiles::find_by_id(db, run.invocation_profile_id)
+            model_invocation_profiles::Entity::find_by_id(run.invocation_profile_id)
+                .one(db)
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
@@ -50,34 +60,53 @@ pub async fn execute_openfold_run(
 
         let command =
             plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
-        let preflight_runner = OpenFoldPreflightRunner {
-            command: &command,
-            invocation_profile: &invocation_profile,
-            run: &run,
-        };
 
         // Preflight validates the real python3 command; the runner gets an env-activated
         // wrapper so torch/openfold resolve without a manual `micromamba activate`. Gated on
         // micromamba actually being installed at the prefix (so tests/dev run the command bare).
         let prefix = config::prefix();
-        let exec_command = if prefix.join("bin/micromamba").is_file() {
-            activate_env_command(&command, &prefix, &config::openfold_env_prefix())
-        } else {
-            command.clone()
-        };
-        let exec_command = srun_command(exec_command, &config::gpu_launch_args());
-        execute_command_workflow(&exec_command, runner, Some(&preflight_runner)).await
+        let exec_command = compose_exec_command(
+            &command,
+            &prefix,
+            &config::openfold_env_prefix(),
+            &config::gpu_launch_args(),
+            prefix.join("bin/micromamba").is_file(),
+        );
+
+        let report = preflight_openfold(&command, &invocation_profile, &run)?;
+        if report.has_failures() {
+            return Ok(ExecutionOutcome {
+                report,
+                output: None,
+            });
+        }
+        let output = runner.run(exec_command).await?;
+        Ok(ExecutionOutcome {
+            report,
+            output: Some(output),
+        })
     }
     .await;
 
     match execution {
-        Ok(result) if result.command_output.is_none() => {
-            mark_failed(db, run_id, started_at, preflight_failure_message(&result)).await?;
-            Ok(result)
+        Ok(outcome) if outcome.output.is_none() => {
+            let failures = outcome
+                .report
+                .failures()
+                .into_iter()
+                .filter_map(|check| check.message.as_deref())
+                .collect::<Vec<_>>();
+            let message = if failures.is_empty() {
+                "OpenFold preflight failed".to_owned()
+            } else {
+                format!("OpenFold preflight failed: {}", failures.join("; "))
+            };
+            mark_failed(db, run_id, started_at, message).await?;
+            Ok(outcome)
         }
-        Ok(result) => {
-            let output = result
-                .command_output
+        Ok(outcome) => {
+            let output = outcome
+                .output
                 .as_ref()
                 .expect("command output is present when execution was not skipped");
             if output.exit_code == 0 {
@@ -100,7 +129,7 @@ pub async fn execute_openfold_run(
                 };
                 mark_failed(db, run_id, started_at, message).await?;
             }
-            Ok(result)
+            Ok(outcome)
         }
         Err(error) => {
             // Don't `?`-propagate the DB write: it would mask the real execution error.
@@ -130,29 +159,6 @@ async fn mark_failed(
     Ok(())
 }
 
-fn preflight_failure_message(result: &ExecutionWorkflowResult) -> String {
-    let failures = result
-        .preflight_report
-        .as_ref()
-        .map(|report| {
-            report
-                .failures()
-                .into_iter()
-                .filter_map(|check| check.message.as_deref())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if failures.is_empty() {
-        result
-            .skipped_execution_reason
-            .clone()
-            .unwrap_or_else(|| "OpenFold execution was skipped".into())
-    } else {
-        format!("OpenFold preflight failed: {}", failures.join("; "))
-    }
-}
-
 /// Wrap a planned local OpenFold command so it runs inside the installed micromamba env:
 /// activate the env, source the installer's activate.d hook (CUTLASS_PATH / LD_LIBRARY_PATH /
 /// NVRTC LD_PRELOAD), and point TRITON_CACHE_DIR node-local (overridable). `exec "$@"` runs the
@@ -180,6 +186,28 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
         args,
         current_dir: command.current_dir.clone(),
         env: command.env.clone(),
+        stream: command.stream,
+    }
+}
+
+/// Composes the exec-time wrapping: env activation (if installed) inside srun (if launched),
+/// with streaming always on. Order is load-bearing -- srun must be outermost so the activation
+/// happens on the compute node it lands on, not the submit host.
+fn compose_exec_command(
+    command: &CommandSpec,
+    prefix: &Path,
+    env_prefix: &Path,
+    launch: &[String],
+    activate: bool,
+) -> CommandSpec {
+    let command = if activate {
+        activate_env_command(command, prefix, env_prefix)
+    } else {
+        command.clone()
+    };
+    CommandSpec {
+        stream: true,
+        ..srun_command(command, launch)
     }
 }
 
@@ -197,13 +225,13 @@ fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
         args,
         current_dir: command.current_dir,
         env: command.env,
+        stream: command.stream,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
         path::PathBuf,
         sync::{
             Arc, Mutex,
@@ -211,21 +239,23 @@ mod tests {
         },
     };
 
-    use sea_orm::{ConnectionTrait, Database, DbErr, Statement};
+    use sea_orm::{ConnectionTrait, Database, DbErr, EntityTrait, Statement};
     use serde_json::json;
 
     use crate::core::{
-        commands::{CommandOutput, CommandRunner, CommandSpec},
-        db, repositories,
+        commands::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner},
+        db,
+        entities::runs as run_entity,
         services::{
             execution_targets::{self, RegisterExecutionTargetInput},
             model_backends::{self, RegisterModelBackendInput},
             model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
             runs::{self, SubmitRunInput},
         },
+        test_support::TestLayout,
     };
 
-    use super::{activate_env_command, execute_openfold_run};
+    use super::{activate_env_command, compose_exec_command, execute_openfold_run};
 
     #[test]
     fn srun_command_wraps_the_whole_activated_command() {
@@ -290,6 +320,35 @@ mod tests {
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
     }
 
+    #[test]
+    fn compose_exec_command_wraps_srun_outside_the_activation() {
+        let command = CommandSpec {
+            program: "python3".into(),
+            args: vec!["-u".into(), "run_openfold.py".into()],
+            ..Default::default()
+        };
+
+        let composed = compose_exec_command(
+            &command,
+            &PathBuf::from("/work/of"),
+            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+            &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
+            true,
+        );
+
+        // srun outermost, wrapping the whole activation script -- not the reverse, which would
+        // activate on the submit host instead of the compute node srun lands on.
+        assert_eq!(composed.program, "srun");
+        assert_eq!(&composed.args[..2], &["-p".to_owned(), "gpu".to_owned()]);
+        assert_eq!(composed.args[2], "bash");
+        assert_eq!(composed.args[3], "-c");
+        assert_eq!(
+            &composed.args[5..],
+            &["vizfold-openfold", "python3", "-u", "run_openfold.py"]
+        );
+        assert!(composed.stream);
+    }
+
     struct TestRunner {
         output: CommandOutput,
         called: Arc<AtomicBool>,
@@ -305,51 +364,6 @@ mod tests {
                 .lock()
                 .expect("command lock should not be poisoned") = Some(command);
             Ok(self.output.clone())
-        }
-    }
-
-    struct TestLayout {
-        root: PathBuf,
-        working_dir: PathBuf,
-        fasta_dir: PathBuf,
-        data_dir: PathBuf,
-        output_location: PathBuf,
-    }
-
-    impl TestLayout {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "executor-openfold-execution-{}-{}",
-                std::process::id(),
-                chrono::Utc::now()
-                    .timestamp_nanos_opt()
-                    .expect("timestamp is representable")
-            ));
-            let working_dir = root.join("workspace");
-            let fasta_dir = root.join("fasta");
-            let data_dir = root.join("data");
-            let output_location = root.join("outputs");
-            fs::create_dir_all(&working_dir).expect("working directory should be created");
-            fs::create_dir_all(&fasta_dir).expect("FASTA directory should be created");
-            fs::create_dir_all(&data_dir).expect("data directory should be created");
-            fs::create_dir_all(&output_location).expect("output location should be created");
-            fs::write(working_dir.join("run_openfold.py"), "# test script")
-                .expect("script should be created");
-            fs::write(fasta_dir.join("input.fasta"), ">test_input\nMSTNPKPQRITF\n")
-                .expect("FASTA should be created");
-            Self {
-                root,
-                working_dir,
-                fasta_dir,
-                data_dir,
-                output_location,
-            }
-        }
-    }
-
-    impl Drop for TestLayout {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
         }
     }
 
@@ -412,6 +426,7 @@ mod tests {
                 model_parameters_json: "{}".into(),
                 execution_parameters_json:
                     json!({"fasta_dir":layout.fasta_dir,"data_dir":layout.data_dir}).to_string(),
+                provenance_json: None,
             },
         )
         .await
@@ -452,12 +467,12 @@ mod tests {
     #[tokio::test]
     async fn successful_command_completes_run_and_uses_openfold_plan() -> Result<(), DbErr> {
         let db = test_db().await?;
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, called, command) = runner(0, "");
         let result = execute_openfold_run(&db, run.id, &runner).await?;
         assert!(called.load(Ordering::SeqCst));
-        assert_eq!(result.command_output.expect("output").exit_code, 0);
+        assert_eq!(result.output.expect("output").exit_code, 0);
         let command = command
             .lock()
             .expect("command lock")
@@ -465,7 +480,9 @@ mod tests {
             .expect("planned command");
         assert_eq!(command.program, "python3");
         assert_eq!(command.args, vec!["-u", "run_openfold.py"]);
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        assert!(command.stream, "long-running folds must stream output");
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
@@ -482,11 +499,12 @@ mod tests {
     #[tokio::test]
     async fn non_zero_command_fails_run() -> Result<(), DbErr> {
         let db = test_db().await?;
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, _, _) = runner(7, "OpenFold failed");
         execute_openfold_run(&db, run.id, &runner).await?;
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "failed");
@@ -497,16 +515,15 @@ mod tests {
     #[tokio::test]
     async fn failing_preflight_skips_runner_and_fails_run() -> Result<(), DbErr> {
         let db = test_db().await?;
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, true).await?;
         let (runner, called, _) = runner(0, "");
         let result = execute_openfold_run(&db, run.id, &runner).await?;
         assert!(!called.load(Ordering::SeqCst));
-        assert_eq!(
-            result.skipped_execution_reason.as_deref(),
-            Some("preflight failed")
-        );
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        assert!(result.output.is_none());
+        assert!(result.report.has_failures());
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "failed");
@@ -515,6 +532,32 @@ mod tests {
                 .error_message
                 .expect("error message")
                 .contains("working directory")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_error_after_preflight_passes_fails_run_and_propagates() -> Result<(), DbErr> {
+        let db = test_db().await?;
+        let layout = TestLayout::new("test_input");
+        let run = create_run(&db, &layout, false).await?;
+        let runner = FakeCommandRunner::fails("boom");
+
+        let error = execute_openfold_run(&db, run.id, &runner)
+            .await
+            .expect_err("runner error should propagate");
+        assert!(error.to_string().contains("boom"));
+
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
+            .await?
+            .expect("run exists");
+        assert_eq!(updated.status, "failed");
+        assert!(
+            updated
+                .error_message
+                .expect("error message")
+                .contains("boom")
         );
         Ok(())
     }

@@ -10,7 +10,7 @@ use crate::core::{
     commands::CommandSpec,
     entities::{execution_targets, model_backends, model_invocation_profiles, runs},
     output_locations::resolve_output_location,
-    preflight::{PreflightCheck, PreflightReport, PreflightRunner},
+    preflight::{PreflightCheck, PreflightReport},
 };
 
 pub fn plan_openfold_command(
@@ -19,7 +19,7 @@ pub fn plan_openfold_command(
     invocation_profile: &model_invocation_profiles::Model,
     run: &runs::Model,
 ) -> Result<CommandSpec, DbErr> {
-    validate_entity_consistency(model_backend, execution_target, invocation_profile, run)?;
+    validate_entity_consistency(invocation_profile)?;
 
     let config = parse_object(
         "model invocation profile config_json",
@@ -81,6 +81,7 @@ pub fn plan_openfold_command(
         args,
         current_dir,
         env,
+        stream: false,
     })
 }
 
@@ -94,6 +95,7 @@ pub fn preflight_openfold(
         &run.execution_parameters_json,
     )?;
     let mut checks = Vec::new();
+    checks.push(gpu_check(detect_gpu().as_deref()));
 
     if command.program.trim().is_empty() {
         checks.push(PreflightCheck::failed(
@@ -174,15 +176,24 @@ pub fn preflight_openfold(
     Ok(PreflightReport::new(checks))
 }
 
-pub struct OpenFoldPreflightRunner<'a> {
-    pub command: &'a CommandSpec,
-    pub invocation_profile: &'a model_invocation_profiles::Model,
-    pub run: &'a runs::Model,
+/// Mirrors run/fold.sh's `nvidia-smi --query-gpu=name --format=csv,noheader` probe.
+pub fn detect_gpu() -> Option<String> {
+    let output = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name", "--format=csv,noheader"])
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_owned();
+    (output.status.success() && !name.is_empty()).then_some(name)
 }
 
-impl PreflightRunner for OpenFoldPreflightRunner<'_> {
-    fn run_preflight(&self) -> Result<PreflightReport, DbErr> {
-        preflight_openfold(self.command, self.invocation_profile, self.run)
+pub fn gpu_check(detected: Option<&str>) -> PreflightCheck {
+    match detected {
+        Some(name) => PreflightCheck::passed("gpu", format!("GPU visible: {name}")),
+        None => PreflightCheck::warning("gpu", "no GPU visible; the run will fall back to CPU"),
     }
 }
 
@@ -426,38 +437,8 @@ fn output_dir_check(output_path: &Path) -> PreflightCheck {
 }
 
 fn validate_entity_consistency(
-    model_backend: &model_backends::Model,
-    execution_target: &execution_targets::Model,
     invocation_profile: &model_invocation_profiles::Model,
-    run: &runs::Model,
 ) -> Result<(), DbErr> {
-    if run.model_backend_id != model_backend.id {
-        return Err(DbErr::Custom(
-            "run model_backend_id does not match loaded model backend".into(),
-        ));
-    }
-
-    if run.execution_target_id != execution_target.id {
-        return Err(DbErr::Custom(
-            "run execution_target_id does not match loaded execution target".into(),
-        ));
-    }
-
-    if run.invocation_profile_id != invocation_profile.id {
-        return Err(DbErr::Custom(
-            "run invocation_profile_id does not match loaded invocation profile".into(),
-        ));
-    }
-
-    if invocation_profile.model_backend_id != model_backend.id
-        || invocation_profile.execution_target_id != execution_target.id
-    {
-        return Err(DbErr::Custom(
-            "model invocation profile does not match loaded model backend and execution target"
-                .into(),
-        ));
-    }
-
     if invocation_profile.invocation_kind != "local_subprocess" {
         return Err(DbErr::Custom(format!(
             "OpenFold planner only supports local_subprocess invocation profiles, got '{}'",
@@ -770,11 +751,7 @@ fn data_path(data_dir: &str, suffix: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        env, fs,
-        path::PathBuf,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::{env, fs, path::PathBuf};
 
     use chrono::Utc;
     use sea_orm::DbErr;
@@ -783,80 +760,14 @@ mod tests {
     use crate::core::{
         commands::CommandSpec,
         entities::{execution_targets, model_backends, model_invocation_profiles, runs},
-        preflight::{PreflightReport, PreflightRunner, PreflightStatus},
+        preflight::{PreflightReport, PreflightStatus},
+        test_support::TestLayout,
     };
 
     use super::{
-        OpenFoldPreflightRunner, plan_openfold_command,
-        preflight_openfold as preflight_openfold_impl, resolve_declared_value,
+        plan_openfold_command, preflight_openfold as preflight_openfold_impl,
+        resolve_declared_value,
     };
-
-    static NEXT_TEMP_DIR: AtomicUsize = AtomicUsize::new(0);
-
-    struct TestLayout {
-        root: PathBuf,
-        working_dir: PathBuf,
-        fasta_dir: PathBuf,
-        data_dir: PathBuf,
-        alignment_dir: PathBuf,
-    }
-
-    impl TestLayout {
-        fn new() -> Self {
-            let root = env::temp_dir().join(format!(
-                "executor-openfold-preflight-{}-{}",
-                std::process::id(),
-                NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
-            ));
-            let working_dir = root.join("workspace");
-            let fasta_dir = root.join("fasta");
-            let data_dir = root.join("data");
-            let output_location = root.join("outputs");
-            let alignment_dir = root.join("alignments");
-
-            fs::create_dir_all(&working_dir).expect("working directory should be created");
-            fs::create_dir_all(&fasta_dir).expect("fasta directory should be created");
-            fs::create_dir_all(&data_dir).expect("data directory should be created");
-            fs::create_dir_all(&output_location).expect("output location should be created");
-            fs::write(working_dir.join("run_openfold.py"), "# test script")
-                .expect("script should be created");
-            fs::write(
-                fasta_dir.join("input.fasta"),
-                ">1UBQ_1|Chain A\nMSTNPKPQRITF\n",
-            )
-            .expect("matching FASTA should be created");
-
-            Self {
-                root,
-                working_dir,
-                fasta_dir,
-                data_dir,
-                alignment_dir,
-            }
-        }
-
-        fn command(&self) -> CommandSpec {
-            CommandSpec {
-                program: "python3".into(),
-                args: vec!["-u".into(), "run_openfold.py".into()],
-                current_dir: Some(self.working_dir.clone()),
-                ..Default::default()
-            }
-        }
-
-        fn execution_parameters(&self) -> serde_json::Value {
-            json!({
-                "fasta_dir": self.fasta_dir,
-                "data_dir": self.data_dir,
-            })
-        }
-    }
-
-    impl Drop for TestLayout {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
 
     fn preflight_run(execution_parameters: serde_json::Value) -> runs::Model {
         preflight_run_with_input_id("1UBQ_1", execution_parameters)
@@ -952,6 +863,7 @@ mod tests {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json,
             execution_parameters_json,
+            provenance_json: None,
             submitted_at: Utc::now(),
             started_at: None,
             completed_at: None,
@@ -1241,50 +1153,33 @@ mod tests {
     }
 
     #[test]
-    fn model_device_comes_from_execution_parameters() {
-        let mut execution = execution_parameters();
-        execution["model_device"] = json!("cpu");
-
-        let command = plan_openfold_command(
-            &model_backend(),
-            &execution_target(),
-            &invocation_profile(config()),
-            &run(
-                json!({"model_device": "cuda:0"}).to_string(),
-                execution.to_string(),
+    fn available_resources_flags_come_from_execution_parameters() {
+        // (execution_parameters field, override value, model_parameters, expected flag, expected value)
+        let cases = [
+            (
+                "model_device",
+                json!("cpu"),
+                json!({"model_device": "cuda:0"}), // same-named model parameter must not win
+                "--model_device",
+                "cpu",
             ),
-        )
-        .expect("command should plan");
+            ("cpus", json!(12), json!({}), "--cpus", "12"),
+        ];
 
-        let model_device_index = command
-            .args
-            .iter()
-            .position(|arg| arg == "--model_device")
-            .expect("model device flag should be present");
+        for (field, value, model_parameters, expected_flag, expected_value) in cases {
+            let mut execution = execution_parameters();
+            execution[field] = value;
 
-        assert_eq!(command.args[model_device_index + 1], "cpu");
-    }
+            let command = plan_openfold_command(
+                &model_backend(),
+                &execution_target(),
+                &invocation_profile(config()),
+                &run(model_parameters.to_string(), execution.to_string()),
+            )
+            .unwrap_or_else(|error| panic!("command should plan for {field}: {error}"));
 
-    #[test]
-    fn cpus_comes_from_execution_parameters() {
-        let mut execution = execution_parameters();
-        execution["cpus"] = json!(12);
-
-        let command = plan_openfold_command(
-            &model_backend(),
-            &execution_target(),
-            &invocation_profile(config()),
-            &run(json!({}).to_string(), execution.to_string()),
-        )
-        .expect("command should plan");
-
-        let cpus_index = command
-            .args
-            .iter()
-            .position(|arg| arg == "--cpus")
-            .expect("cpus flag should be present");
-
-        assert_eq!(command.args[cpus_index + 1], "12");
+            assert_pair(&command.args, expected_flag, expected_value);
+        }
     }
 
     #[test]
@@ -1526,7 +1421,7 @@ mod tests {
 
     #[test]
     fn preflight_passes_when_local_configuration_is_ready() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let report = preflight_openfold(
             &layout.command(),
             &preflight_run(layout.execution_parameters()),
@@ -1552,7 +1447,7 @@ mod tests {
 
     #[test]
     fn preflight_warns_when_relative_script_has_no_working_directory() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut command = layout.command();
         command.current_dir = None;
 
@@ -1572,7 +1467,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_script_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut command = layout.command();
         command.args[1] = "missing_script.py".into();
 
@@ -1588,7 +1483,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_dir_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut execution = layout.execution_parameters();
         execution["fasta_dir"] = json!(layout.root.join("missing-fasta"));
 
@@ -1601,7 +1496,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_tag_does_not_match_input_id() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::write(
             layout.fasta_dir.join("input.fasta"),
             ">1UBQ\nMSTNPKPQRITF\n",
@@ -1621,7 +1516,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_dir_contains_no_fasta_files() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::remove_file(layout.fasta_dir.join("input.fasta"))
             .expect("default FASTA should be removed");
 
@@ -1638,7 +1533,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_dir_contains_multiple_fasta_files() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::write(
             layout.fasta_dir.join("second.fa"),
             ">1UBQ_1\nMSTNPKPQRITF\n",
@@ -1658,7 +1553,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_file_has_no_header() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::write(layout.fasta_dir.join("input.fasta"), "MSTNPKPQRITF\n")
             .expect("headerless FASTA should be written");
 
@@ -1675,7 +1570,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_fasta_file_contains_multiple_records() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::write(
             layout.fasta_dir.join("input.fasta"),
             ">1UBQ_1\nMSTNPKPQRITF\n>2OMF_1\nMSTNPKPQRITF\n",
@@ -1695,7 +1590,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_data_dir_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut execution = layout.execution_parameters();
         execution["data_dir"] = json!(layout.root.join("missing-data"));
 
@@ -1708,7 +1603,7 @@ mod tests {
 
     #[test]
     fn preflight_does_not_require_output_dir_in_execution_parameters() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let report = preflight_openfold(
             &layout.command(),
             &preflight_run(layout.execution_parameters()),
@@ -1723,7 +1618,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_resolved_output_dir_parent_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let profile = invocation_profile(
             json!({"output_location": layout.root.join("missing-parent")}).to_string(),
         );
@@ -1744,7 +1639,7 @@ mod tests {
 
     #[test]
     fn preflight_returns_clear_error_for_missing_output_location() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let error = preflight_openfold_impl(
             &layout.command(),
             &invocation_profile("{}".into()),
@@ -1757,7 +1652,7 @@ mod tests {
 
     #[test]
     fn preflight_returns_clear_error_for_invalid_output_location() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let error = preflight_openfold_impl(
             &layout.command(),
             &invocation_profile(json!({"output_location": 42}).to_string()),
@@ -1774,7 +1669,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_requested_alignment_dir_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut execution = layout.execution_parameters();
         execution["use_precomputed_alignments"] = json!(true);
 
@@ -1790,7 +1685,7 @@ mod tests {
 
     #[test]
     fn preflight_passes_when_requested_alignment_dir_exists() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::create_dir_all(layout.alignment_dir.join("1UBQ_1"))
             .expect("alignment key directory should be created");
         let mut execution = layout.execution_parameters();
@@ -1813,7 +1708,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_precomputed_alignment_key_is_missing() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::create_dir_all(&layout.alignment_dir).expect("alignment directory should be created");
         let mut execution = layout.execution_parameters();
         execution["use_precomputed_alignments"] = json!(true);
@@ -1836,7 +1731,7 @@ mod tests {
 
     #[test]
     fn preflight_fails_when_input_id_is_empty() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let report = preflight_openfold(
             &layout.command(),
             &preflight_run_with_input_id("  ", layout.execution_parameters()),
@@ -1850,7 +1745,7 @@ mod tests {
 
     #[test]
     fn preflight_report_has_failures_tracks_failed_checks() {
-        let layout = TestLayout::new();
+        let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut command = layout.command();
         command.program.clear();
 
@@ -1864,66 +1759,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn openfold_preflight_runner_delegates_to_openfold_preflight() {
-        let layout = TestLayout::new();
-        let command = layout.command();
-        let invocation_profile = preflight_invocation_profile();
-        let run = preflight_run(layout.execution_parameters());
-        let runner = OpenFoldPreflightRunner {
-            command: &command,
-            invocation_profile: &invocation_profile,
-            run: &run,
-        };
-
-        let report = runner
-            .run_preflight()
-            .expect("runner should return the OpenFold preflight report");
-        let direct_report = preflight_openfold_impl(&command, &invocation_profile, &run)
-            .expect("direct OpenFold preflight should return a report");
-
-        assert_eq!(report, direct_report);
-    }
-
-    #[test]
-    fn openfold_preflight_runner_returns_passing_report() {
-        let layout = TestLayout::new();
-        let command = layout.command();
-        let invocation_profile = preflight_invocation_profile();
-        let run = preflight_run(layout.execution_parameters());
-        let runner = OpenFoldPreflightRunner {
-            command: &command,
-            invocation_profile: &invocation_profile,
-            run: &run,
-        };
-
-        let report = runner
-            .run_preflight()
-            .expect("runner should inspect valid local paths");
-
-        assert!(!report.has_failures());
-    }
-
-    #[test]
-    fn openfold_preflight_runner_returns_failing_report() {
-        let layout = TestLayout::new();
-        let mut command = layout.command();
-        command.program.clear();
-        let invocation_profile = preflight_invocation_profile();
-        let run = preflight_run(layout.execution_parameters());
-        let runner = OpenFoldPreflightRunner {
-            command: &command,
-            invocation_profile: &invocation_profile,
-            run: &run,
-        };
-
-        let report = runner
-            .run_preflight()
-            .expect("runner should inspect configured values");
-
-        assert!(report.has_failures());
-    }
-
     fn assert_pair(args: &[String], flag: &str, value: &str) {
         let index = args
             .iter()
@@ -1931,5 +1766,19 @@ mod tests {
             .unwrap_or_else(|| panic!("{flag} should be present"));
 
         assert_eq!(args[index + 1], value);
+    }
+
+    #[test]
+    fn gpu_check_passes_when_a_gpu_is_visible() {
+        let check = super::gpu_check(Some("NVIDIA A100-SXM4-40GB"));
+        assert_eq!(check.status, PreflightStatus::Passed);
+        assert!(check.message.unwrap().contains("A100"));
+    }
+
+    #[test]
+    fn gpu_check_warns_when_no_gpu_is_visible() {
+        let check = super::gpu_check(None);
+        assert_eq!(check.status, PreflightStatus::Warning);
+        assert!(check.message.unwrap().contains("no GPU visible"));
     }
 }

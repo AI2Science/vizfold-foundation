@@ -1,6 +1,8 @@
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
+};
 
-use crate::core::{entities::artifacts, repositories};
+use crate::core::entities::{artifact_types, artifacts};
 
 use super::validation::require_json_object;
 
@@ -26,7 +28,10 @@ pub async fn list_artifacts_for_run(
     db: &DatabaseConnection,
     run_id: i32,
 ) -> Result<Vec<artifacts::Model>, DbErr> {
-    repositories::artifacts::list_by_run(db, run_id).await
+    artifacts::Entity::find()
+        .filter(artifacts::Column::RunId.eq(run_id))
+        .all(db)
+        .await
 }
 
 pub async fn record_artifact_manifest_entry(
@@ -35,14 +40,25 @@ pub async fn record_artifact_manifest_entry(
 ) -> Result<artifacts::Model, DbErr> {
     require_json_object("artifact metadata", &input.metadata_json)?;
 
-    repositories::artifacts::create(db, input).await
+    artifacts::ActiveModel {
+        run_id: Set(input.run_id),
+        artifact_type_id: Set(input.artifact_type_id),
+        format: Set(input.format),
+        storage_uri: Set(input.storage_uri),
+        metadata_json: Set(input.metadata_json),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
 }
 
 pub async fn record_artifact_manifest_entry_by_type_slug(
     db: &DatabaseConnection,
     input: RecordArtifactByTypeSlugInput,
 ) -> Result<artifacts::Model, DbErr> {
-    let artifact_type = repositories::artifact_types::find_by_slug(db, &input.artifact_type_slug)
+    let artifact_type = artifact_types::Entity::find()
+        .filter(artifact_types::Column::Slug.eq(&input.artifact_type_slug))
+        .one(db)
         .await?
         .ok_or_else(|| {
             DbErr::Custom(format!(

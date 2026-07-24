@@ -1,0 +1,455 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ModelBackends::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ModelBackends::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelBackends::Slug)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(ColumnDef::new(ModelBackends::Label).string().not_null())
+                    .col(ColumnDef::new(ModelBackends::Version).string())
+                    .col(ColumnDef::new(ModelBackends::Description).text())
+                    .col(
+                        ColumnDef::new(ModelBackends::ArtifactCapabilitiesJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelBackends::ParameterSchemaJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelBackends::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(ModelBackends::UpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ExecutionTargets::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ExecutionTargets::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ExecutionTargets::Slug)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ExecutionTargets::TargetType)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(ExecutionTargets::Description).text())
+                    .col(
+                        ColumnDef::new(ExecutionTargets::AvailableResourcesJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ExecutionTargets::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(ExecutionTargets::UpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ModelInvocationProfiles::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::ModelBackendId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::ExecutionTargetId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::InvocationKind)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::ConfigJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(ModelInvocationProfiles::UpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_model_invocation_profiles_model_backend_id")
+                            .from(
+                                ModelInvocationProfiles::Table,
+                                ModelInvocationProfiles::ModelBackendId,
+                            )
+                            .to(ModelBackends::Table, ModelBackends::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_model_invocation_profiles_execution_target_id")
+                            .from(
+                                ModelInvocationProfiles::Table,
+                                ModelInvocationProfiles::ExecutionTargetId,
+                            )
+                            .to(ExecutionTargets::Table, ExecutionTargets::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(Runs::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Runs::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Runs::ModelBackendId).integer().not_null())
+                    .col(ColumnDef::new(Runs::ExecutionTargetId).integer().not_null())
+                    .col(
+                        ColumnDef::new(Runs::InvocationProfileId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Runs::Status).string().not_null())
+                    .col(
+                        ColumnDef::new(Runs::InputId)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
+                    .col(ColumnDef::new(Runs::InputSequence).text().not_null())
+                    .col(ColumnDef::new(Runs::ModelParametersJson).text().not_null())
+                    .col(
+                        ColumnDef::new(Runs::ExecutionParametersJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Runs::ProvenanceJson).text())
+                    .col(
+                        ColumnDef::new(Runs::SubmittedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(ColumnDef::new(Runs::StartedAt).timestamp())
+                    .col(ColumnDef::new(Runs::CompletedAt).timestamp())
+                    .col(ColumnDef::new(Runs::ErrorMessage).text())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_runs_model_backend_id")
+                            .from(Runs::Table, Runs::ModelBackendId)
+                            .to(ModelBackends::Table, ModelBackends::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_runs_execution_target_id")
+                            .from(Runs::Table, Runs::ExecutionTargetId)
+                            .to(ExecutionTargets::Table, ExecutionTargets::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_runs_invocation_profile_id")
+                            .from(Runs::Table, Runs::InvocationProfileId)
+                            .to(ModelInvocationProfiles::Table, ModelInvocationProfiles::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ArtifactTypes::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ArtifactTypes::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ArtifactTypes::Slug)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(ColumnDef::new(ArtifactTypes::Label).string().not_null())
+                    .col(
+                        ColumnDef::new(ArtifactTypes::DefaultFormat)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ArtifactTypes::DisplayMode)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ArtifactTypes::ViewerKind)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(ArtifactTypes::Description).text().not_null())
+                    .col(
+                        ColumnDef::new(ArtifactTypes::MetadataSchemaJson)
+                            .text()
+                            .not_null()
+                            .default("{}"),
+                    )
+                    .col(
+                        ColumnDef::new(ArtifactTypes::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(ArtifactTypes::UpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(Artifacts::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Artifacts::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Artifacts::RunId).integer().not_null())
+                    .col(
+                        ColumnDef::new(Artifacts::ArtifactTypeId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Artifacts::Format).string().not_null())
+                    .col(ColumnDef::new(Artifacts::StorageUri).text().not_null())
+                    .col(ColumnDef::new(Artifacts::MetadataJson).text().not_null())
+                    .col(
+                        ColumnDef::new(Artifacts::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_artifacts_run_id")
+                            .from(Artifacts::Table, Artifacts::RunId)
+                            .to(Runs::Table, Runs::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_artifacts_artifact_type_id")
+                            .from(Artifacts::Table, Artifacts::ArtifactTypeId)
+                            .to(ArtifactTypes::Table, ArtifactTypes::Id)
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(Artifacts::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ArtifactTypes::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Runs::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ModelInvocationProfiles::Table)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ExecutionTargets::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ModelBackends::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum ModelBackends {
+    Table,
+    Id,
+    Slug,
+    Label,
+    Version,
+    Description,
+    ArtifactCapabilitiesJson,
+    ParameterSchemaJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ExecutionTargets {
+    Table,
+    Id,
+    Slug,
+    TargetType,
+    Description,
+    AvailableResourcesJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ModelInvocationProfiles {
+    Table,
+    Id,
+    ModelBackendId,
+    ExecutionTargetId,
+    InvocationKind,
+    ConfigJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Runs {
+    Table,
+    Id,
+    ModelBackendId,
+    ExecutionTargetId,
+    InvocationProfileId,
+    Status,
+    InputId,
+    InputSequence,
+    ModelParametersJson,
+    ExecutionParametersJson,
+    ProvenanceJson,
+    SubmittedAt,
+    StartedAt,
+    CompletedAt,
+    ErrorMessage,
+}
+
+#[derive(DeriveIden)]
+enum ArtifactTypes {
+    Table,
+    Id,
+    Slug,
+    Label,
+    DefaultFormat,
+    DisplayMode,
+    ViewerKind,
+    Description,
+    MetadataSchemaJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Artifacts {
+    Table,
+    Id,
+    RunId,
+    ArtifactTypeId,
+    Format,
+    StorageUri,
+    MetadataJson,
+    CreatedAt,
+}

@@ -2,6 +2,7 @@
 name = "executor"
 version = "0.2.0"
 edition = "2024"
+default-run = "vizfold"
 
 [dependencies]
 async-trait = "0.1"

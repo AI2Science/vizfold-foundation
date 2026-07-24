@@ -8,6 +8,8 @@ pub struct CommandSpec {
     pub args: Vec<String>,
     pub current_dir: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
+    /// Inherit the parent's stdio instead of capturing it, so a long run reports progress live.
+    pub stream: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,12 +38,23 @@ impl CommandRunner for LocalCommandRunner {
             command.current_dir(current_dir);
         }
 
-        let output = command.output().await.map_err(|error| {
+        let spawn_error = |error: std::io::Error| {
             DbErr::Custom(format!(
-                "failed to spawn command '{}': {error}",
-                spec.program
+                "failed to spawn command '{}': {}",
+                spec.program, error
             ))
-        })?;
+        };
+
+        if spec.stream {
+            let status = command.status().await.map_err(spawn_error)?;
+            return Ok(CommandOutput {
+                exit_code: status.code().unwrap_or(-1),
+                stdout: String::new(),
+                stderr: String::new(),
+            });
+        }
+
+        let output = command.output().await.map_err(spawn_error)?;
 
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(-1),
@@ -80,8 +93,6 @@ impl CommandRunner for FakeCommandRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, path::Path};
-
     use super::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner, LocalCommandRunner};
 
     #[cfg(unix)]
@@ -183,38 +194,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_command_runner_passes_environment_variables() {
+    async fn streaming_returns_the_exit_code_without_capturing_output() {
         let runner = LocalCommandRunner;
         #[cfg(unix)]
-        let mut spec = shell_command("printf '%s' \"$EXECUTOR_TEST_VALUE\"");
+        let mut spec = shell_command("printf visible; exit 3");
         #[cfg(windows)]
-        let mut spec = shell_command("echo %EXECUTOR_TEST_VALUE%");
-        spec.env
-            .insert("EXECUTOR_TEST_VALUE".into(), "configured-value".into());
+        let mut spec = shell_command("echo visible & exit /B 3");
+        spec.stream = true;
 
         let output = runner.run(spec).await.expect("command should run");
 
-        assert_eq!(output.stdout.trim(), "configured-value");
+        assert_eq!(output.exit_code, 3);
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
     }
 
     #[tokio::test]
-    async fn local_command_runner_applies_current_directory() {
+    async fn local_command_runner_applies_current_dir_and_env() {
         let runner = LocalCommandRunner;
-        let current_dir = env::temp_dir()
-            .canonicalize()
-            .expect("temp directory exists");
+        let dir = std::env::temp_dir();
         #[cfg(unix)]
-        let mut spec = shell_command("pwd");
+        let mut spec = shell_command("pwd; printf \"$VIZFOLD_RUNNER_TEST_VAR\"");
         #[cfg(windows)]
-        let mut spec = shell_command("cd");
-        spec.current_dir = Some(current_dir.clone());
+        let mut spec = shell_command("cd & echo %VIZFOLD_RUNNER_TEST_VAR%");
+        spec.current_dir = Some(dir.clone());
+        spec.env
+            .insert("VIZFOLD_RUNNER_TEST_VAR".into(), "applied".into());
 
         let output = runner.run(spec).await.expect("command should run");
-        let reported_dir = Path::new(output.stdout.trim())
-            .canonicalize()
-            .expect("command should report a valid directory");
 
-        assert_eq!(reported_dir, current_dir);
+        let printed_dir = output.stdout.lines().next().expect("pwd line");
+        assert_eq!(
+            std::fs::canonicalize(printed_dir).expect("printed dir should exist"),
+            std::fs::canonicalize(&dir).expect("temp dir should exist")
+        );
+        assert!(output.stdout.contains("applied"));
     }
 
     #[tokio::test]

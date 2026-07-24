@@ -2,8 +2,6 @@ use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-pub const DEFAULT_DATABASE_URL: &str = "sqlite://data/vizfold.db?mode=rwc";
-
 /// Path to the install-time config written by `install/config.sh` (`config::save`).
 /// This flat JSON map is the single source of storage, DB, and cluster-inferrable paths.
 pub fn config_file() -> PathBuf {
@@ -160,12 +158,17 @@ pub fn gpu_launch(
 pub fn gpu_launch_args() -> Vec<String> {
     gpu_launch(
         SlurmContext::detect(),
-        resolved("OPENFOLD_GPU_PARTITION").as_deref(),
+        gpu_partition().as_deref(),
         resolved("OPENFOLD_GPU_ACCOUNT").as_deref(),
         resolved("OPENFOLD_GPU_GRES").as_deref(),
         resolved("OPENFOLD_GPU_RESOURCES").as_deref(),
         resolved("OPENFOLD_GPU_TIME").as_deref(),
     )
+}
+
+/// The GPU partition `gpu_launch_args` would srun onto, resolved the same env-var-or-config way.
+pub fn gpu_partition() -> Option<String> {
+    resolved("OPENFOLD_GPU_PARTITION")
 }
 
 pub fn database_url() -> String {
@@ -201,7 +204,7 @@ pub fn database_path() -> Option<PathBuf> {
 /// Repository root for the local development layout. DEV FALLBACK ONLY: relies on
 /// the executor crate being nested under the repository root, not suitable for an
 /// installed binary (where `openfold_home()` resolves from config instead).
-pub fn repository_root() -> PathBuf {
+fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
