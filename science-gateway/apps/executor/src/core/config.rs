@@ -88,6 +88,24 @@ pub fn openfold_env_prefix() -> PathBuf {
         .unwrap_or_else(|| prefix().join("mamba/envs/openfold-env"))
 }
 
+/// venv prefix for the ESMFold backend (matches `install/esmfold.sh`'s
+/// `${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}`).
+pub fn esmfold_env_prefix() -> PathBuf {
+    resolved("ESMFOLD_ENV_PREFIX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| prefix().join("esmfold-venv"))
+}
+
+/// The install-resolved config map as sorted (key, value) string pairs, for `vizfold status`.
+pub fn config_entries() -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = vizfold_config()
+        .iter()
+        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned())))
+        .collect();
+    entries.sort();
+    entries
+}
+
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)

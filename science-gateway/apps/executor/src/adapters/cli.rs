@@ -1,4 +1,4 @@
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -29,8 +29,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Install a model backend (OpenFold) on this machine.
-    Install,
+    /// Install a model backend (openfold or esmfold) on this machine.
+    Install(InstallArgs),
+    /// Show resolved config and which backends are installed.
+    Status,
     /// Remove everything the install generated.
     Uninstall(UninstallArgs),
     /// Start the workbench dashboard.
@@ -47,6 +49,50 @@ enum Command {
     ExecuteRun { run_id: i32 },
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
+}
+
+#[derive(Debug, Args)]
+struct InstallArgs {
+    /// Model backend to install.
+    #[arg(value_enum)]
+    backend: Backend,
+}
+
+/// A model backend `vizfold install` can provision. Each knows the installer script it runs
+/// (relative to the checkout) and the env prefix whose presence means "installed".
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Backend {
+    Openfold,
+    Esmfold,
+}
+
+impl Backend {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Openfold => "openfold",
+            Self::Esmfold => "esmfold",
+        }
+    }
+
+    /// Installer script, relative to the vizfold checkout. `init.sh` picks a site and dispatches
+    /// OpenFold's cluster install; `esmfold.sh` is a self-contained venv install.
+    fn installer(self) -> &'static str {
+        match self {
+            Self::Openfold => "install/init.sh",
+            Self::Esmfold => "install/esmfold.sh",
+        }
+    }
+
+    fn env_prefix(self) -> PathBuf {
+        match self {
+            Self::Openfold => config::openfold_env_prefix(),
+            Self::Esmfold => config::esmfold_env_prefix(),
+        }
+    }
+
+    fn is_installed(self) -> bool {
+        self.env_prefix().is_dir()
+    }
 }
 
 #[derive(Debug, Args)]
@@ -193,17 +239,21 @@ fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // `install` is the bootstrap and `uninstall` cleans up after a partial one; everything
-    // else requires an initialized config.
-    if !matches!(cli.command, Command::Install | Command::Uninstall(_)) && !config::is_initialized()
+    // `install` is the bootstrap, `uninstall` cleans up after a partial one, and `status` reports
+    // where things stand before either has run; everything else requires an initialized config.
+    if !matches!(
+        cli.command,
+        Command::Install(_) | Command::Uninstall(_) | Command::Status
+    ) && !config::is_initialized()
     {
-        eprintln!("run `vizfold install` first");
+        eprintln!("run `vizfold install openfold` first");
         std::process::exit(1);
     }
 
-    // These three touch the filesystem only; they need no database connection.
+    // These touch the filesystem only; they need no database connection.
     match cli.command {
-        Command::Install => return run_install(),
+        Command::Install(args) => return run_install(args.backend),
+        Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
         Command::Serve(args) => return run_serve(args),
         _ => {}
@@ -229,7 +279,7 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::ExecuteRun { run_id } => execute_openfold(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
-        Command::Install | Command::Uninstall(_) | Command::Serve(_) => {
+        Command::Install(_) | Command::Status | Command::Uninstall(_) | Command::Serve(_) => {
             unreachable!("handled before DB connect")
         }
     }
@@ -237,22 +287,28 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Install a model backend (OpenFold) by running the checkout's `install/init.sh` with
-/// inherited stdio. The release binary ships only itself, so the checkout is cloned on
-/// first install. Idempotent: its steps are sentinel-guarded, so re-running is safe.
-fn run_install() -> Result<(), DbErr> {
+/// Install a model backend by running the checkout's installer for it (`install/init.sh` for
+/// OpenFold, `install/esmfold.sh` for ESMFold) with inherited stdio. The release binary ships
+/// only itself, so the checkout is cloned on first install. Idempotent: the installers are
+/// sentinel- or import-guarded, so re-running is safe.
+fn run_install(backend: Backend) -> Result<(), DbErr> {
     let src = config::vizfold_src();
-    let installer = src.join("install/init.sh");
+    let installer = src.join(backend.installer());
     if !installer.is_file() {
         clone_checkout(&src)?;
     }
     if !installer.is_file() {
         return Err(DbErr::Custom(format!(
-            "no vizfold checkout at {}; set VIZFOLD_SRC to a checkout",
-            src.display()
+            "no {} installer at {}; set VIZFOLD_SRC to a checkout",
+            backend.slug(),
+            installer.display()
         )));
     }
-    println!("Running model install: bash {}", installer.display());
+    println!(
+        "Installing {}: bash {}",
+        backend.slug(),
+        installer.display()
+    );
     let status = std::process::Command::new("bash")
         .arg(&installer)
         .env("OPENFOLD_HOME", &src)
@@ -262,6 +318,50 @@ fn run_install() -> Result<(), DbErr> {
         .success()
         .then_some(())
         .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
+}
+
+/// Report resolved config plus which backends are installed. Runs before any install (so it can
+/// say "nothing initialized yet") and needs no database.
+fn run_status() -> Result<(), DbErr> {
+    let config_file = config::config_file();
+    println!("VizFold status\n");
+    if config::is_initialized() {
+        println!("Config: {}", config_file.display());
+        for (key, value) in config::config_entries() {
+            println!("  {key} = {value}");
+        }
+    } else {
+        println!("Config: {} (not initialized)", config_file.display());
+    }
+    if let Some(database) = config::database_path() {
+        let state = if database.is_file() {
+            "present"
+        } else {
+            "not created yet"
+        };
+        println!("  database = {} ({state})", database.display());
+    }
+
+    println!("\nBackends:");
+    print_table(
+        &["BACKEND", "STATUS", "ENV PREFIX"],
+        [Backend::Openfold, Backend::Esmfold]
+            .into_iter()
+            .map(|backend| {
+                let status = if backend.is_installed() {
+                    "installed"
+                } else {
+                    "not installed"
+                };
+                vec![
+                    backend.slug().to_owned(),
+                    status.to_owned(),
+                    backend.env_prefix().display().to_string(),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
 }
 
 /// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
@@ -361,6 +461,7 @@ fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         ".done",
         "params",
         "workbench",
+        "esmfold-venv",
         "vizfold.db",
     ]
     .iter()
@@ -1086,10 +1187,46 @@ mod tests {
     }
 
     #[test]
-    fn parses_install() {
-        let cli =
-            Cli::try_parse_from(["vizfold", "install"]).expect("install command should parse");
-        assert!(matches!(cli.command, Command::Install));
+    fn parses_install_backend() {
+        for (arg, want) in [
+            ("openfold", Backend::Openfold),
+            ("esmfold", Backend::Esmfold),
+        ] {
+            let cli = Cli::try_parse_from(["vizfold", "install", arg])
+                .expect("install <backend> should parse");
+            assert!(
+                matches!(cli.command, Command::Install(InstallArgs { backend }) if backend == want)
+            );
+        }
+        // The backend is required and constrained to the known set.
+        assert!(Cli::try_parse_from(["vizfold", "install"]).is_err());
+        assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
+    }
+
+    #[test]
+    fn parses_status() {
+        let cli = Cli::try_parse_from(["vizfold", "status"]).expect("status command should parse");
+        assert!(matches!(cli.command, Command::Status));
+    }
+
+    #[test]
+    fn backend_is_installed_tracks_its_env_prefix() {
+        let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        // env_prefix() reads config; pin ESMFOLD_ENV_PREFIX so the check is deterministic.
+        // SAFETY: single-threaded test, no other thread reads the env concurrently.
+        unsafe { std::env::set_var("ESMFOLD_ENV_PREFIX", &base) };
+        assert!(
+            Backend::Esmfold.is_installed(),
+            "an existing env dir reads as installed"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(
+            !Backend::Esmfold.is_installed(),
+            "a missing env dir reads as not installed"
+        );
+        unsafe { std::env::remove_var("ESMFOLD_ENV_PREFIX") };
     }
 
     #[test]
@@ -1123,6 +1260,7 @@ mod tests {
             prefix.join("data"),
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
+            prefix.join("esmfold-venv"),
             base.join(".openfold-pkgs"),
             home.join("openfold/resources/params"),
         ] {
@@ -1179,7 +1317,8 @@ mod tests {
     fn copy_tree_skips_a_symlinked_directory() {
         // public/runs is a symlink to the run outputs; fs::copy would follow it into a directory
         // and fail with EISDIR. The stage must skip it, not choke on it.
-        let base = std::env::temp_dir().join(format!("vizfold-copytree-link-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("vizfold-copytree-link-{}", std::process::id()));
         let (src, dst, outputs) = (base.join("src"), base.join("dst"), base.join("outputs"));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(src.join("public")).unwrap();
