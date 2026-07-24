@@ -120,9 +120,10 @@ struct OpenfoldQueueArgs {
     /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
     #[arg(long)]
     alignment_dir: Option<String>,
-    #[arg(long, default_value = "cuda:0")]
-    model_device: String,
-    #[arg(long, default_value_t = 1)]
+    /// Torch device. Defaults to cuda:0 when a GPU is visible, otherwise cpu.
+    #[arg(long)]
+    model_device: Option<String>,
+    #[arg(long, default_value_t = default_cpus())]
     cpus: i64,
     #[arg(long, default_value_t = 1)]
     residue_idx: i64,
@@ -136,6 +137,22 @@ struct OpenfoldQueueArgs {
     /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
+}
+
+fn model_device_for(detected: Option<&str>) -> String {
+    if detected.is_some() {
+        "cuda:0".to_owned()
+    } else {
+        "cpu".to_owned()
+    }
+}
+
+fn default_model_device() -> String {
+    model_device_for(crate::core::model_runners::openfold::detect_gpu().as_deref())
+}
+
+fn default_cpus() -> i64 {
+    std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
 }
 
 pub async fn run() -> Result<(), DbErr> {
@@ -627,6 +644,10 @@ async fn queue_openfold_run(
             .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
             .transpose()?
     };
+    let model_device = args
+        .model_device
+        .clone()
+        .unwrap_or_else(default_model_device);
 
     let mut execution_parameters = serde_json::Map::from_iter([
         ("fasta_dir".into(), json!(fasta_dir)),
@@ -636,7 +657,7 @@ async fn queue_openfold_run(
             "use_precomputed_alignments".into(),
             json!(args.use_precomputed_alignments),
         ),
-        ("model_device".into(), json!(args.model_device)),
+        ("model_device".into(), json!(model_device)),
         ("cpus".into(), json!(args.cpus)),
     ]);
     if let Some(alignment_dir) = alignment_dir {
@@ -958,11 +979,12 @@ mod tests {
                     data_dir,
                     demo_attn: false,
                     use_precomputed_alignments: true,
-                    cpus: 1,
+                    cpus,
                     ..
                 })
             }) if input_id == "6KWC_1" && input_sequence == "GSTI"
                 && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
+                && cpus == default_cpus()
         ));
     }
 
@@ -1143,7 +1165,7 @@ mod tests {
                 fasta_dir: Some(".".into()),
                 data_dir: Some(".".into()),
                 alignment_dir: Some(".".into()),
-                model_device: "cpu".into(),
+                model_device: Some("cpu".into()),
                 cpus: 1,
                 residue_idx: 1,
                 demo_attn: true,
@@ -1192,7 +1214,7 @@ mod tests {
                 fasta_dir: Some(missing_path.into()),
                 data_dir: Some(".".into()),
                 alignment_dir: None,
-                model_device: "cpu".into(),
+                model_device: Some("cpu".into()),
                 cpus: 1,
                 residue_idx: 1,
                 demo_attn: false,
@@ -1213,5 +1235,25 @@ mod tests {
                 .contains(&crate::core::config::openfold_home().display().to_string())
         );
         Ok(())
+    }
+
+    #[test]
+    fn model_device_defaults_to_cpu_without_a_gpu() {
+        assert_eq!(super::model_device_for(None), "cpu");
+    }
+
+    #[test]
+    fn model_device_defaults_to_cuda_with_a_gpu() {
+        assert_eq!(super::model_device_for(Some("NVIDIA A100")), "cuda:0");
+    }
+
+    #[test]
+    fn cpus_default_follows_available_parallelism() {
+        let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
+        assert_eq!(super::default_cpus(), expected);
+        assert!(
+            super::default_cpus() > 1,
+            "a dev machine should report more than one core"
+        );
     }
 }

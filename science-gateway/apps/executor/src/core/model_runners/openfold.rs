@@ -94,6 +94,7 @@ pub fn preflight_openfold(
         &run.execution_parameters_json,
     )?;
     let mut checks = Vec::new();
+    checks.push(gpu_check(detect_gpu().as_deref()));
 
     if command.program.trim().is_empty() {
         checks.push(PreflightCheck::failed(
@@ -172,6 +173,27 @@ pub fn preflight_openfold(
     }
 
     Ok(PreflightReport::new(checks))
+}
+
+/// Mirrors run/fold.sh's `nvidia-smi --query-gpu=name --format=csv,noheader` probe.
+pub fn detect_gpu() -> Option<String> {
+    let output = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name", "--format=csv,noheader"])
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_owned();
+    (output.status.success() && !name.is_empty()).then_some(name)
+}
+
+pub fn gpu_check(detected: Option<&str>) -> PreflightCheck {
+    match detected {
+        Some(name) => PreflightCheck::passed("gpu", format!("GPU visible: {name}")),
+        None => PreflightCheck::warning("gpu", "no GPU visible; the run will fall back to CPU"),
+    }
 }
 
 pub struct OpenFoldPreflightRunner<'a> {
@@ -1931,5 +1953,19 @@ mod tests {
             .unwrap_or_else(|| panic!("{flag} should be present"));
 
         assert_eq!(args[index + 1], value);
+    }
+
+    #[test]
+    fn gpu_check_passes_when_a_gpu_is_visible() {
+        let check = super::gpu_check(Some("NVIDIA A100-SXM4-40GB"));
+        assert_eq!(check.status, PreflightStatus::Passed);
+        assert!(check.message.unwrap().contains("A100"));
+    }
+
+    #[test]
+    fn gpu_check_warns_when_no_gpu_is_visible() {
+        let check = super::gpu_check(None);
+        assert_eq!(check.status, PreflightStatus::Warning);
+        assert!(check.message.unwrap().contains("no GPU visible"));
     }
 }
