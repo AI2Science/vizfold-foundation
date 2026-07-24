@@ -216,7 +216,7 @@ pub async fn run() -> Result<(), DbErr> {
         Command::QueueRun(queue) => match queue.model {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
         },
-        Command::ExecuteRun { run_id } => execute_run(&database, run_id).await?,
+        Command::ExecuteRun { run_id } => execute_openfold(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
         Command::Install | Command::Uninstall(_) | Command::Serve(_) => {
             unreachable!("handled before DB connect")
@@ -552,60 +552,38 @@ async fn register_artifacts(
     Ok(())
 }
 
-async fn execute_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
-    let run = runs::get_run_with_artifacts(database, run_id)
-        .await?
-        .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?
-        .run;
-    let backend = model_backend_entity::Entity::find_by_id(run.model_backend_id)
-        .one(database)
-        .await?
-        .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
-
-    if backend.slug != "openfold" {
-        return Err(DbErr::Custom(format!(
-            "run {run_id} uses backend '{}'; only OpenFold runs can be executed",
-            backend.slug
-        )));
-    }
-
-    execute_openfold(database, run_id).await
-}
-
 async fn execute_openfold(
     database: &sea_orm::DatabaseConnection,
     run_id: i32,
 ) -> Result<(), DbErr> {
     println!("Executing OpenFold run {run_id}");
-    let result = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
+    let outcome = execute_openfold_run(database, run_id, &LocalCommandRunner).await?;
 
-    if let Some(report) = result.preflight_report {
-        let outcome = if report.has_failures() {
-            "failed"
-        } else {
-            "passed"
-        };
-        println!("\nPreflight: {outcome}");
-        for check in report.checks {
-            let message = check.message.as_deref().unwrap_or("no details");
-            println!(
-                "[{}] {}: {}",
-                preflight_status_label(check.status),
-                check.name,
-                message
-            );
-        }
+    let label = if outcome.report.has_failures() {
+        "failed"
+    } else {
+        "passed"
+    };
+    println!("\nPreflight: {label}");
+    for check in outcome.report.checks {
+        let message = check.message.as_deref().unwrap_or("no details");
+        println!(
+            "[{}] {}: {}",
+            preflight_status_label(check.status),
+            check.name,
+            message
+        );
     }
 
-    if let Some(reason) = result.skipped_execution_reason {
-        println!("\nExecution skipped:\n{reason}");
-    }
-
-    if let Some(output) = result.command_output {
+    if let Some(output) = outcome.output {
         println!("\nCommand output:");
         println!("exit_code: {}", output.exit_code);
-        println!("stdout:\n{}", output.stdout);
-        println!("stderr:\n{}", output.stderr);
+        if !output.stdout.is_empty() {
+            println!("stdout:\n{}", output.stdout);
+        }
+        if !output.stderr.is_empty() {
+            println!("stderr:\n{}", output.stderr);
+        }
     }
 
     if let Some(run) = runs::get_run_with_artifacts(database, run_id)

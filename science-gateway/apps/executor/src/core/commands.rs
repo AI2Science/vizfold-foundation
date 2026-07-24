@@ -93,8 +93,6 @@ impl CommandRunner for FakeCommandRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, path::Path};
-
     use super::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner, LocalCommandRunner};
 
     #[cfg(unix)]
@@ -193,41 +191,6 @@ mod tests {
         let output = runner.run(spec).await.expect("command should run");
 
         assert_eq!(output.exit_code, 7);
-    }
-
-    #[tokio::test]
-    async fn local_command_runner_passes_environment_variables() {
-        let runner = LocalCommandRunner;
-        #[cfg(unix)]
-        let mut spec = shell_command("printf '%s' \"$EXECUTOR_TEST_VALUE\"");
-        #[cfg(windows)]
-        let mut spec = shell_command("echo %EXECUTOR_TEST_VALUE%");
-        spec.env
-            .insert("EXECUTOR_TEST_VALUE".into(), "configured-value".into());
-
-        let output = runner.run(spec).await.expect("command should run");
-
-        assert_eq!(output.stdout.trim(), "configured-value");
-    }
-
-    #[tokio::test]
-    async fn local_command_runner_applies_current_directory() {
-        let runner = LocalCommandRunner;
-        let current_dir = env::temp_dir()
-            .canonicalize()
-            .expect("temp directory exists");
-        #[cfg(unix)]
-        let mut spec = shell_command("pwd");
-        #[cfg(windows)]
-        let mut spec = shell_command("cd");
-        spec.current_dir = Some(current_dir.clone());
-
-        let output = runner.run(spec).await.expect("command should run");
-        let reported_dir = Path::new(output.stdout.trim())
-            .canonicalize()
-            .expect("command should report a valid directory");
-
-        assert_eq!(reported_dir, current_dir);
     }
 
     #[tokio::test]

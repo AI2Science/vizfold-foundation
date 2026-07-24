@@ -191,6 +191,123 @@ pub async fn get_run_with_artifacts(
 mod tests {
     use std::path::Path;
 
+    use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
+    use serde_json::json;
+
+    use crate::core::{
+        db,
+        services::{
+            execution_targets::{self, RegisterExecutionTargetInput},
+            model_backends::{self, RegisterModelBackendInput},
+            model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
+        },
+    };
+
+    use super::{SubmitRunInput, UpdateRunStatusInput, runs, submit_run, update_run_status};
+
+    async fn test_db() -> Result<DatabaseConnection, DbErr> {
+        let db = Database::connect("sqlite::memory:").await?;
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "PRAGMA foreign_keys = ON".to_owned(),
+        ))
+        .await?;
+        db::migrate_database(&db).await?;
+        Ok(db)
+    }
+
+    async fn create_test_run(db: &DatabaseConnection) -> Result<runs::Model, DbErr> {
+        let backend = model_backends::register_model_backend(
+            db,
+            RegisterModelBackendInput {
+                slug: "test-backend".into(),
+                label: "Test".into(),
+                version: None,
+                description: None,
+                artifact_capabilities_json: "{}".into(),
+                parameter_schema_json: json!({"type":"object","properties":{}}).to_string(),
+            },
+        )
+        .await?;
+        let target = execution_targets::register_execution_target(
+            db,
+            RegisterExecutionTargetInput {
+                slug: "test-target".into(),
+                target_type: "local".into(),
+                description: None,
+                available_resources_json: json!({"type":"object","properties":{}}).to_string(),
+            },
+        )
+        .await?;
+        let profile = model_invocation_profiles::register_model_invocation_profile(
+            db,
+            RegisterModelInvocationProfileInput {
+                model_backend_id: backend.id,
+                execution_target_id: target.id,
+                invocation_kind: "local_subprocess".into(),
+                config_json: "{}".into(),
+            },
+        )
+        .await?;
+        submit_run(
+            db,
+            SubmitRunInput {
+                model_backend_id: backend.id,
+                execution_target_id: target.id,
+                invocation_profile_id: profile.id,
+                status: "submitted".into(),
+                input_id: "test".into(),
+                input_sequence: "MSTNPKPQRITF".into(),
+                model_parameters_json: "{}".into(),
+                execution_parameters_json: "{}".into(),
+                provenance_json: None,
+            },
+        )
+        .await
+    }
+
+    /// `UpdateRunStatusInput`'s `started_at`/`completed_at`/`error_message` are
+    /// `Option<Option<T>>`: an outer `None` must leave the column untouched, while `Some(None)`
+    /// writes NULL. A regression that treats outer `None` the same as `Some(None)` would silently
+    /// NULL these columns instead of failing loudly, so this asserts the values survive.
+    #[tokio::test]
+    async fn update_run_status_leaves_untouched_columns_alone() -> Result<(), DbErr> {
+        let db = test_db().await?;
+        let run = create_test_run(&db).await?;
+
+        let started_at = chrono::Utc::now();
+        update_run_status(
+            &db,
+            run.id,
+            UpdateRunStatusInput {
+                status: "running".into(),
+                started_at: Some(Some(started_at)),
+                completed_at: None,
+                error_message: Some(Some("first error".into())),
+            },
+        )
+        .await?;
+
+        // Outer `None` for started_at and error_message: neither column should be touched.
+        let updated = update_run_status(
+            &db,
+            run.id,
+            UpdateRunStatusInput {
+                status: "completed".into(),
+                started_at: None,
+                completed_at: Some(Some(chrono::Utc::now())),
+                error_message: None,
+            },
+        )
+        .await?;
+
+        assert_eq!(updated.status, "completed");
+        assert_eq!(updated.started_at, Some(started_at));
+        assert_eq!(updated.error_message.as_deref(), Some("first error"));
+        assert!(updated.completed_at.is_some());
+        Ok(())
+    }
+
     #[test]
     fn snapshot_records_every_catalog_payload_and_the_resolved_paths() {
         let snapshot = super::provenance_snapshot(
