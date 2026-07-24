@@ -772,15 +772,50 @@ fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Node for the dashboard, in a micromamba env of its own. Clusters ship none -- Delta has no
-/// `node`, no `npm`, and no nodejs module -- and the workbench needs >=22.13 for `node:sqlite`.
-/// Kept out of every backend env so the dashboard works before a backend is installed. Returns the
-/// bin directory to put in front of PATH.
+/// The workbench needs Node >=22.13 for `node:sqlite`.
+const MIN_NODE: (u32, u32) = (22, 13);
+
+/// Whether a `process.versions.node` string clears `MIN_NODE`. Unparseable reads as too old:
+/// provisioning a known-good Node is cheaper than a confusing failure deep in `next dev`.
+fn node_is_new_enough(version: &str) -> bool {
+    let mut parts = version.trim().trim_start_matches('v').split('.');
+    let (Some(Ok(major)), Some(Ok(minor))) = (
+        parts.next().map(str::parse::<u32>),
+        parts.next().map(str::parse::<u32>),
+    ) else {
+        return false;
+    };
+    (major, minor) >= MIN_NODE
+}
+
+/// The bin directory of a usable Node already on PATH, if there is one.
+fn system_node_bin() -> Option<PathBuf> {
+    let output = std::process::Command::new("node")
+        .args([
+            "-e",
+            "process.stdout.write(process.versions.node + '\\n' + process.execPath)",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let (version, path) = text.split_once('\n')?;
+    node_is_new_enough(version)
+        .then(|| PathBuf::from(path).parent().map(Path::to_path_buf))
+        .flatten()
+}
+
+/// Node for the dashboard: whatever is already on PATH when it is new enough, otherwise a
+/// micromamba env of its own. Clusters ship none -- Delta has no `node`, no `npm`, and no nodejs
+/// module -- and the env is kept out of every backend so the dashboard works before a backend is
+/// installed. Returns the bin directory to put in front of PATH.
 fn ensure_node() -> Result<PathBuf, DbErr> {
     let env_dir = config::prefix().join("mamba/envs/vizfold-web");
     let bin = env_dir.join("bin");
     if bin.join("node").is_file() {
         return Ok(bin);
+    }
+    if let Some(system) = system_node_bin() {
+        return Ok(system);
     }
     let micromamba = ensure_micromamba()?;
     println!("Provisioning Node (first run only)...");
@@ -805,8 +840,10 @@ fn ensure_micromamba() -> Result<PathBuf, DbErr> {
     if micromamba.is_file() {
         return Ok(micromamba);
     }
-    let arch = match std::env::consts::ARCH {
-        "aarch64" | "arm64" => "linux-aarch64",
+    let arch = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64" | "arm64") => "osx-arm64",
+        ("macos", _) => "osx-64",
+        (_, "aarch64" | "arm64") => "linux-aarch64",
         _ => "linux-64",
     };
     std::fs::create_dir_all(prefix.join("bin")).map_err(|error| {
@@ -1819,6 +1856,19 @@ mod tests {
             cli.command,
             Command::Serve(ServeArgs { port: Some(3001) })
         ));
+    }
+
+    #[test]
+    fn node_version_gate_is_major_then_minor() {
+        assert!(node_is_new_enough("22.13.0"));
+        assert!(node_is_new_enough("v26.5.0"));
+        assert!(node_is_new_enough("23.0.1"));
+        assert!(!node_is_new_enough("22.12.9"), "minor below the floor");
+        assert!(!node_is_new_enough("20.19.0"), "major below the floor");
+        // 22.9 must not beat 22.13 -- the reason this compares numbers, not strings.
+        assert!(!node_is_new_enough("22.9.0"));
+        assert!(!node_is_new_enough(""), "unparseable reads as too old");
+        assert!(!node_is_new_enough("garbage"));
     }
 
     #[test]
