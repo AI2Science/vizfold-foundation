@@ -6,11 +6,11 @@
 # already imports torch + transformers.
 set -euo pipefail
 
-# OPENFOLD_HOME is exported by `vizfold install`; config.sh also fills unset vars from an existing
-# ~/.config/vizfold/vizfold.json (so an openfold install's PREFIX etc. carry over here). config.sh
-# is shared install infrastructure that lives with the openfold backend.
-CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install/config.sh}
-. "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../openfold/install" && pwd)/config.sh}"
+# config.sh is the backend-neutral shared install lib (repo-root lib/), owned by no backend. It
+# fills unset vars from ~/.config/vizfold/vizfold.json (so an openfold install's PREFIX etc. carry
+# over here). OPENFOLD_HOME is exported by `vizfold install`; the fallback finds lib/ from here.
+CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib/config.sh}
+. "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../lib" && pwd)/config.sh}"
 
 log() { echo "== $* (+$((SECONDS))s)"; }
 
@@ -71,7 +71,7 @@ ESMFold env: $ENV
 
 Fold the bundled example (downloads facebook/esmfold_v1 on first run):
 
-  $ENV/bin/python $ESM/run_pretrained_esmf.py \\
+  $ENV/bin/python $REPO/scripts/esmfold/run_pretrained_esmf.py \\
     --fasta $REPO/examples/monomer/fasta_dir_6KWC/6KWC.fasta \\
     --out $PREFIX/outputs/esmf_6KWC --trace_mode none
 EOF

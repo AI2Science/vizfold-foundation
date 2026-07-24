@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Path to the install-time config written by `install/config.sh` (`config::save`).
+/// Path to the install-time config written by `lib/config.sh` (`config::save`).
 /// This flat JSON map is the single source of storage, DB, and cluster-inferrable paths.
 pub fn config_file() -> PathBuf {
     if let Ok(explicit) = std::env::var("VIZFOLD_CONFIG")
@@ -88,7 +88,7 @@ pub fn openfold_env_prefix() -> PathBuf {
         .unwrap_or_else(|| prefix().join("mamba/envs/openfold-env"))
 }
 
-/// venv prefix for the ESMFold backend (matches `backends/esmfold/install.sh`'s
+/// venv prefix for the ESMFold backend (matches `backends/esmfold/install/install.sh`'s
 /// `${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}`).
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")

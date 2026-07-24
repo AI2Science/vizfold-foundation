@@ -50,7 +50,7 @@ python -c "import torch; import transformers" 2>/dev/null || {
 echo "FASTA=$FASTA OUTDIR=$OUTDIR TRACE_MODE=$TRACE_MODE"
 echo "Running ESMFold..."
 
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta "$FASTA" \
   --out "$OUTDIR" \
   --model facebook/esmfold_v1 \

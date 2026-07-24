@@ -14,7 +14,7 @@ from openfold.data.parsers import parse_fasta
 from openfold.data.tools import hhsearch, hmmsearch
 from openfold.np import protein, residue_constants
 
-from utils import add_data_args
+from openfold.scripts.utils import add_data_args
 
 
 logging.basicConfig(level=logging.WARNING)

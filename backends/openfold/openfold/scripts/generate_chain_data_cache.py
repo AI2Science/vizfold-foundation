@@ -6,7 +6,6 @@ from multiprocessing import Pool
 import os
 import string
 import sys
-sys.path.append(".") # an innocent hack to get this to run from the top level
 
 from collections import defaultdict
 from tqdm import tqdm

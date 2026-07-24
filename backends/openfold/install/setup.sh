@@ -5,8 +5,8 @@ set -euo pipefail
 
 # sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under
 # the backend subtree. The BASH_SOURCE fallback covers a direct local run (libs are siblings here).
-LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install}
-. "${LIB:-$(dirname "${BASH_SOURCE[0]}")}/config.sh"
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
+. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
 
 log()    { echo "== $* (+$((SECONDS))s)"; }
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
@@ -158,7 +158,7 @@ setup::link_mirror() {
 # No mirror: fetch params (4 GB, into the prefix) and the mmCIFs the examples cite.
 setup::fetch_params() {
     rm -rf "$PREFIX/params"   # a half-extracted tar would pass a single-file check
-    bash "$OF/scripts/download_alphafold_params.sh" "$PREFIX"
+    bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$PREFIX"
 }
 
 setup::fetch_templates() {
@@ -238,7 +238,7 @@ setup::ready() {
 
 Check it works -- fold the bundled example and count the atoms:
 
-  ${LAUNCH}env OPENFOLD_PREFIX=$PREFIX $OF/fold.sh $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
+  ${LAUNCH}env OPENFOLD_PREFIX=$PREFIX $REPO/scripts/openfold/fold.sh $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
   grep -c '^ATOM' $PREFIX/outputs/$EXAMPLE/predictions/${EXAMPLE}_model_1_ptm_$STRUCTURE.pdb
 
 A few thousand atoms means it worked. To use the environment directly:

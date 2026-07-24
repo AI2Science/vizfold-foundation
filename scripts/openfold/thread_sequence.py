@@ -14,7 +14,7 @@ from openfold.utils.script_utils import load_models_from_command_line, parse_fas
 from openfold.utils.tensor_utils import (
     tensor_tree_map,
 )
-from scripts.utils import add_data_args
+from openfold.scripts.utils import add_data_args
 
 logging.basicConfig()
 logger = logging.getLogger(__file__)

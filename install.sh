@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bootstrap the vizfold platform CLI: download the release binary into ~/.local/bin, then `vizfold install` installs a model backend (OpenFold, ESMFold; each is a self-contained project under backends/<name>/ with its own installer).
+# Bootstrap the vizfold platform CLI: download the release binary into ~/.local/bin, then `vizfold install` installs a model backend (OpenFold, ESMFold; each a pip/conda-installable package under backends/<name>/ with its own installer).
 set -euo pipefail
 
 die() { echo "FATAL: $*" >&2; exit 1; }

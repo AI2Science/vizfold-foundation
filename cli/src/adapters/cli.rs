@@ -31,6 +31,8 @@ pub struct Cli {
 enum Command {
     /// Install a model backend (openfold or esmfold) on this machine.
     Install(InstallArgs),
+    /// Download a backend's data (OpenFold AlphaFold2 databases/params).
+    Download(DownloadArgs),
     /// Show resolved config and which backends are installed.
     Status,
     /// Remove everything the install generated.
@@ -58,6 +60,17 @@ struct InstallArgs {
     backend: Backend,
 }
 
+#[derive(Debug, Args)]
+struct DownloadArgs {
+    /// Model backend whose data to download.
+    #[arg(value_enum)]
+    backend: Backend,
+    /// Dataset to fetch: `all` (the full AlphaFold2 set) or a single db name (e.g. `uniref90`,
+    /// `pdb70`, `bfd`, `alphafold_params`), mapped to `downloaders/<backend>/download_<name>.sh`.
+    #[arg(default_value = "all")]
+    dataset: String,
+}
+
 /// A model backend `vizfold install` can provision. Each knows the installer script it runs
 /// (relative to the checkout) and the env prefix whose presence means "installed".
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -75,12 +88,22 @@ impl Backend {
     }
 
     /// Installer script, relative to the vizfold checkout. Each backend owns its installer under
-    /// `backends/<name>/`: OpenFold's `install/install.sh` picks a site and dispatches the cluster
-    /// install; ESMFold's `install.sh` is a self-contained venv install.
+    /// `backends/<name>/install/`: OpenFold's picks a site and dispatches the cluster install;
+    /// ESMFold's is a self-contained venv install.
     fn installer(self) -> &'static str {
         match self {
             Self::Openfold => "backends/openfold/install/install.sh",
-            Self::Esmfold => "backends/esmfold/install.sh",
+            Self::Esmfold => "backends/esmfold/install/install.sh",
+        }
+    }
+
+    /// Data-download entrypoint, relative to the checkout, for `vizfold download`. OpenFold ships
+    /// the AlphaFold2 DB/params fetchers under `downloaders/openfold/`; ESMFold has none (it pulls
+    /// its weights from HuggingFace at run time), so its downloader is `None`.
+    fn downloader_dir(self) -> Option<&'static str> {
+        match self {
+            Self::Openfold => Some("downloaders/openfold"),
+            Self::Esmfold => None,
         }
     }
 
@@ -289,6 +312,7 @@ pub async fn run() -> Result<(), DbErr> {
     // These touch the filesystem only; they need no database connection.
     match cli.command {
         Command::Install(args) => return run_install(args.backend),
+        Command::Download(args) => return run_download(args.backend, args.dataset),
         Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
         Command::Serve(args) => return run_serve(args),
@@ -316,7 +340,11 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::ExecuteRun { run_id } => execute(&database, run_id).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
-        Command::Install(_) | Command::Status | Command::Uninstall(_) | Command::Serve(_) => {
+        Command::Install(_)
+        | Command::Download(_)
+        | Command::Status
+        | Command::Uninstall(_)
+        | Command::Serve(_) => {
             unreachable!("handled before DB connect")
         }
     }
@@ -324,8 +352,8 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Install a model backend by running the checkout's installer for it (`backends/openfold/install/install.sh` for
-/// OpenFold, `backends/esmfold/install.sh` for ESMFold) with inherited stdio. The release binary ships
+/// Install a model backend by running the checkout's installer for it (`backends/<name>/install/install.sh`)
+/// with inherited stdio. The release binary ships
 /// only itself, so the checkout is cloned on first install. Idempotent: the installers are
 /// sentinel- or import-guarded, so re-running is safe.
 fn run_install(backend: Backend) -> Result<(), DbErr> {
@@ -355,6 +383,55 @@ fn run_install(backend: Backend) -> Result<(), DbErr> {
         .success()
         .then_some(())
         .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
+}
+
+/// Download a backend's data by running the checkout's downloader for the requested dataset into
+/// `config::data_dir()`. `all` runs `download_alphafold_dbs.sh`; any other name maps to
+/// `download_<name>.sh`. ESMFold has no downloaders (it pulls weights from HuggingFace at run
+/// time), so it prints a note and succeeds. Mirrors `run_install`: clones the checkout if absent.
+fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
+    let Some(dir) = backend.downloader_dir() else {
+        println!(
+            "{} fetches its weights from HuggingFace at run time; nothing to download.",
+            backend.slug()
+        );
+        return Ok(());
+    };
+    let src = config::vizfold_src();
+    if !src.join(dir).is_dir() {
+        clone_checkout(&src)?;
+    }
+    let script_name = if dataset == "all" {
+        "download_alphafold_dbs.sh".to_string()
+    } else {
+        format!("download_{dataset}.sh")
+    };
+    let script = src.join(dir).join(&script_name);
+    if !script.is_file() {
+        return Err(DbErr::Custom(format!(
+            "no downloader `{script_name}` at {}; pass `all` or a db name (e.g. uniref90, pdb70, bfd)",
+            script.display()
+        )));
+    }
+    let dest = config::data_dir();
+    std::fs::create_dir_all(&dest)
+        .map_err(|error| DbErr::Custom(format!("cannot create {}: {error}", dest.display())))?;
+    println!(
+        "Downloading {} `{dataset}`: bash {} {}",
+        backend.slug(),
+        script.display(),
+        dest.display()
+    );
+    let status = std::process::Command::new("bash")
+        .arg(&script)
+        .arg(&dest)
+        .env("OPENFOLD_HOME", &src)
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to launch downloader: {error}")))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| DbErr::Custom(format!("downloader exited with status {status}")))
 }
 
 /// Report resolved config plus which backends are installed. Runs before any install (so it can

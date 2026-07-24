@@ -5,7 +5,7 @@ import pickle
 from alphafold.data import pipeline, pipeline_multimer, templates
 from alphafold.data.tools import hmmsearch, hhsearch
 
-from scripts.utils import add_data_args
+from openfold.scripts.utils import add_data_args
 
 
 def main(args):
