@@ -69,6 +69,7 @@ mod tests {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({}).to_string(),
             execution_parameters_json: json!({}).to_string(),
+            provenance_json: None,
             submitted_at: Utc::now(),
             started_at: None,
             completed_at: None,

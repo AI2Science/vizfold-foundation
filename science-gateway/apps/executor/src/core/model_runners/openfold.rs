@@ -975,6 +975,7 @@ mod tests {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json,
             execution_parameters_json,
+            provenance_json: None,
             submitted_at: Utc::now(),
             started_at: None,
             completed_at: None,

@@ -223,6 +223,10 @@ Current expectation:
 - this reset guidance is appropriate for local development
 - no production-safe migration path exists yet for carrying an older executor DB forward automatically
 
+The migration history was collapsed into a single baseline on 2026-07-23. An executor database
+created before that will not match and is not migrated forward — delete the SQLite file and let
+the executor recreate it. Seeding is existence-guarded, so the default records repopulate.
+
 ### Tests
 
 Run the Rust executor tests from `science-gateway/apps/executor`:

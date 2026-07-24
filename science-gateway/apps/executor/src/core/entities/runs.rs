@@ -13,6 +13,7 @@ pub struct Model {
     pub input_sequence: String,
     pub model_parameters_json: String,
     pub execution_parameters_json: String,
+    pub provenance_json: Option<String>,
     pub submitted_at: DateTimeUtc,
     pub started_at: Option<DateTimeUtc>,
     pub completed_at: Option<DateTimeUtc>,

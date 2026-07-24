@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbErr, Statement};
 use serde_json::json;
 
 use crate::core::{
@@ -580,5 +580,47 @@ async fn updates_run_status() -> Result<(), DbErr> {
 
     assert_eq!(updated.status, "completed");
     assert!(updated.completed_at.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn baseline_schema_creates_every_table_including_provenance() -> Result<(), DbErr> {
+    let db = test_db().await?;
+
+    let tables: Vec<String> = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "select name from sqlite_master where type='table' order by name".to_owned(),
+        ))
+        .await?
+        .iter()
+        .map(|row| row.try_get::<String>("", "name").expect("name"))
+        .collect();
+
+    for expected in [
+        "artifact_types",
+        "artifacts",
+        "execution_targets",
+        "model_backends",
+        "model_invocation_profiles",
+        "runs",
+    ] {
+        assert!(
+            tables.iter().any(|t| t == expected),
+            "missing table {expected}"
+        );
+    }
+
+    let columns: Vec<String> = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "select name from pragma_table_info('runs')".to_owned(),
+        ))
+        .await?
+        .iter()
+        .map(|row| row.try_get::<String>("", "name").expect("name"))
+        .collect();
+
+    assert!(columns.iter().any(|c| c == "provenance_json"));
     Ok(())
 }
