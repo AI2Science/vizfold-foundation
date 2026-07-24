@@ -73,11 +73,11 @@ Notes:
 
 ## Executor Development
 
-Run the Rust executor from `science-gateway/apps/executor`:
+Run the Rust executor from `science-gateway/apps/executor`. `cargo run` alone now runs the `vizfold` CLI (see below), so name the REST binary explicitly:
 
 ```bash
 cd apps/executor
-cargo run
+cargo run --bin executor
 ```
 
 The current HTTP health endpoint is available at [http://127.0.0.1:3001/health](http://127.0.0.1:3001/health).
@@ -138,85 +138,52 @@ The executor uses SQLite and SeaORM migrations.
 
 Current behavior:
 
-- Default database URL: `sqlite://data/vizfold.db?mode=rwc`
-- Database file location, when using the default URL: `science-gateway/apps/executor/data/vizfold.db`
+- Database URL resolution order (`config::database_url()`): `DATABASE_URL` env var, then `VIZFOLD_DB` (env var or install config), then `<OPENFOLD_PREFIX>/vizfold.db`, then `$XDG_DATA_HOME/vizfold/vizfold.db` (`~/.local/share/vizfold/vizfold.db` by default).
 - Parent directories are created automatically if they do not exist.
-- SeaORM migrations run automatically during executor startup.
-- Default seed records are inserted on startup if they are missing.
+- SeaORM migrations run automatically whenever the executor or CLI connects to the database.
+- Default seed records are inserted by `vizfold seed`.
 
-Create the database and apply migrations by starting the executor:
+Create the database and apply migrations:
 
 ```bash
 cd apps/executor
-cargo run
+cargo run --bin vizfold -- seed
 ```
 
-That startup path will:
+That command will:
 
 1. open or create the SQLite database file,
 2. enable SQLite foreign keys,
 3. run SeaORM migrations,
 4. seed default model backend and execution target records.
 
-To use a different SQLite file, set `DATABASE_URL` before running the executor.
+To use a different SQLite file, set `DATABASE_URL` before running the CLI.
 
 PowerShell:
 
 ```powershell
 $env:DATABASE_URL = "sqlite://data/vizfold-dev.db?mode=rwc"
-cargo run
+cargo run --bin vizfold -- seed
 ```
 
 Bash:
 
 ```bash
 export DATABASE_URL="sqlite://data/vizfold-dev.db?mode=rwc"
-cargo run
+cargo run --bin vizfold -- seed
 ```
 
-The `vizfold seed` command also opens the database and applies migrations before seeding. There is not currently a migrations-only CLI command; use either executor startup or `vizfold seed` for local development setup.
+There is not currently a migrations-only CLI command; use either `cargo run --bin executor` (REST startup) or `vizfold seed` for local development setup.
 
 ### Resetting an Existing Development Database
 
-If you already ran an earlier version of the Rust executor, you may have an older SQLite schema on disk.
-
-The most likely symptom is an error like:
+If you already ran the executor against a database from before the migrations were collapsed into a single baseline schema, the CLI/executor will fail with an actionable error naming the exact file to delete, e.g.:
 
 ```text
-no such column: model_backends.version
+this executor database predates the 2026-07-23 baseline schema; delete <path> and re-run
 ```
 
-Why this happens:
-
-- SeaORM records applied migrations in the `seaql_migrations` table.
-- If a local database already marked the original migration names as applied, SeaORM will not rerun them automatically.
-- That means an older `vizfold.db` can keep the old table shape even after the code expects the new schema.
-
-This is a Rust executor migration-state issue. It is not caused by the disconnected Next.js workbench itself. The frontend does not currently manage this SQLite database.
-
-For the current development-only setup, the safest fix is to remove the existing executor database and let the executor recreate it.
-
-If you are using the default database path:
-
-PowerShell:
-
-```powershell
-Remove-Item .\apps\executor\data\vizfold.db
-cd .\apps\executor
-cargo run
-```
-
-Bash:
-
-```bash
-rm ./apps/executor/data/vizfold.db
-cd ./apps/executor
-cargo run
-```
-
-If you set a custom `DATABASE_URL`, delete the SQLite file referenced by that URL instead, then start the executor again.
-
-After reset, executor startup will recreate the DB, apply the current SeaORM migrations, and seed the default records again.
+If you want to find the file yourself instead of waiting for that error, it is whatever `DATABASE_URL` → `VIZFOLD_DB` → `<OPENFOLD_PREFIX>/vizfold.db` → `$XDG_DATA_HOME/vizfold/vizfold.db` resolves to (see above) -- not a fixed `apps/executor/data/vizfold.db` path.
 
 Current expectation:
 

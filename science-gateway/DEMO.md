@@ -64,36 +64,21 @@ Expected on a GPU machine:
 True
 ```
 
-## 3. Useful environment variable overrides
+## 3. Useful queue-run flags
 
-Most users only need `VIZFOLD_OPENFOLD_DATA_DIR`.
-
-Optional overrides:
+Every OpenFold-specific input is a `queue-run openfold` flag, not an environment variable -- see the full command in section 4. The one environment override most users need is the data directory, consulted when `--data-dir` is omitted:
 
 ```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="/path/to/vizfold_data"
-export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
-export VIZFOLD_OPENFOLD_INPUT_ID="1UBQ_1"
-export VIZFOLD_OPENFOLD_FASTA_DIR="/path/to/fasta_dir"
-export VIZFOLD_OPENFOLD_ALIGNMENT_DIR="/path/to/alignments"
-export VIZFOLD_OPENFOLD_OUTPUT_LOCATION="/path/to/output-root"
-export VIZFOLD_OPENFOLD_RESIDUE_IDX="1"
-export VIZFOLD_OPENFOLD_DEMO_ATTN="true"
+export OPENFOLD_DATA_DIR="/path/to/vizfold_data"
 ```
 
-If you override `VIZFOLD_OPENFOLD_INPUT_ID`, make sure the FASTA header and precomputed alignment directory match. For example, with:
-
-```bash
-export VIZFOLD_OPENFOLD_INPUT_ID="1UBQ_1"
-```
-
-the FASTA header should resolve to `1UBQ_1`, and precomputed alignments should exist at:
+If you pass `--input-id`, make sure the FASTA header and precomputed alignment directory match. For example, with `--input-id 1UBQ_1`, the FASTA header should resolve to `1UBQ_1`, and precomputed alignments should exist at:
 
 ```text
 alignment_dir/1UBQ_1
 ```
 
-`VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is the base output location. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
+The output location is not a per-run flag: it comes from the seeded `local-openfold` invocation profile. The workflow resolves the run workspace as `<output_location>/<run.id>`, passes it to OpenFold as `--output_dir`, and derives attention output under `<output_location>/<run.id>/attention`.
 
 ## 4. CLI workflow
 
@@ -219,7 +204,7 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 Set:
 
 ```bash
-export VIZFOLD_OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
+export OPENFOLD_DATA_DIR="$(realpath ../../../../vizfold_data)"
 ```
 
 from:

@@ -56,35 +56,21 @@ cd <workspace>
 unzip vizfold_data.zip
 ```
 
-## 5. Optional environment variable overrides
+## 5. Useful queue-run flags
 
-Most users only need `VIZFOLD_OPENFOLD_DATA_DIR`.
-
-Useful overrides:
+Every OpenFold-specific input (input ID, FASTA/alignment directories, model device, residue index, `--demo-attn`) is a `queue-run openfold` flag -- see DEMO.md for the full command. The one environment override most users need is the data directory, consulted when `--data-dir` is omitted:
 
 ```bash
-export VIZFOLD_OPENFOLD_INPUT_ID="6KWC_1"
-export VIZFOLD_OPENFOLD_FASTA_DIR="/path/to/fasta_dir"
-export VIZFOLD_OPENFOLD_ALIGNMENT_DIR="/path/to/alignments"
-export VIZFOLD_OPENFOLD_OUTPUT_LOCATION="/path/to/output-root"
-export VIZFOLD_OPENFOLD_RESIDUE_IDX="1"
-export VIZFOLD_OPENFOLD_DEMO_ATTN="true"
-export VIZFOLD_OPENFOLD_MODEL_DEVICE="cuda:0"
+export OPENFOLD_DATA_DIR="/path/to/vizfold_data"
 ```
 
-If overriding `VIZFOLD_OPENFOLD_INPUT_ID`, make sure the FASTA header and precomputed alignment directory match. For example, with:
-
-```bash
-export VIZFOLD_OPENFOLD_INPUT_ID="6KWC_1"
-```
-
-the FASTA header should resolve to `6KWC_1`, and precomputed alignments should exist at:
+If you pass `--input-id`, make sure the FASTA header and precomputed alignment directory match. For example, with `--input-id 6KWC_1`, the FASTA header should resolve to `6KWC_1`, and precomputed alignments should exist at:
 
 ```text
 <alignment_dir>/6KWC_1
 ```
 
-`VIZFOLD_OPENFOLD_OUTPUT_LOCATION` is written to `ModelInvocationProfile.config_json.output_location`. The run workspace is `<output_location>/<run.id>`; OpenFold receives it as `--output_dir`, and attention output is derived under `<output_location>/<run.id>/attention`.
+The output location is not a per-run flag: it is written to `ModelInvocationProfile.config_json.output_location` by `vizfold seed`. The run workspace is `<output_location>/<run.id>`; OpenFold receives it as `--output_dir`, and attention output is derived under `<output_location>/<run.id>/attention`.
 
 ## 6. Notes
 
