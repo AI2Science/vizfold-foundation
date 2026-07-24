@@ -143,8 +143,9 @@ unrelaxed PDBs, `timings.json`) and, with `--demo-attn`, `attention/`.
 
 ## 4. Register artifacts
 
-Record the produced directories against the run so the workbench and other tools can find them.
-The first call registers; a second call is idempotent and reports them as already present.
+`execute-run` already did this — a completed run whose outputs were never registered is invisible
+to the workbench, so registration rides along with execution. The command remains for re-running it
+against a run whose outputs appeared later; it is idempotent and reports what is already present.
 
 ```bash
 vizfold register-artifacts 1

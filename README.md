@@ -175,23 +175,40 @@ init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, 
 
 ## Commands
 
-`vizfold <command>`. After a backend is installed, the fold lifecycle is: `seed` the executor
-records once, then `queue-run` → `execute-run` → `register-artifacts` → `show run` for each
-fold; `serve` opens the dashboard over the results. `vizfold <command> --help` details any one.
+`vizfold <command>`. After a backend is installed, folding a bundled example is one command —
+`execute-run <example-id>` queues it, runs it, and registers its outputs. For a sequence of your
+own, `queue-run` first and hand `execute-run` the run id it prints. `serve` opens the dashboard
+over the results. `vizfold <command> --help` details any one.
 
 ```text
 install                  Install a model backend (openfold or esmfold) on this machine
 download                 Download a backend's data (OpenFold AlphaFold2 databases/params)
 status                   Show resolved config and which backends are installed
 uninstall                Remove everything the install generated
-seed                     Seed the default executor records
+seed                     Seed the default executor records (the submit path does this for you)
 queue-run                Queue a run for a backend (queue-run openfold|esmfold ...)
-execute-run <id>         Execute a queued run
-register-artifacts <id>  Register known artifacts for a completed run
-list                     List executor records (list models|targets|profiles|runs)
+execute-run <target>     Fold a bundled example, or execute a queued run by id
+register-artifacts <id>  Re-register a run's artifacts (execute-run already does)
+list                     List records (list examples|models|targets|profiles|runs)
 show                     Show one executor record (show run <id>)
 serve                    Start the workbench dashboard
 ```
+
+`vizfold list examples` shows what folds without an MSA search — the bundled monomers whose
+alignments are precomputed:
+
+```text
+ID      RESIDUES  DESCRIPTION
+------  --------  -------------------------------------
+1G1J_1  43        NON-STRUCTURAL GLYCOPROTEIN NSP4
+1UBQ_1  76        UBIQUITIN
+1STM_1  157       SATELLITE PANICUM MOSAIC VIRUS
+6KWC_1  191
+2OMF_1  340       MATRIX PORIN OUTER MEMBRANE PROTEIN F
+```
+
+The dashboard drives the same path: pick one of these in **Fold a protein** and it queues,
+executes, and registers the run for you.
 
 For a full end-to-end walkthrough on a cluster — queue a sequence, fold it on a GPU, register
 and view the outputs, with real commands and results — see [DEMO.md](DEMO.md).

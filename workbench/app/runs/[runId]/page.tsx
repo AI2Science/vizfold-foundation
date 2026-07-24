@@ -5,6 +5,7 @@ import path from "node:path";
 import { readdirSync } from "node:fs";
 import { getRun, listArtifacts, type ArtifactRow } from "@/lib/db";
 import StructureViewer from "@/app/StructureViewer";
+import Poller from "@/app/Poller";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,7 @@ export default async function RunPage({
 
   return (
     <main className="page-shell">
+      <Poller statuses={[run.status]} />
       <section className="hero-card">
         <div className="hero-copy">
           <p className="eyebrow">

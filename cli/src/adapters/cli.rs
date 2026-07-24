@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
-    config, db,
+    config, db, examples,
     entities::{
         execution_targets as execution_target_entity, model_backends as model_backend_entity,
         model_invocation_profiles as model_invocation_profile_entity,
@@ -47,8 +47,8 @@ enum Command {
     Show(ShowArgs),
     /// Queue a run for a supported model backend.
     QueueRun(QueueRunArgs),
-    /// Execute a queued run.
-    ExecuteRun { run_id: i32 },
+    /// Execute a queued run, or fold a bundled example in one step.
+    ExecuteRun(ExecuteRunArgs),
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
 }
@@ -139,8 +139,28 @@ struct ListArgs {
     resource: ListResource,
 }
 
+#[derive(Debug, Args)]
+struct ExecuteRunArgs {
+    /// A queued run's id, or a bundled example to queue and fold in one step
+    /// (`vizfold list examples`).
+    target: String,
+    /// Dump per-layer, per-head attention maps. Applies when queueing an example; an
+    /// already-queued run keeps whatever it was queued with.
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    attn: bool,
+    /// Print only the run as JSON, for tools driving the CLI.
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Debug, Subcommand)]
 enum ListResource {
+    /// List the bundled examples that can fold without an MSA search.
+    Examples {
+        /// Emit JSON including each sequence, for tools driving the CLI.
+        #[arg(long)]
+        json: bool,
+    },
     /// List model backends.
     Models,
     /// List execution targets.
@@ -214,7 +234,7 @@ struct EsmfoldQueueArgs {
     structure_traces: bool,
 }
 
-#[derive(Clone, Debug, Args)]
+#[derive(Clone, Debug, PartialEq, Eq, Args)]
 struct OpenfoldQueueArgs {
     #[arg(long)]
     input_id: String,
@@ -247,6 +267,27 @@ struct OpenfoldQueueArgs {
     /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
+}
+
+impl OpenfoldQueueArgs {
+    /// A bundled example queued with the same defaults clap applies to `queue-run openfold`, which
+    /// `queue_run_openfold_defaults_match_for_example` pins so the two cannot drift.
+    fn for_example(example: &examples::Example, attn: bool) -> Self {
+        Self {
+            input_id: example.id.clone(),
+            input_sequence: example.sequence.clone(),
+            demo_attn: attn,
+            fasta_dir: None,
+            data_dir: None,
+            alignment_dir: None,
+            model_device: None,
+            cpus: default_cpus(),
+            residue_idx: 1,
+            save_outputs: true,
+            num_recycles_save: 1,
+            use_precomputed_alignments: true,
+        }
+    }
 }
 
 /// No allocation held but a GPU partition configured means the fold will be srun'd onto a
@@ -316,6 +357,9 @@ pub async fn run() -> Result<(), DbErr> {
         Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
         Command::Serve(args) => return run_serve(args),
+        Command::List(ListArgs {
+            resource: ListResource::Examples { json },
+        }) => return list_examples(json),
         _ => {}
     }
 
@@ -330,6 +374,7 @@ pub async fn run() -> Result<(), DbErr> {
             ListResource::Targets => list_targets(&database).await?,
             ListResource::Profiles => list_profiles(&database).await?,
             ListResource::Runs { status } => list_runs(&database, status.as_deref()).await?,
+            ListResource::Examples { .. } => unreachable!("handled before DB connect"),
         },
         Command::Show(show) => match show.resource {
             ShowResource::Run { run_id } => show_run(&database, run_id).await?,
@@ -338,7 +383,7 @@ pub async fn run() -> Result<(), DbErr> {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
             QueueRunModel::Esmfold(args) => queue_esmfold_run(&database, args).await?,
         },
-        Command::ExecuteRun { run_id } => execute(&database, run_id).await?,
+        Command::ExecuteRun(args) => run_execute(&database, args).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
         Command::Install(_)
         | Command::Download(_)
@@ -661,12 +706,14 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
         }
     }
 
+    let node_bin = ensure_node()?;
+
     let node_modules = workbench.join("node_modules");
     let empty =
         std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
     if empty {
         println!("Installing workbench dependencies (npm install)...");
-        run_npm(&workbench, &["install"])?;
+        run_npm(&workbench, &node_bin, &["install"])?;
     }
 
     let port = args.port.unwrap_or(3000);
@@ -676,7 +723,7 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     if args.port.is_some() {
         npm_args.extend(["--", "--port", &port_arg]);
     }
-    run_npm(&workbench, &npm_args)
+    run_npm(&workbench, &node_bin, &npm_args)
 }
 
 /// Directory the dashboard runs from. A cluster home is inode-quota-capped NFS, so on a real
@@ -725,19 +772,89 @@ fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<()> {
     Ok(())
 }
 
-fn run_npm(dir: &Path, args: &[&str]) -> Result<(), DbErr> {
-    let mut command = std::process::Command::new("npm");
+/// Node for the dashboard, in a micromamba env of its own. Clusters ship none -- Delta has no
+/// `node`, no `npm`, and no nodejs module -- and the workbench needs >=22.13 for `node:sqlite`.
+/// Kept out of every backend env so the dashboard works before a backend is installed. Returns the
+/// bin directory to put in front of PATH.
+fn ensure_node() -> Result<PathBuf, DbErr> {
+    let env_dir = config::prefix().join("mamba/envs/vizfold-web");
+    let bin = env_dir.join("bin");
+    if bin.join("node").is_file() {
+        return Ok(bin);
+    }
+    let micromamba = ensure_micromamba()?;
+    println!("Provisioning Node (first run only)...");
+    // --no-rc so a user ~/.condarc envs_dirs/channels can't hijack it, as the backend installs do.
+    let status = std::process::Command::new(&micromamba)
+        .args(["create", "-y", "--no-rc", "-c", "conda-forge", "nodejs>=22.13", "-p"])
+        .arg(&env_dir)
+        .env("MAMBA_ROOT_PREFIX", config::prefix().join("mamba"))
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to launch micromamba: {error}")))?;
+    status
+        .success()
+        .then_some(bin)
+        .ok_or_else(|| DbErr::Custom(format!("provisioning Node exited with status {status}")))
+}
+
+/// The micromamba a backend install drops at `<prefix>/bin`, fetched the same way
+/// `backends/openfold/install/setup.sh` fetches it when no backend has been installed yet.
+fn ensure_micromamba() -> Result<PathBuf, DbErr> {
+    let prefix = config::prefix();
+    let micromamba = prefix.join("bin/micromamba");
+    if micromamba.is_file() {
+        return Ok(micromamba);
+    }
+    let arch = match std::env::consts::ARCH {
+        "aarch64" | "arm64" => "linux-aarch64",
+        _ => "linux-64",
+    };
+    std::fs::create_dir_all(prefix.join("bin")).map_err(|error| {
+        DbErr::Custom(format!(
+            "failed to create '{}/bin': {error}",
+            prefix.display()
+        ))
+    })?;
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "curl -Ls 'https://micro.mamba.pm/api/micromamba/{arch}/latest' | tar -xj -C '{}' bin/micromamba",
+            prefix.display()
+        ))
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to fetch micromamba: {error}")))?;
+    status
+        .success()
+        .then_some(micromamba)
+        .ok_or_else(|| DbErr::Custom(format!("fetching micromamba exited with status {status}")))
+}
+
+fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
+    let mut command = std::process::Command::new(node_bin.join("npm"));
     command.current_dir(dir).args(args);
+    // npm's shebang resolves `node` off PATH, and `next` spawns node for the dev server, so the
+    // provisioned env has to lead PATH -- naming the npm binary by path is not enough on its own.
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let dirs = std::iter::once(node_bin.to_path_buf()).chain(std::env::split_paths(&path));
+    command.env(
+        "PATH",
+        std::env::join_paths(dirs)
+            .map_err(|error| DbErr::Custom(format!("failed to build PATH: {error}")))?,
+    );
+    // The dashboard shells out to this same binary to list examples and queue runs, and drops each
+    // background fold's log under the prefix.
+    if let Ok(binary) = std::env::current_exe() {
+        command.env("VIZFOLD_BIN", binary);
+    }
+    command.env("OPENFOLD_PREFIX", config::prefix());
     // The dashboard reads the sqlite file directly; hand it the plain path (database_url() carries
     // a sqlite://...?mode=rwc wrapper that node:sqlite can't open).
     if let Some(database) = config::database_path() {
         command.env("VIZFOLD_DB", database);
     }
-    let status = command.status().map_err(|error| {
-        DbErr::Custom(format!(
-            "failed to run npm (is Node.js installed and on PATH?): {error}"
-        ))
-    })?;
+    let status = command
+        .status()
+        .map_err(|error| DbErr::Custom(format!("failed to run npm: {error}")))?;
     status.success().then_some(()).ok_or_else(|| {
         DbErr::Custom(format!(
             "npm {} exited with status {status}",
@@ -807,7 +924,12 @@ async fn register_artifacts(
     Ok(())
 }
 
-async fn execute(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result<(), DbErr> {
+/// The execution itself, with its preflight and command output. `run_execute` owns the queueing
+/// and the registration around it.
+async fn report_execution(
+    database: &sea_orm::DatabaseConnection,
+    run_id: i32,
+) -> Result<(), DbErr> {
     println!("Executing run {run_id}");
     let outcome = execute_run(database, run_id, &LocalCommandRunner).await?;
 
@@ -855,10 +977,149 @@ fn preflight_status_label(status: PreflightStatus) -> &'static str {
     }
 }
 
+/// The bundled examples. Filesystem-only, so it runs without a database -- the dashboard calls
+/// this on every page render and should not pay for a connect and migrate to draw a dropdown.
+fn list_examples(json: bool) -> Result<(), DbErr> {
+    let found = examples::scan_default();
+    if json {
+        println!(
+            "{}",
+            serde_json::Value::Array(
+                found
+                    .iter()
+                    .map(|example| json!({
+                        "id": example.id,
+                        "residues": example.residues,
+                        "description": example.description,
+                        "sequence": example.sequence,
+                    }))
+                    .collect()
+            )
+        );
+        return Ok(());
+    }
+    if found.is_empty() {
+        println!(
+            "No examples under {}. Re-run `vizfold install openfold`.",
+            examples::monomer_dir().display()
+        );
+        return Ok(());
+    }
+    print_table(
+        &["ID", "RESIDUES", "DESCRIPTION"],
+        found
+            .iter()
+            .map(|example| {
+                vec![
+                    example.id.clone(),
+                    example.residues.to_string(),
+                    example.description.clone(),
+                ]
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
+/// Execute a run -- either one already queued, by id, or a bundled example, which is queued first.
+/// Folding an example *is* executing a run, so it is one verb rather than two. Artifacts are
+/// registered on the way out: a completed run whose outputs were never registered is invisible to
+/// the dashboard, and registration is idempotent and skips directories that do not exist.
+async fn run_execute(
+    database: &sea_orm::DatabaseConnection,
+    args: ExecuteRunArgs,
+) -> Result<(), DbErr> {
+    let run_id = match args.target.parse::<i32>() {
+        Ok(run_id) => run_id,
+        Err(_) => {
+            let example = examples::find(&args.target).ok_or_else(|| unknown_target(&args.target))?;
+            let run =
+                submit_openfold_run(database, OpenfoldQueueArgs::for_example(&example, args.attn))
+                    .await?;
+            if !args.json {
+                println!(
+                    "Queued OpenFold run {} ({}, {} residues)\n",
+                    run.id, example.id, example.residues
+                );
+            }
+            run.id
+        }
+    };
+
+    if args.json {
+        execute_run(database, run_id, &LocalCommandRunner).await?;
+    } else {
+        report_execution(database, run_id).await?;
+        println!();
+    }
+    register_known_openfold_artifacts(database, run_id).await?;
+
+    let run = runs::get_run_with_artifacts(database, run_id)
+        .await?
+        .map(|result| result.run)
+        .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
+    let elapsed = run
+        .started_at
+        .zip(run.completed_at)
+        .map(|(started, completed)| (completed - started).num_seconds());
+
+    if args.json {
+        println!(
+            "{}",
+            json!({ "run_id": run.id, "status": run.status, "elapsed_s": elapsed })
+        );
+    } else if run.status == "completed" {
+        let took = elapsed.map_or(String::new(), |seconds| format!(" in {seconds}s"));
+        println!("Run {} completed{took}. View it with: vizfold serve", run.id);
+    } else {
+        println!("Run {} finished with status: {}", run.id, run.status);
+        if let Some(message) = run.error_message {
+            println!("{message}");
+        }
+    }
+    Ok(())
+}
+
+/// A target that is neither a run id nor a bundled example.
+fn unknown_target(target: &str) -> DbErr {
+    let available: Vec<String> = examples::scan_default()
+        .into_iter()
+        .map(|example| example.id)
+        .collect();
+    DbErr::Custom(if available.is_empty() {
+        format!(
+            "'{target}' is not a run id, and no bundled examples were found under {}; re-run `vizfold install openfold`",
+            examples::monomer_dir().display()
+        )
+    } else {
+        format!(
+            "'{target}' is not a run id or a bundled example; available examples: {}",
+            available.join(", ")
+        )
+    })
+}
+
 async fn queue_openfold_run(
     database: &sea_orm::DatabaseConnection,
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
+    let run = submit_openfold_run(database, args).await?;
+    println!("Queued OpenFold run {}", run.id);
+    println!("status: {}", run.status);
+    println!("input_id: {}", run.input_id);
+    println!("\nNext:");
+    println!("  vizfold execute-run {}", run.id);
+    Ok(())
+}
+
+/// The queue step without its reporting, so `fold` can chain it into execute and register.
+async fn submit_openfold_run(
+    database: &sea_orm::DatabaseConnection,
+    args: OpenfoldQueueArgs,
+) -> Result<crate::core::entities::runs::Model, DbErr> {
+    // Submitting a run *needs* the catalog, so seed here rather than making every caller -- the
+    // CLI, the dashboard -- remember to. Existence-guarded, so repeating it is free.
+    seed_defaults(database).await?;
     let backend = model_backend_entity::Entity::find()
         .filter(model_backend_entity::Column::Slug.eq("openfold"))
         .one(database)
@@ -959,18 +1220,14 @@ async fn queue_openfold_run(
     )
     .await?;
 
-    println!("Queued OpenFold run {}", run.id);
-    println!("status: {}", run.status);
-    println!("input_id: {}", run.input_id);
-    println!("\nNext:");
-    println!("  vizfold execute-run {}", run.id);
-    Ok(())
+    Ok(run)
 }
 
 async fn queue_esmfold_run(
     database: &sea_orm::DatabaseConnection,
     args: EsmfoldQueueArgs,
 ) -> Result<(), DbErr> {
+    seed_defaults(database).await?;
     let backend = model_backend_entity::Entity::find()
         .filter(model_backend_entity::Column::Slug.eq("esmfold"))
         .one(database)
@@ -1569,7 +1826,62 @@ mod tests {
         let cli = Cli::try_parse_from(["vizfold", "execute-run", "1"])
             .expect("execute-run command should parse");
 
-        assert!(matches!(cli.command, Command::ExecuteRun { run_id: 1 }));
+        assert!(matches!(
+            cli.command,
+            Command::ExecuteRun(ExecuteRunArgs {
+                ref target,
+                attn: true,
+                json: false,
+            }) if target == "1"
+        ));
+    }
+
+    /// Folding an example is executing a run, so it is the same verb -- the target is a run id or
+    /// an example id, and `run_execute` tells them apart by whether it parses as an integer.
+    #[test]
+    fn execute_run_takes_an_example_id_as_its_target() {
+        let cli = Cli::try_parse_from(["vizfold", "execute-run", "6KWC_1", "--attn=false"])
+            .expect("execute-run command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::ExecuteRun(ExecuteRunArgs {
+                ref target,
+                attn: false,
+                ..
+            }) if target == "6KWC_1"
+        ));
+    }
+
+    /// `for_example` hardcodes the defaults clap applies to `queue-run openfold`. If a default
+    /// there ever changes, this fails rather than silently queueing examples differently.
+    #[test]
+    fn queue_run_openfold_defaults_match_for_example() {
+        let cli = Cli::try_parse_from([
+            "vizfold",
+            "queue-run",
+            "openfold",
+            "--input-id",
+            "1UBQ_1",
+            "--input-sequence",
+            "MQIFVKTL",
+            "--demo-attn",
+        ])
+        .expect("queue-run command should parse");
+        let Command::QueueRun(QueueRunArgs {
+            model: QueueRunModel::Openfold(parsed),
+        }) = cli.command
+        else {
+            panic!("expected an openfold queue-run");
+        };
+
+        let example = examples::Example {
+            id: "1UBQ_1".into(),
+            residues: 8,
+            description: "UBIQUITIN".into(),
+            sequence: "MQIFVKTL".into(),
+        };
+        assert_eq!(OpenfoldQueueArgs::for_example(&example, true), parsed);
     }
 
     #[test]
