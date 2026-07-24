@@ -60,6 +60,12 @@ pnpm-debug.log*
 science-gateway/apps/executor/target/
 science-gateway/openfold-demo-output/
 
+# Dashboard symlink to run outputs, created at `vizfold serve` (see run_serve)
+science-gateway/apps/workbench/public/runs
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Windows executable artifacts
 *.exe
 *.pdb
