@@ -62,7 +62,15 @@ _, bare_metal_major, _ = get_cuda_bare_metal_version(CUDA_HOME)
 if int(bare_metal_major) >= 11:
     compute_capabilities.add((8, 0))
 
-cc_flag = ['-gencode', 'arch=compute_120,code=sm_120']
+# The install exports TORCH_CUDA_ARCH_LIST for the deployment GPUs (e.g. "7.0;8.0;8.6;9.0" for
+# A100/GH200); honor it so the kernel image matches the target device. Falls back to the set above.
+arch_list = re.findall(r'\b(\d+)\.(\d+)\b', os.environ.get('TORCH_CUDA_ARCH_LIST', ''))
+if arch_list:
+    compute_capabilities = {(int(major), int(minor)) for major, minor in arch_list}
+
+cc_flag = []
+for major, minor in sorted(compute_capabilities):
+    cc_flag.extend(['-gencode', f'arch=compute_{major}{minor},code=sm_{major}{minor}'])
 extra_cuda_flags += cc_flag
 
 if bare_metal_major != -1:

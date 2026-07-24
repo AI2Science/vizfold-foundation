@@ -6,6 +6,7 @@
   "OPENFOLD_GPU_ACCOUNT": "$ALLOC-delta-gpu",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=32G",
+  "OPENFOLD_GPU_TIME": "01:00:00",
   "OPENFOLD_MAX_CUDA": "12.8",
   "OPENFOLD_PARTITION": "cpu",
   "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"

@@ -136,7 +136,9 @@ setup::link_mirror() {
     log datasets
     for d in "$AF2"/*; do
         [ "${d##*/}" = uniclust30 ] && continue
-        ln -sfn "$d" "$DATA/"
+        # Explicit link name, not "$DATA/": GNU ln -sfn onto a real dir (empty on a cold start)
+        # errors with "cannot overwrite directory" instead of creating the link inside it.
+        ln -sfn "$d" "$DATA/${d##*/}"
     done
     ln -sfn "$AF2/params" "$OF/openfold/resources/params"
     # uniclust30_2018_08 goes in a writable canonical dir (not the read-only mirror symlink): the mirror's real set if present (single- or double-nested), else aliased from uniref30.
@@ -146,7 +148,9 @@ setup::link_mirror() {
         compgen -G "$c/uniclust30_2018_08_*" >/dev/null 2>&1 && { src=$c; break; }
     done
     if [ -n "$src" ]; then
-        ln -sfn "$src"/uniclust30_2018_08_* "$UNICLUST/"
+        # Per-file explicit link name (see the $DATA loop above): robust whether the glob matches
+        # one file or many, unlike a trailing-slash "$UNICLUST/" dest.
+        for u in "$src"/uniclust30_2018_08_*; do ln -sfn "$u" "$UNICLUST/${u##*/}"; done
     else
         for f in "$AF2"/uniref30/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]*; do
             [ -e "$f" ] || continue
