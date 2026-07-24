@@ -17,7 +17,7 @@ log() { echo "== $* (+$((SECONDS))s)"; }
 REPO=${OPENFOLD_HOME:-$REPO}
 ESM=$REPO/backends/esmfold
 PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
-ENV=${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}
+ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
 test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
 command -v python3 >/dev/null || die "python3 is required to create the ESMFold venv"
 

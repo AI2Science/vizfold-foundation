@@ -13,6 +13,12 @@ REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 OF=${OPENFOLD_DIR:-$REPO/backends/openfold}
 die() { echo "FATAL: $*" >&2; exit 1; }
 
+# Every environment the install creates lives in one base directory under a fixed vizfold-<backend>
+# name -- conda envs and the ESMFold venv alike, so one directory holds them all and nothing has to
+# be told where any of them is. Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
+vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-${OPENFOLD_PREFIX:-$HOME/openfold}/envs}"; }
+vizfold::env() { echo "$(vizfold::env_base)/vizfold-$1"; }
+
 config::file() {
     echo "${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}"
 }

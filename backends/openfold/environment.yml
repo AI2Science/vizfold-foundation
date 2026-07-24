@@ -22,9 +22,9 @@
 # if `nvidia-smi` reports a lower version than the solver picks. Note that
 # `env create` takes no extra specs, so this needs plain `create`:
 #
-#   mamba create -n openfold-env -f environment.yml 'cuda-version<=12.8'
+#   mamba create -n vizfold-openfold -f environment.yml 'cuda-version<=12.8'
 
-name: openfold-env
+name: vizfold-openfold
 channels:
   - conda-forge
   - bioconda

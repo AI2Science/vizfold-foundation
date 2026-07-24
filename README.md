@@ -117,6 +117,16 @@ exactly what you care about and nothing else:
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
+Every environment the install creates lives in one base directory under a fixed name:
+`$VIZFOLD_ENV_BASE/vizfold-<backend>`, defaulting to `<prefix>/envs`. That is
+`vizfold-openfold` and `vizfold-workbench` (conda) and `vizfold-esmfold` (a venv) — same directory,
+same shape, so nothing has to be told where any of them is. `vizfold::env` in `lib/config.sh` and
+`env_dir()` in `cli/src/core/config.rs` are the two definitions, and each names the other.
+
+Move them all with `VIZFOLD_ENV_BASE`. An install predating the env base keeps working untouched:
+it recorded absolute `OPENFOLD_ENV_PREFIX`/`ESMFOLD_ENV_PREFIX` values, and those still outrank the
+derived paths.
+
 A `<site>.json` carries every variable and templates paths off `$VAR` references, resolved
 recursively (`$VAR` against the environment first, then other keys in the same file). The site's
 `<site>.sh` discovers only the one login-specific atom the templates need — the allocation, the

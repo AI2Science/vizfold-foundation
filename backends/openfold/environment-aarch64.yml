@@ -5,7 +5,7 @@
 #   py3.13     the aarch64 flash-attn/openmm/pytorch generation is py3.13, not the x86 py3.11
 #   cuda<=12.9 setup.sh caps it (aarch64 MAX_CUDA=12.9); the 13.x pytorch build won't compile OpenFold's CUDA extension
 #   gcc<15     gcc 15's -Wtemplate-body strictness rejects torch's ATen headers (List_inl.h needs 'typename')
-name: openfold-env
+name: vizfold-openfold
 channels:
   - conda-forge
   - bioconda
