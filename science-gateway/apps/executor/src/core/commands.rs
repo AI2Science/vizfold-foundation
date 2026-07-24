@@ -210,6 +210,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_command_runner_applies_current_dir_and_env() {
+        let runner = LocalCommandRunner;
+        let dir = std::env::temp_dir();
+        #[cfg(unix)]
+        let mut spec = shell_command("pwd; printf \"$VIZFOLD_RUNNER_TEST_VAR\"");
+        #[cfg(windows)]
+        let mut spec = shell_command("cd & echo %VIZFOLD_RUNNER_TEST_VAR%");
+        spec.current_dir = Some(dir.clone());
+        spec.env
+            .insert("VIZFOLD_RUNNER_TEST_VAR".into(), "applied".into());
+
+        let output = runner.run(spec).await.expect("command should run");
+
+        let printed_dir = output.stdout.lines().next().expect("pwd line");
+        assert_eq!(
+            std::fs::canonicalize(printed_dir).expect("printed dir should exist"),
+            std::fs::canonicalize(&dir).expect("temp dir should exist")
+        );
+        assert!(output.stdout.contains("applied"));
+    }
+
+    #[tokio::test]
     async fn local_command_runner_reports_spawn_failures_clearly() {
         let runner = LocalCommandRunner;
         let spec = CommandSpec {

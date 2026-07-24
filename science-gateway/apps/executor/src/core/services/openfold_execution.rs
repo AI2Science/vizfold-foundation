@@ -15,7 +15,7 @@ use crate::core::{
 use super::runs::{self, UpdateRunStatusInput};
 
 /// Outcome of planning, preflighting, and (if preflight passed) executing an OpenFold run.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct ExecutionOutcome {
     pub report: PreflightReport,
     pub output: Option<CommandOutput>,
@@ -65,16 +65,13 @@ pub async fn execute_openfold_run(
         // wrapper so torch/openfold resolve without a manual `micromamba activate`. Gated on
         // micromamba actually being installed at the prefix (so tests/dev run the command bare).
         let prefix = config::prefix();
-        let exec_command = if prefix.join("bin/micromamba").is_file() {
-            activate_env_command(&command, &prefix, &config::openfold_env_prefix())
-        } else {
-            command.clone()
-        };
-        let exec_command = srun_command(exec_command, &config::gpu_launch_args());
-        let exec_command = CommandSpec {
-            stream: true,
-            ..exec_command
-        };
+        let exec_command = compose_exec_command(
+            &command,
+            &prefix,
+            &config::openfold_env_prefix(),
+            &config::gpu_launch_args(),
+            prefix.join("bin/micromamba").is_file(),
+        );
 
         let report = preflight_openfold(&command, &invocation_profile, &run)?;
         if report.has_failures() {
@@ -193,6 +190,27 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
     }
 }
 
+/// Composes the exec-time wrapping: env activation (if installed) inside srun (if launched),
+/// with streaming always on. Order is load-bearing -- srun must be outermost so the activation
+/// happens on the compute node it lands on, not the submit host.
+fn compose_exec_command(
+    command: &CommandSpec,
+    prefix: &Path,
+    env_prefix: &Path,
+    launch: &[String],
+    activate: bool,
+) -> CommandSpec {
+    let command = if activate {
+        activate_env_command(command, prefix, env_prefix)
+    } else {
+        command.clone()
+    };
+    CommandSpec {
+        stream: true,
+        ..srun_command(command, launch)
+    }
+}
+
 /// Prefix a command with the SLURM launcher. Applied *outside* the micromamba wrapper so the
 /// environment is activated on the compute node, not the submit host.
 fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
@@ -237,7 +255,7 @@ mod tests {
         test_support::TestLayout,
     };
 
-    use super::{activate_env_command, execute_openfold_run};
+    use super::{activate_env_command, compose_exec_command, execute_openfold_run};
 
     #[test]
     fn srun_command_wraps_the_whole_activated_command() {
@@ -300,6 +318,35 @@ mod tests {
             ]
         );
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
+    }
+
+    #[test]
+    fn compose_exec_command_wraps_srun_outside_the_activation() {
+        let command = CommandSpec {
+            program: "python3".into(),
+            args: vec!["-u".into(), "run_openfold.py".into()],
+            ..Default::default()
+        };
+
+        let composed = compose_exec_command(
+            &command,
+            &PathBuf::from("/work/of"),
+            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+            &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
+            true,
+        );
+
+        // srun outermost, wrapping the whole activation script -- not the reverse, which would
+        // activate on the submit host instead of the compute node srun lands on.
+        assert_eq!(composed.program, "srun");
+        assert_eq!(&composed.args[..2], &["-p".to_owned(), "gpu".to_owned()]);
+        assert_eq!(composed.args[2], "bash");
+        assert_eq!(composed.args[3], "-c");
+        assert_eq!(
+            &composed.args[5..],
+            &["vizfold-openfold", "python3", "-u", "run_openfold.py"]
+        );
+        assert!(composed.stream);
     }
 
     struct TestRunner {
@@ -433,6 +480,7 @@ mod tests {
             .expect("planned command");
         assert_eq!(command.program, "python3");
         assert_eq!(command.args, vec!["-u", "run_openfold.py"]);
+        assert!(command.stream, "long-running folds must stream output");
         let updated = run_entity::Entity::find_by_id(run.id)
             .one(&db)
             .await?
