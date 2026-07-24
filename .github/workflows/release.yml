@@ -25,7 +25,7 @@ jobs:
             asset: vizfold-linux-aarch64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust and the musl target
         run: |
