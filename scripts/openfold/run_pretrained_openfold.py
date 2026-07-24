@@ -540,8 +540,12 @@ if __name__ == "__main__":
     print(args)
 
     if args.jax_param_path is None and args.openfold_checkpoint_path is None:
+        # Resolve params via the installed openfold package, not cwd: the entrypoint runs from the
+        # checkout root (for examples/) while the package + its symlinked resources live under
+        # backends/openfold/openfold/.
+        import openfold
         args.jax_param_path = os.path.join(
-            "openfold", "resources", "params",
+            os.path.dirname(openfold.__file__), "resources", "params",
             "params_" + args.config_preset + ".npz"
         )
 
