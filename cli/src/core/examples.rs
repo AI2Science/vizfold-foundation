@@ -77,9 +77,9 @@ fn parse(text: &str) -> Option<Example> {
         .flat_map(str::chars)
         .filter(|c| !c.is_whitespace())
         .collect();
-    (!id.is_empty() && !sequence.is_empty()).then(|| Example {
-        id,
+    (!id.is_empty() && !sequence.is_empty()).then_some(Example {
         residues: sequence.len(),
+        id,
         description,
         sequence,
     })
