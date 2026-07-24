@@ -19,14 +19,13 @@ step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1
 setup::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
-    ENV_NAME=${OPENFOLD_ENV_NAME:-$(vizfold::env openfold)}
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
         aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
         *)             ENV_YML=$OF/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
     esac
     DATA=$PREFIX/data
-    ENV_DIR=$PREFIX/mamba/envs/$ENV_NAME
+    ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
     MM=$PREFIX/bin/micromamba
     CUTLASS=$PREFIX/cutlass
     UNICLUST=$DATA/uniclust30/uniclust30_2018_08
@@ -49,7 +48,7 @@ setup::preflight() {
     mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$OF/openfold/resources"
     hostname
     nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
-    echo "prefix=$PREFIX repo=$REPO env=$ENV_NAME max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
+    echo "prefix=$PREFIX repo=$REPO env=$ENV_DIR max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
     test -f "$OF/setup.py" || die "$REPO is not an OpenFold checkout"
 }
 
@@ -225,11 +224,11 @@ setup::fold_vars() {
 # Record resolved values, not the caller's -- a consumer shouldn't know our fallbacks.
 setup::config_save() {
     log config
-    export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX OPENFOLD_ENV_NAME=$ENV_NAME
+    export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX VIZFOLD_ENV_BASE=$(vizfold::env_base)
     export OPENFOLD_ENV_PREFIX=$CONDA_PREFIX OPENFOLD_DATA_DIR=$DATA OPENFOLD_MAX_CUDA=$MAX_CUDA
     export OPENFOLD_GPU_RESOURCES=$GPU_RES OPENFOLD_EXAMPLE=$EXAMPLE OPENFOLD_GPU_GRES=$GPU_GRES
     export VIZFOLD_DB=$PREFIX/vizfold.db
-    config::save OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_ENV_NAME OPENFOLD_ENV_PREFIX \
+    config::save OPENFOLD_HOME OPENFOLD_PREFIX VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX \
         OPENFOLD_DATA_DIR OPENFOLD_SITE OPENFOLD_AF2_ROOT OPENFOLD_MAX_CUDA \
         OPENFOLD_DRIVER_CUDA OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION \
         OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES OPENFOLD_GPU_TIME \

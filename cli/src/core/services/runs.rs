@@ -318,7 +318,7 @@ mod tests {
             r#"{"output_location":"/work/runs"}"#,
             Path::new("/opt/openfold"),
             Path::new("/opt/prefix"),
-            Path::new("/opt/prefix/mamba/envs/vizfold-openfold"),
+            Path::new("/opt/prefix/envs/vizfold-openfold"),
         );
         let value: serde_json::Value = serde_json::from_str(&snapshot).expect("valid json");
 
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(value["resolved"]["prefix"], "/opt/prefix");
         assert_eq!(
             value["resolved"]["env_prefix"],
-            "/opt/prefix/mamba/envs/vizfold-openfold"
+            "/opt/prefix/envs/vizfold-openfold"
         );
     }
 }

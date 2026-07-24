@@ -80,25 +80,33 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| openfold_home().join("data"))
 }
 
-/// Every environment the install creates is named `vizfold-<backend>`. Mirrors `vizfold::env` in
-/// `lib/config.sh`; a conda env lives under `<prefix>/mamba/envs`, a venv beside it.
-pub fn conda_env(name: &str) -> PathBuf {
-    prefix().join("mamba/envs").join(format!("vizfold-{name}"))
+/// The one directory holding every environment the install creates. Mirrors `vizfold::env_base`
+/// in `lib/config.sh`.
+pub fn env_base() -> PathBuf {
+    resolved("VIZFOLD_ENV_BASE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| prefix().join("envs"))
 }
 
-/// micromamba env prefix for local OpenFold execution (matches fold.sh's `$OPENFOLD_ENV_PREFIX`).
+/// `<env base>/vizfold-<backend>` — a fixed name per backend, conda env and venv alike, so nothing
+/// has to be told where any of them is.
+pub fn env_dir(name: &str) -> PathBuf {
+    env_base().join(format!("vizfold-{name}"))
+}
+
+/// micromamba env prefix for local OpenFold execution. `OPENFOLD_ENV_PREFIX` is honoured because
+/// installs predating the env base recorded one; fresh installs derive it.
 pub fn openfold_env_prefix() -> PathBuf {
     resolved("OPENFOLD_ENV_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(|| conda_env("openfold"))
+        .unwrap_or_else(|| env_dir("openfold"))
 }
 
-/// venv prefix for the ESMFold backend (matches `backends/esmfold/install/install.sh`'s
-/// `$ESMFOLD_ENV_PREFIX`). A venv, so it sits beside the conda envs rather than under them.
+/// venv prefix for the ESMFold backend, same story as `openfold_env_prefix`.
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(|| prefix().join("vizfold-esmfold"))
+        .unwrap_or_else(|| env_dir("esmfold"))
 }
 
 /// The install-resolved config map as sorted (key, value) string pairs, for `vizfold status`.
@@ -237,7 +245,20 @@ fn repository_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{SlurmContext, gpu_launch};
+    use super::{SlurmContext, env_base, env_dir, gpu_launch};
+
+    /// Every environment is `<base>/vizfold-<backend>` — one directory, a fixed name each. Keeps
+    /// the Rust side in step with `vizfold::env` in lib/config.sh.
+    #[test]
+    fn every_env_is_a_fixed_name_under_one_base() {
+        for backend in ["openfold", "esmfold", "workbench"] {
+            assert_eq!(
+                env_dir(backend),
+                env_base().join(format!("vizfold-{backend}"))
+            );
+        }
+        assert_eq!(env_base().file_name().unwrap(), "envs");
+    }
 
     // (name, context, partition, account, gres, resources, time, expected args)
     #[test]

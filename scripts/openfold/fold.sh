@@ -11,13 +11,13 @@ LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 
 fold::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
-    ENV_NAME=${OPENFOLD_ENV_NAME:-$(vizfold::env openfold)}
+    ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
 }
 
 # torch/DeepSpeed JIT-compile at import; a site's leaked toolchain env breaks it. Re-exec in a curated env (HOME, clean PATH, SLURM/CUDA binding, OPENFOLD_*).
 fold::reexec() {
     [ -n "${OPENFOLD_CLEAN_ENV:-}" ] && return
-    local env_prefix=${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/$ENV_NAME} clean kv
+    local env_prefix=$ENV_DIR clean kv
     clean=(HOME="$HOME" PATH="$env_prefix/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
     [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
     # JIT autotune cache: node-local, not NFS $HOME (79 s vs 8 s inference).
@@ -41,7 +41,8 @@ fold::activate() {
     local mm=$PREFIX/bin/micromamba
     [ -x "$mm" ] || die "nothing installed at $PREFIX; run install.sh first"
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
-    mamba::activate "$mm" "$ENV_NAME"
+    # By path, not name: the env lives under VIZFOLD_ENV_BASE, not $MAMBA_ROOT_PREFIX/envs.
+    mamba::activate "$mm" "$ENV_DIR"
 }
 
 fold::preflight() {
