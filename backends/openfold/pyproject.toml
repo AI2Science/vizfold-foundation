@@ -24,10 +24,11 @@ classifiers = [
 Homepage = "https://github.com/aqlaboratory/openfold"
 
 [tool.setuptools.packages.find]
-# namespaces defaults to true, which would sweep up every sibling directory here
-# (docs, install, viz, imgs...) as a top-level package.
+# namespaces defaults to true, which would sweep up sibling dirs (install, imgs...) as
+# top-level packages. namespaces=false keeps only dirs with __init__.py: the `openfold`
+# package (including its `openfold.scripts` subpackage) and `tests` (excluded below).
 namespaces = false
-exclude = ["tests*", "scripts*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 openfold = ["utils/kernel/csrc/*"]

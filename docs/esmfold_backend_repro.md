@@ -29,7 +29,7 @@ pip install -e ./backends/esmfold
 Run:
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -52,7 +52,7 @@ Successful execution confirms:
 Run:
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \
@@ -129,7 +129,7 @@ source .venv/bin/activate
 Run structure inference:
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -139,7 +139,7 @@ python backends/esmfold/run_pretrained_esmf.py \
 Run trace extraction:
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \

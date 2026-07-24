@@ -21,9 +21,6 @@ import subprocess
 import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from scripts.utils import get_nvidia_cc
-
 
 version_dependent_macros = [
     '-DVERSION_GE_1_1',
@@ -54,40 +51,18 @@ def get_cuda_bare_metal_version(cuda_dir):
         
         return raw_output, bare_metal_major, bare_metal_minor
 
-compute_capabilities = set([
+compute_capabilities = {
     (5, 2), # Titan X
     (6, 1), # GeForce 1000-series
     (9, 0), # Hopper
-])
+}
 
 compute_capabilities.add((7, 0))
 _, bare_metal_major, _ = get_cuda_bare_metal_version(CUDA_HOME)
 if int(bare_metal_major) >= 11:
     compute_capabilities.add((8, 0))
 
-# TORCH_CUDA_ARCH_LIST is torch's standard override. Honour it so a build can
-# target the deployment GPUs instead of every capability, which matters when
-# building on a node with no device to probe.
-# Only major.minor entries are understood; torch's named aliases ("Ampere",
-# "All") and suffixed arches ("9.0a") are left to its own fallback.
-arch_list = re.findall(
-    r'\b(\d+)\.(\d+)\b', os.environ.get('TORCH_CUDA_ARCH_LIST', '')
-)
-if arch_list:
-    compute_capabilities = {(int(major), int(minor)) for major, minor in arch_list}
-else:
-    compute_capability, _ = get_nvidia_cc()
-    if compute_capability is not None:
-        compute_capabilities = set([compute_capability])
-
-cc_flag = []
-for major, minor in list(compute_capabilities):
-    cc_flag.extend([
-        '-gencode',
-        f'arch=compute_{major}{minor},code=sm_{major}{minor}',
-    ])
-
-cc_flag = ['-gencode','arch=compute_120,code=sm_120']
+cc_flag = ['-gencode', 'arch=compute_120,code=sm_120']
 extra_cuda_flags += cc_flag
 
 if bare_metal_major != -1:

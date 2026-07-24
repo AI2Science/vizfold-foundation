@@ -5,11 +5,11 @@
 [ -n "${CONFIG_SH:-}" ] && return 0
 CONFIG_SH=1
 
-# The checkout root every script shares. OPENFOLD_HOME wins (exported by `vizfold install`);
-# otherwise it is three levels up from this lib at backends/openfold/install/config.sh.
-REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
-# The OpenFold backend subtree. Backend-local files (setup.py, environment.yml, fold.sh, sites/)
-# live here; shared demo assets (examples/) stay at the checkout root.
+# The checkout root every backend shares. OPENFOLD_HOME wins (exported by `vizfold install`);
+# otherwise it is one level up from this neutral lib at lib/config.sh.
+REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+# The OpenFold backend subtree, for OpenFold's own scripts (esmfold never reads OF). Backend-local
+# files (setup.py, environment.yml, install/) live here; shared demo assets (examples/) at the root.
 OF=${OPENFOLD_DIR:-$REPO/backends/openfold}
 die() { echo "FATAL: $*" >&2; exit 1; }
 

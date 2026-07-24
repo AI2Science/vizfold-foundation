@@ -38,7 +38,7 @@ pip install ./backends/esmfold
 **Structure only (fast):**
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode none
@@ -47,7 +47,7 @@ python backends/esmfold/run_pretrained_esmf.py \
 **Structure + attention + activations:**
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --model facebook/esmfold_v1 \
@@ -60,7 +60,7 @@ python backends/esmfold/run_pretrained_esmf.py \
 **Limit layers/heads (saves memory and disk):**
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention \
@@ -71,7 +71,7 @@ python backends/esmfold/run_pretrained_esmf.py \
 **Structure + IPA attention + per-recycle backbone (structure module traces):**
 
 ```bash
-python backends/esmfold/run_pretrained_esmf.py \
+python scripts/esmfold/run_pretrained_esmf.py \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention+activations \

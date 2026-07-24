@@ -6,8 +6,8 @@ set -euo pipefail
 # sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under the
 # backend subtree. The BASH_SOURCE fallback covers a direct local run (install/ is a sibling here).
 # config.sh sets REPO, OF, die.
-LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install}
-. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/install}/config.sh"
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
+. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../lib}/config.sh"
 
 fold::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
@@ -55,7 +55,7 @@ fold::preflight() {
 fold::run() {
     cd "$REPO"
     set -x
-    python3 -u "$OF/run_pretrained_openfold.py" \
+    python3 -u "$REPO/scripts/openfold/run_pretrained_openfold.py" \
         "$FASTA_DIR" \
         "$DATA/pdb_mmcif/mmcif_files" \
         --use_precomputed_alignments "$ALIGNMENT_DIR" \

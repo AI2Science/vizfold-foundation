@@ -100,7 +100,7 @@ async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
             .map_err(|error| DbErr::Custom(error.to_string()))?,
         json!({
             "program": "python3",
-            "script": "backends/openfold/run_pretrained_openfold.py",
+            "script": "scripts/openfold/run_pretrained_openfold.py",
             "working_dir": config::openfold_home(),
             "output_location": config::prefix().join("runs"),
         })
@@ -139,7 +139,7 @@ async fn seeds_local_esmfold_target_and_profile() -> Result<(), DbErr> {
             .map_err(|error| DbErr::Custom(error.to_string()))?,
         json!({
             "program": "python3",
-            "script": "backends/esmfold/run_pretrained_esmf.py",
+            "script": "scripts/esmfold/run_pretrained_esmf.py",
             "working_dir": config::openfold_home(),
             "output_location": config::prefix().join("runs"),
         })

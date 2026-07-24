@@ -9,9 +9,9 @@ The `vizfold` CLI is the platform; a model backend plugs in underneath it. Insta
 `vizfold install <backend>` — **OpenFold** (the full cluster install: micromamba env, CUDA
 extension build, AlphaFold2 databases) or **ESMFold** (a lightweight venv with PyTorch +
 Transformers, weights pulled from HuggingFace at run time). `vizfold status` shows the resolved
-config and which backends are installed. Each backend is a self-contained project under
-`backends/<name>/` (its installer, environment, and Python package), so others (openfold3, boltz)
-slot in the same way as they land.
+config and which backends are installed. Each backend is a pip/conda-installable package under
+`backends/<name>/` with its own environment and installer, so others (openfold3, boltz) slot in
+the same way as they land.
 
 ---
 
@@ -178,10 +178,11 @@ The repository is laid out as:
 
 - `cli/` — the Rust `vizfold` CLI and executor core (SeaORM entities, migrations, services, and seed). This is the primary active implementation path.
 - `workbench/` — a Next.js dashboard that reads the executor's SQLite directly (read-only) and renders each run's outputs: an interactive 3D structure viewer for predicted PDBs plus the attention-map images.
-- `backends/<name>/` — one self-contained project per model backend, each with its own installer, environment, run entrypoint, and pip-installable Python package:
-  - `backends/openfold/` — the OpenFold model package + `scripts/`, its cluster installer (`install/`), `environment*.yml`, `run_pretrained_openfold.py`, the GPU fold runner (`fold.sh`), and the attention-visualization demo (`viz/`). Installs as `import openfold`.
-  - `backends/esmfold/` — the ESMFold package, `run_pretrained_esmf.py`, and a self-contained venv installer (`install.sh`). Installs as `import esmfold`.
-- `docs/` — architecture notes and backlog.
+- `backends/<name>/` — one pip/conda-installable package per model backend: its Python package, packaging metadata, environment spec, and env-provisioning installer (`install/`). `backends/openfold/` installs as `import openfold` (conda env, CUDA extension; its dataprep/training tooling is the installed `openfold.scripts` subpackage); `backends/esmfold/` as `import esmfold` (plain venv).
+- `downloaders/<name>/` — data-download scripts. `downloaders/openfold/` holds the AlphaFold2 database/params fetchers (`vizfold download openfold`); ESMFold has none — it pulls weights from HuggingFace at run time.
+- `scripts/<name>/` — execution entrypoints (`run_pretrained_*.py`, `fold.sh`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
+- `lib/` — the backend-neutral shared install library (`config.sh`), owned by no backend.
+- `docs/` — architecture notes and backlog. `examples/` — demo inputs, attention-viz utilities, and notebooks.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from source.
 

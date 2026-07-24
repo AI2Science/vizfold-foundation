@@ -60,8 +60,8 @@ from openfold.utils.trace_utils import (
     trace_model_,
 )
 
-from scripts.precompute_embeddings import EmbeddingGenerator
-from scripts.utils import add_data_args
+from openfold.scripts.precompute_embeddings import EmbeddingGenerator
+from openfold.scripts.utils import add_data_args
 
 
 TRACING_INTERVAL = 50

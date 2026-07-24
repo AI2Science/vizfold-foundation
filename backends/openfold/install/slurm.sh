@@ -5,7 +5,8 @@
 [ -n "${SLURM_SH:-}" ] && return 0
 SLURM_SH=1
 
-. "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, OF, die
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
+. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"   # REPO, OF, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
