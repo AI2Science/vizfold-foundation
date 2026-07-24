@@ -4,7 +4,24 @@ The ESMFold backend runs [ESMFold](https://github.com/facebookresearch/esm) via 
 
 ## Install
 
-**Option A – conda (recommended)**  
+**Option A – `vizfold install` (recommended)**  
+The executor CLI provisions a self-contained venv (PyTorch + Transformers) and records it in
+`~/.config/vizfold/vizfold.json`:
+
+```bash
+vizfold install esmfold
+vizfold status          # shows resolved config + which backends are installed
+```
+
+Override the torch wheel when a specific CUDA build is needed:
+
+```bash
+ESMFOLD_TORCH_SPEC=torch \
+ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  vizfold install esmfold
+```
+
+**Option B – conda**  
 Use `environment-mac.yml` (Mac) or `environment.yml` (Linux):
 
 ```bash
@@ -12,7 +29,7 @@ conda env create -f environment-mac.yml   # or environment.yml on Linux
 conda activate openfold-env
 ```
 
-**Option B – pip (after PyTorch is installed)**  
+**Option C – pip (after PyTorch is installed)**  
 From repo root:
 
 ```bash

@@ -222,6 +222,92 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?;
     }
 
+    seed_esmfold(db).await?;
+
+    Ok(())
+}
+
+/// ESMFold catalog rows: the backend's CLI schema, a local execution target, and a
+/// local_subprocess profile pointing at `run_pretrained_esmf.py`. Single-sequence, so no
+/// AlphaFold2 database schema -- just the model/trace flags and a `--device`.
+async fn seed_esmfold(db: &DatabaseConnection) -> Result<(), DbErr> {
+    if model_backends::Entity::find()
+        .filter(model_backends::Column::Slug.eq("esmfold"))
+        .one(db)
+        .await?
+        .is_none()
+    {
+        services::model_backends::register_model_backend(
+            db,
+            services::model_backends::RegisterModelBackendInput {
+                slug: "esmfold".into(),
+                label: "ESMFold".into(),
+                version: Some("esmfold_v1".into()),
+                description: Some("ESMFold backend (HuggingFace EsmForProteinFolding).".into()),
+                artifact_capabilities_json:
+                    r#"{"structure":{"formats":["pdb"],"required":true}}"#.into(),
+                parameter_schema_json:
+                    r#"{"type":"object","properties":{"fasta":{"type":"path","source":"execution_parameters","parameter":"fasta","cli_flag":"--fasta"},"out":{"type":"path","source":"run_output_workspace","cli_flag":"--out"},"model":{"type":"string","default":"facebook/esmfold_v1","cli_flag":"--model"},"dtype":{"type":"string","default":"float32","cli_flag":"--dtype"},"trace_mode":{"type":"string","default":"attention+activations","cli_flag":"--trace_mode"},"layers":{"type":"string","default":"all","cli_flag":"--layers"},"heads":{"type":"string","default":"all","cli_flag":"--heads"},"top_k":{"type":"integer","default":50,"cli_flag":"--top_k"},"save_fp16":{"type":"boolean","cli_flag":"--save_fp16"},"structure_traces":{"type":"boolean","cli_flag":"--structure_traces"}}}"#
+                        .into(),
+            },
+        )
+        .await?;
+    }
+
+    if execution_targets::Entity::find()
+        .filter(execution_targets::Column::Slug.eq("local-esmfold"))
+        .one(db)
+        .await?
+        .is_none()
+    {
+        services::execution_targets::register_execution_target(
+            db,
+            services::execution_targets::RegisterExecutionTargetInput {
+                slug: "local-esmfold".into(),
+                target_type: "local".into(),
+                description: Some("Local ESMFold subprocess execution target.".into()),
+                available_resources_json:
+                    r#"{"type":"object","properties":{"model_device":{"type":"string","enum":["cpu","cuda","cuda:0"],"default":"cuda:0","cli_flag":"--device"}}}"#
+                        .into(),
+            },
+        )
+        .await?;
+    }
+
+    let backend = model_backends::Entity::find()
+        .filter(model_backends::Column::Slug.eq("esmfold"))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("seeded ESMFold model backend is missing".into()))?;
+    let target = execution_targets::Entity::find()
+        .filter(execution_targets::Column::Slug.eq("local-esmfold"))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("seeded local ESMFold execution target is missing".into()))?;
+
+    let config = local_esmfold_config_json();
+    if let Some(profile) = model_invocation_profiles::Entity::find()
+        .filter(model_invocation_profiles::Column::ModelBackendId.eq(backend.id))
+        .filter(model_invocation_profiles::Column::ExecutionTargetId.eq(target.id))
+        .one(db)
+        .await?
+    {
+        if profile.config_json != config {
+            services::model_invocation_profiles::update_config(db, profile.id, config).await?;
+        }
+    } else {
+        services::model_invocation_profiles::register_model_invocation_profile(
+            db,
+            services::model_invocation_profiles::RegisterModelInvocationProfileInput {
+                model_backend_id: backend.id,
+                execution_target_id: target.id,
+                invocation_kind: "local_subprocess".into(),
+                config_json: config,
+            },
+        )
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -229,6 +315,16 @@ fn local_openfold_config_json() -> String {
     json!({
         "program": "python3",
         "script": "run_pretrained_openfold.py",
+        "working_dir": config::openfold_home(),
+        "output_location": config::prefix().join("runs"),
+    })
+    .to_string()
+}
+
+fn local_esmfold_config_json() -> String {
+    json!({
+        "program": "python3",
+        "script": "run_pretrained_esmf.py",
         "working_dir": config::openfold_home(),
         "output_location": config::prefix().join("runs"),
     })
