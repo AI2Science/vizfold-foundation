@@ -23,6 +23,7 @@ pub async fn create(db: &DatabaseConnection, input: SubmitRunInput) -> Result<ru
         input_sequence: Set(input.input_sequence),
         model_parameters_json: Set(input.model_parameters_json),
         execution_parameters_json: Set(input.execution_parameters_json),
+        provenance_json: Set(input.provenance_json),
         ..Default::default()
     }
     .insert(db)

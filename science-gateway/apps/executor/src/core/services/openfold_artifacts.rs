@@ -148,6 +148,7 @@ mod tests {
                 input_sequence: "MSTNPKPQRITF".into(),
                 model_parameters_json: "{}".into(),
                 execution_parameters_json: "{}".into(),
+                provenance_json: None,
             },
         )
         .await

@@ -237,6 +237,7 @@ async fn creates_run_with_separate_parameter_sets() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 5}).to_string(),
             execution_parameters_json: json!({"gpu_count": 1, "walltime": "02:00:00"}).to_string(),
+            provenance_json: None,
         },
     )
     .await?;
@@ -272,6 +273,7 @@ async fn rejects_run_with_empty_input_id() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -304,6 +306,7 @@ async fn rejects_run_with_empty_input_sequence() -> Result<(), DbErr> {
             input_sequence: "   ".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -350,6 +353,7 @@ async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 5}).to_string(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -386,6 +390,7 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: "[]".into(),
             execution_parameters_json: json!({"gpu_count": 1}).to_string(),
+            provenance_json: None,
         },
     )
     .await
@@ -423,6 +428,7 @@ async fn records_artifact_manifest_entry() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await?;
@@ -469,6 +475,7 @@ async fn retrieves_run_with_artifacts() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await?;
@@ -519,6 +526,7 @@ async fn artifact_manifest_stores_uri_and_metadata_only() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await?;
@@ -563,6 +571,7 @@ async fn updates_run_status() -> Result<(), DbErr> {
             input_sequence: "MSTNPKPQRITF".into(),
             model_parameters_json: json!({"num_recycles": 2}).to_string(),
             execution_parameters_json: json!({"gpu_count": 0}).to_string(),
+            provenance_json: None,
         },
     )
     .await?;

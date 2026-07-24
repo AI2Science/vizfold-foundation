@@ -637,6 +637,13 @@ async fn queue_openfold_run(
                 && profile.invocation_kind == "local_subprocess"
         })
         .ok_or_else(seed_required_error)?;
+    let provenance = runs::provenance_snapshot(
+        &backend.slug,
+        backend.version.as_deref(),
+        &target.slug,
+        &profile.invocation_kind,
+        &profile.config_json,
+    );
     let working_dir = local_openfold_working_dir(&profile)?;
     let fasta_dir_input = args
         .fasta_dir
@@ -700,6 +707,7 @@ async fn queue_openfold_run(
             })
             .to_string(),
             execution_parameters_json: serde_json::Value::Object(execution_parameters).to_string(),
+            provenance_json: Some(provenance),
         },
     )
     .await?;

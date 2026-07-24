@@ -418,6 +418,7 @@ mod tests {
                 model_parameters_json: "{}".into(),
                 execution_parameters_json:
                     json!({"fasta_dir":layout.fasta_dir,"data_dir":layout.data_dir}).to_string(),
+                provenance_json: None,
             },
         )
         .await

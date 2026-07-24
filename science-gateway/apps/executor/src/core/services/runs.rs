@@ -2,6 +2,7 @@ use chrono::Utc;
 use sea_orm::{DatabaseConnection, DbErr};
 
 use crate::core::{
+    config,
     entities::{artifacts, runs},
     repositories,
 };
@@ -18,6 +19,7 @@ pub struct SubmitRunInput {
     pub input_sequence: String,
     pub model_parameters_json: String,
     pub execution_parameters_json: String,
+    pub provenance_json: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -36,6 +38,29 @@ pub struct RunWithArtifacts {
 
 pub async fn list_runs(db: &DatabaseConnection) -> Result<Vec<runs::Model>, DbErr> {
     repositories::runs::list(db).await
+}
+
+/// Immutable record of what produced a run. Catalog rows can be edited later; this cannot.
+pub fn provenance_snapshot(
+    backend_slug: &str,
+    backend_version: Option<&str>,
+    target_slug: &str,
+    invocation_kind: &str,
+    profile_config_json: &str,
+) -> String {
+    let config: serde_json::Value =
+        serde_json::from_str(profile_config_json).unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "backend": { "slug": backend_slug, "version": backend_version },
+        "target": { "slug": target_slug },
+        "profile": { "invocation_kind": invocation_kind, "config": config },
+        "resolved": {
+            "openfold_home": config::openfold_home().display().to_string(),
+            "prefix": config::prefix().display().to_string(),
+            "env_prefix": config::openfold_env_prefix().display().to_string(),
+        },
+    })
+    .to_string()
 }
 
 pub async fn submit_run(
@@ -113,4 +138,25 @@ pub async fn get_run_with_artifacts(
 
     let artifacts = repositories::artifacts::list_by_run(db, run_id).await?;
     Ok(Some(RunWithArtifacts { run, artifacts }))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn snapshot_records_every_catalog_payload_and_the_resolved_paths() {
+        let snapshot = super::provenance_snapshot(
+            "openfold",
+            Some("v2.1"),
+            "local-openfold",
+            "local_subprocess",
+            r#"{"output_location":"/work/runs"}"#,
+        );
+        let value: serde_json::Value = serde_json::from_str(&snapshot).expect("valid json");
+
+        assert_eq!(value["backend"]["slug"], "openfold");
+        assert_eq!(value["backend"]["version"], "v2.1");
+        assert_eq!(value["target"]["slug"], "local-openfold");
+        assert_eq!(value["profile"]["invocation_kind"], "local_subprocess");
+        assert_eq!(value["profile"]["config"]["output_location"], "/work/runs");
+    }
 }

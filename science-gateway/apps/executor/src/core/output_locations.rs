@@ -10,7 +10,27 @@ pub fn resolve_output_location(
     invocation_profile: &model_invocation_profiles::Model,
     run: &runs::Model,
 ) -> Result<PathBuf, DbErr> {
-    let config: Value = serde_json::from_str(&invocation_profile.config_json).map_err(|error| {
+    let output_location = output_location_from(
+        run.provenance_json.as_deref(),
+        &invocation_profile.config_json,
+    )?;
+    Ok(PathBuf::from(output_location).join(run.id.to_string()))
+}
+
+/// Prefer the run's immutable snapshot; fall back to the live profile for runs queued before
+/// snapshots existed.
+pub fn output_location_from(
+    provenance_json: Option<&str>,
+    profile_config_json: &str,
+) -> Result<String, DbErr> {
+    if let Some(raw) = provenance_json
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(raw)
+        && let Some(location) = value["profile"]["config"]["output_location"].as_str()
+    {
+        return Ok(location.to_owned());
+    }
+
+    let config: Value = serde_json::from_str(profile_config_json).map_err(|error| {
         DbErr::Custom(format!(
             "model invocation profile config_json must be valid JSON: {error}"
         ))
@@ -32,7 +52,7 @@ pub fn resolve_output_location(
         return Err(DbErr::Custom("output_location must be non-empty".into()));
     }
 
-    Ok(PathBuf::from(output_location).join(run.id.to_string()))
+    Ok(output_location.to_owned())
 }
 
 #[cfg(test)]
@@ -120,6 +140,25 @@ mod tests {
                 .to_string()
                 .contains("output_location must be a string")
         );
+    }
+
+    #[test]
+    fn provenance_snapshot_wins_over_a_mutated_profile() {
+        let profile_config = r#"{"output_location":"/work/relocated"}"#;
+        let snapshot =
+            Some(r#"{"profile":{"config":{"output_location":"/work/original"}}}"#.to_owned());
+
+        let resolved =
+            super::output_location_from(snapshot.as_deref(), profile_config).expect("resolved");
+
+        assert_eq!(resolved, "/work/original");
+    }
+
+    #[test]
+    fn falls_back_to_the_profile_when_a_run_has_no_snapshot() {
+        let resolved = super::output_location_from(None, r#"{"output_location":"/work/live"}"#)
+            .expect("resolved");
+        assert_eq!(resolved, "/work/live");
     }
 
     #[test]
