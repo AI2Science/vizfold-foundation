@@ -65,6 +65,7 @@ pub async fn execute_openfold_run(
         } else {
             command.clone()
         };
+        let exec_command = srun_command(exec_command, &config::gpu_launch_args());
         execute_command_workflow(&exec_command, runner, Some(&preflight_runner)).await
     }
     .await;
@@ -182,6 +183,23 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
     }
 }
 
+/// Prefix a command with the SLURM launcher. Applied *outside* the micromamba wrapper so the
+/// environment is activated on the compute node, not the submit host.
+fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
+    let Some((program, prefix)) = launch.split_first() else {
+        return command;
+    };
+    let mut args = prefix.to_vec();
+    args.push(command.program);
+    args.extend(command.args);
+    CommandSpec {
+        program: program.clone(),
+        args,
+        current_dir: command.current_dir,
+        env: command.env,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -208,6 +226,33 @@ mod tests {
     };
 
     use super::{activate_env_command, execute_openfold_run};
+
+    #[test]
+    fn srun_command_wraps_the_whole_activated_command() {
+        let inner = CommandSpec {
+            program: "bash".into(),
+            args: vec!["-c".into(), "script".into()],
+            current_dir: Some(PathBuf::from("/repo")),
+            ..Default::default()
+        };
+        let wrapped = super::srun_command(
+            inner,
+            &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
+        );
+
+        assert_eq!(wrapped.program, "srun");
+        assert_eq!(wrapped.args, vec!["-p", "gpu", "bash", "-c", "script"]);
+        assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
+    }
+
+    #[test]
+    fn srun_command_is_a_no_op_without_a_launch_prefix() {
+        let inner = CommandSpec {
+            program: "python3".into(),
+            ..Default::default()
+        };
+        assert_eq!(super::srun_command(inner.clone(), &[]), inner);
+    }
 
     #[test]
     fn activate_env_command_wraps_planned_command_in_micromamba_activation() {
