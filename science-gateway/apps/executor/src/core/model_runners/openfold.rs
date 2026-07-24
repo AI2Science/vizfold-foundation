@@ -81,6 +81,7 @@ pub fn plan_openfold_command(
         args,
         current_dir,
         env,
+        stream: false,
     })
 }
 

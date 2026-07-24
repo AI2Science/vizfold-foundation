@@ -66,6 +66,10 @@ pub async fn execute_openfold_run(
             command.clone()
         };
         let exec_command = srun_command(exec_command, &config::gpu_launch_args());
+        let exec_command = CommandSpec {
+            stream: true,
+            ..exec_command
+        };
         execute_command_workflow(&exec_command, runner, Some(&preflight_runner)).await
     }
     .await;
@@ -180,6 +184,7 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
         args,
         current_dir: command.current_dir.clone(),
         env: command.env.clone(),
+        stream: command.stream,
     }
 }
 
@@ -197,6 +202,7 @@ fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
         args,
         current_dir: command.current_dir,
         env: command.env,
+        stream: command.stream,
     }
 }
 

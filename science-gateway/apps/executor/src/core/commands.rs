@@ -8,6 +8,8 @@ pub struct CommandSpec {
     pub args: Vec<String>,
     pub current_dir: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
+    /// Inherit the parent's stdio instead of capturing it, so a long run reports progress live.
+    pub stream: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,12 +38,23 @@ impl CommandRunner for LocalCommandRunner {
             command.current_dir(current_dir);
         }
 
-        let output = command.output().await.map_err(|error| {
+        let spawn_error = |error: std::io::Error| {
             DbErr::Custom(format!(
-                "failed to spawn command '{}': {error}",
-                spec.program
+                "failed to spawn command '{}': {}",
+                spec.program, error
             ))
-        })?;
+        };
+
+        if spec.stream {
+            let status = command.status().await.map_err(spawn_error)?;
+            return Ok(CommandOutput {
+                exit_code: status.code().unwrap_or(-1),
+                stdout: String::new(),
+                stderr: String::new(),
+            });
+        }
+
+        let output = command.output().await.map_err(spawn_error)?;
 
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(-1),
@@ -215,6 +228,22 @@ mod tests {
             .expect("command should report a valid directory");
 
         assert_eq!(reported_dir, current_dir);
+    }
+
+    #[tokio::test]
+    async fn streaming_returns_the_exit_code_without_capturing_output() {
+        let runner = LocalCommandRunner;
+        #[cfg(unix)]
+        let mut spec = shell_command("printf visible; exit 3");
+        #[cfg(windows)]
+        let mut spec = shell_command("echo visible & exit /B 3");
+        spec.stream = true;
+
+        let output = runner.run(spec).await.expect("command should run");
+
+        assert_eq!(output.exit_code, 3);
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
     }
 
     #[tokio::test]
