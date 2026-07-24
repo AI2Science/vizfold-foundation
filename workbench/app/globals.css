@@ -81,16 +81,6 @@ textarea {
   line-height: 1.6;
 }
 
-.workspace-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-  gap: 24px;
-}
-
-.result-panel {
-  grid-column: 1 / -1;
-}
-
 .panel {
   padding: 24px;
 }
@@ -158,14 +148,6 @@ textarea {
   background: var(--accent-strong);
 }
 
-.capability-list {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--text-soft);
-  display: grid;
-  gap: 10px;
-}
-
 .result-card,
 .empty-state {
   border: 1px dashed var(--border);
@@ -191,12 +173,10 @@ textarea {
 }
 
 .result-row span,
-.empty-state p:last-child,
-.result-note {
+.empty-state p:last-child {
   color: var(--text-soft);
 }
 
-.result-note,
 .empty-state p {
   margin: 14px 0 0;
   line-height: 1.5;
@@ -339,14 +319,6 @@ textarea {
 }
 
 @media (max-width: 900px) {
-  .workspace-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .result-panel {
-    grid-column: auto;
-  }
-
   .page-shell {
     padding-inline: 16px;
   }

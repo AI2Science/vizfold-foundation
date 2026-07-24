@@ -30,8 +30,14 @@ export type ArtifactRow = {
 };
 
 // A fresh install has no db until the first run; treat "not created yet" as "nothing to show".
-function open(): DatabaseSync | null {
-  return existsSync(dbPath) ? new DatabaseSync(dbPath, { readOnly: true }) : null;
+function query<T>(read: (db: DatabaseSync) => T, whenAbsent: T): T {
+  if (!existsSync(dbPath)) return whenAbsent;
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return read(db);
+  } finally {
+    db.close();
+  }
 }
 
 // Join the FK tables here so pages never see bare model_backend_id/execution_target_id.
@@ -42,40 +48,17 @@ const RUN_SELECT = `SELECT r.id, r.status, r.input_id, r.input_sequence, r.submi
   JOIN model_backends b ON b.id = r.model_backend_id
   JOIN execution_targets t ON t.id = r.execution_target_id`;
 
-export function listRuns(): RunRow[] {
-  const db = open();
-  if (!db) return [];
-  try {
-    return db.prepare(`${RUN_SELECT} ORDER BY r.submitted_at DESC`).all() as RunRow[];
-  } finally {
-    db.close();
-  }
-}
+const ARTIFACT_SELECT = `SELECT a.id, a.format, a.storage_uri,
+    at.slug AS type_slug, at.label AS type_label, at.viewer_kind, at.display_mode
+  FROM artifacts a
+  JOIN artifact_types at ON at.id = a.artifact_type_id
+  WHERE a.run_id = ? ORDER BY a.id`;
 
-export function getRun(id: number): RunRow | null {
-  const db = open();
-  if (!db) return null;
-  try {
-    return (db.prepare(`${RUN_SELECT} WHERE r.id = ?`).get(id) as RunRow) ?? null;
-  } finally {
-    db.close();
-  }
-}
+export const listRuns = (): RunRow[] =>
+  query((db) => db.prepare(`${RUN_SELECT} ORDER BY r.submitted_at DESC`).all() as RunRow[], []);
 
-export function listArtifacts(runId: number): ArtifactRow[] {
-  const db = open();
-  if (!db) return [];
-  try {
-    return db
-      .prepare(
-        `SELECT a.id, a.format, a.storage_uri,
-            at.slug AS type_slug, at.label AS type_label, at.viewer_kind, at.display_mode
-          FROM artifacts a
-          JOIN artifact_types at ON at.id = a.artifact_type_id
-          WHERE a.run_id = ? ORDER BY a.id`,
-      )
-      .all(runId) as ArtifactRow[];
-  } finally {
-    db.close();
-  }
-}
+export const getRun = (id: number): RunRow | null =>
+  query((db) => (db.prepare(`${RUN_SELECT} WHERE r.id = ?`).get(id) as RunRow) ?? null, null);
+
+export const listArtifacts = (runId: number): ArtifactRow[] =>
+  query((db) => db.prepare(ARTIFACT_SELECT).all(runId) as ArtifactRow[], []);

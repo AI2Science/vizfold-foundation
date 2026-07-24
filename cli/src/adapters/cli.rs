@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
-    config, db, examples,
+    config, db,
     entities::{
         execution_targets as execution_target_entity, model_backends as model_backend_entity,
         model_invocation_profiles as model_invocation_profile_entity,
     },
+    examples,
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
     seed::seed_defaults,
@@ -419,15 +420,23 @@ fn run_install(backend: Backend) -> Result<(), DbErr> {
         backend.slug(),
         installer.display()
     );
-    let status = std::process::Command::new("bash")
-        .arg(&installer)
-        .env("OPENFOLD_HOME", &src)
+    run_to_completion(
+        "model install",
+        std::process::Command::new("bash")
+            .arg(&installer)
+            .env("OPENFOLD_HOME", &src),
+    )
+}
+
+/// Run a child to completion with inherited stdio, naming it in either failure.
+fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<(), DbErr> {
+    let status = command
         .status()
-        .map_err(|error| DbErr::Custom(format!("failed to launch model install: {error}")))?;
+        .map_err(|error| DbErr::Custom(format!("failed to launch {what}: {error}")))?;
     status
         .success()
         .then_some(())
-        .ok_or_else(|| DbErr::Custom(format!("model install exited with status {status}")))
+        .ok_or_else(|| DbErr::Custom(format!("{what} exited with status {status}")))
 }
 
 /// Download a backend's data by running the checkout's downloader for the requested dataset into
@@ -467,16 +476,13 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
         script.display(),
         dest.display()
     );
-    let status = std::process::Command::new("bash")
-        .arg(&script)
-        .arg(&dest)
-        .env("OPENFOLD_HOME", &src)
-        .status()
-        .map_err(|error| DbErr::Custom(format!("failed to launch downloader: {error}")))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| DbErr::Custom(format!("downloader exited with status {status}")))
+    run_to_completion(
+        "downloader",
+        std::process::Command::new("bash")
+            .arg(&script)
+            .arg(&dest)
+            .env("OPENFOLD_HOME", &src),
+    )
 }
 
 /// Report resolved config plus which backends are installed. Runs before any install (so it can
@@ -517,8 +523,7 @@ fn run_status() -> Result<(), DbErr> {
                     status.to_owned(),
                     backend.env_prefix().display().to_string(),
                 ]
-            })
-            .collect(),
+            }),
     );
     Ok(())
 }
@@ -804,10 +809,9 @@ fn system_node_bin() -> Option<PathBuf> {
         .flatten()
 }
 
-/// Node for the dashboard: whatever is already on PATH when it is new enough, otherwise a
-/// micromamba env of its own. Clusters ship none -- Delta has no `node`, no `npm`, and no nodejs
-/// module -- and the env is kept out of every backend so the dashboard works before a backend is
-/// installed. Returns the bin directory to put in front of PATH.
+/// Node for the dashboard: whatever is on PATH when it is new enough, else a micromamba env of its
+/// own -- clusters ship none (Delta has no `node`, `npm`, or nodejs module). Kept out of every
+/// backend env so the dashboard works before a backend is installed. Returns the bin dir for PATH.
 fn ensure_node() -> Result<PathBuf, DbErr> {
     let env_dir = config::prefix().join("mamba/envs/vizfold-web");
     let bin = env_dir.join("bin");
@@ -820,16 +824,22 @@ fn ensure_node() -> Result<PathBuf, DbErr> {
     let micromamba = ensure_micromamba()?;
     println!("Provisioning Node (first run only)...");
     // --no-rc so a user ~/.condarc envs_dirs/channels can't hijack it, as the backend installs do.
-    let status = std::process::Command::new(&micromamba)
-        .args(["create", "-y", "--no-rc", "-c", "conda-forge", "nodejs>=22.13", "-p"])
-        .arg(&env_dir)
-        .env("MAMBA_ROOT_PREFIX", config::prefix().join("mamba"))
-        .status()
-        .map_err(|error| DbErr::Custom(format!("failed to launch micromamba: {error}")))?;
-    status
-        .success()
-        .then_some(bin)
-        .ok_or_else(|| DbErr::Custom(format!("provisioning Node exited with status {status}")))
+    run_to_completion(
+        "provisioning Node",
+        std::process::Command::new(&micromamba)
+            .args([
+                "create",
+                "-y",
+                "--no-rc",
+                "-c",
+                "conda-forge",
+                "nodejs>=22.13",
+                "-p",
+            ])
+            .arg(&env_dir)
+            .env("MAMBA_ROOT_PREFIX", config::prefix().join("mamba")),
+    )?;
+    Ok(bin)
 }
 
 /// The micromamba a backend install drops at `<prefix>/bin`, fetched the same way
@@ -852,18 +862,14 @@ fn ensure_micromamba() -> Result<PathBuf, DbErr> {
             prefix.display()
         ))
     })?;
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!(
+    run_to_completion(
+        "fetching micromamba",
+        std::process::Command::new("sh").arg("-c").arg(format!(
             "curl -Ls 'https://micro.mamba.pm/api/micromamba/{arch}/latest' | tar -xj -C '{}' bin/micromamba",
             prefix.display()
-        ))
-        .status()
-        .map_err(|error| DbErr::Custom(format!("failed to fetch micromamba: {error}")))?;
-    status
-        .success()
-        .then_some(micromamba)
-        .ok_or_else(|| DbErr::Custom(format!("fetching micromamba exited with status {status}")))
+        )),
+    )?;
+    Ok(micromamba)
 }
 
 fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
@@ -889,15 +895,7 @@ fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
     if let Some(database) = config::database_path() {
         command.env("VIZFOLD_DB", database);
     }
-    let status = command
-        .status()
-        .map_err(|error| DbErr::Custom(format!("failed to run npm: {error}")))?;
-    status.success().then_some(()).ok_or_else(|| {
-        DbErr::Custom(format!(
-            "npm {} exited with status {status}",
-            args.join(" ")
-        ))
-    })
+    run_to_completion(&format!("npm {}", args.join(" ")), &mut command)
 }
 
 async fn register_artifacts(
@@ -1044,16 +1042,13 @@ fn list_examples(json: bool) -> Result<(), DbErr> {
     }
     print_table(
         &["ID", "RESIDUES", "DESCRIPTION"],
-        found
-            .iter()
-            .map(|example| {
-                vec![
-                    example.id.clone(),
-                    example.residues.to_string(),
-                    example.description.clone(),
-                ]
-            })
-            .collect(),
+        found.iter().map(|example| {
+            vec![
+                example.id.clone(),
+                example.residues.to_string(),
+                example.description.clone(),
+            ]
+        }),
     );
     Ok(())
 }
@@ -1069,10 +1064,13 @@ async fn run_execute(
     let run_id = match args.target.parse::<i32>() {
         Ok(run_id) => run_id,
         Err(_) => {
-            let example = examples::find(&args.target).ok_or_else(|| unknown_target(&args.target))?;
-            let run =
-                submit_openfold_run(database, OpenfoldQueueArgs::for_example(&example, args.attn))
-                    .await?;
+            let example =
+                examples::find(&args.target).ok_or_else(|| unknown_target(&args.target))?;
+            let run = submit_openfold_run(
+                database,
+                OpenfoldQueueArgs::for_example(&example, args.attn),
+            )
+            .await?;
             if !args.json {
                 println!(
                     "Queued OpenFold run {} ({}, {} residues)\n",
@@ -1107,7 +1105,10 @@ async fn run_execute(
         );
     } else if run.status == "completed" {
         let took = elapsed.map_or(String::new(), |seconds| format!(" in {seconds}s"));
-        println!("Run {} completed{took}. View it with: vizfold serve", run.id);
+        println!(
+            "Run {} completed{took}. View it with: vizfold serve",
+            run.id
+        );
     } else {
         println!("Run {} finished with status: {}", run.id, run.status);
         if let Some(message) = run.error_message {
@@ -1141,29 +1142,36 @@ async fn queue_openfold_run(
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
     let run = submit_openfold_run(database, args).await?;
-    println!("Queued OpenFold run {}", run.id);
-    println!("status: {}", run.status);
-    println!("input_id: {}", run.input_id);
-    println!("\nNext:");
-    println!("  vizfold execute-run {}", run.id);
+    report_queued("OpenFold", &run);
     Ok(())
 }
 
 /// The queue step without its reporting, so `fold` can chain it into execute and register.
-async fn submit_openfold_run(
+/// The seeded records a local run is built from, plus what is derived from them. Both queue paths
+/// need all of it and differ only in the backend.
+struct LocalCatalog {
+    backend_id: i32,
+    target_id: i32,
+    profile_id: i32,
+    available_resources_json: String,
+    provenance: String,
+    working_dir: String,
+}
+
+async fn local_catalog(
     database: &sea_orm::DatabaseConnection,
-    args: OpenfoldQueueArgs,
-) -> Result<crate::core::entities::runs::Model, DbErr> {
+    backend: Backend,
+) -> Result<LocalCatalog, DbErr> {
     // Submitting a run *needs* the catalog, so seed here rather than making every caller -- the
     // CLI, the dashboard -- remember to. Existence-guarded, so repeating it is free.
     seed_defaults(database).await?;
-    let backend = model_backend_entity::Entity::find()
-        .filter(model_backend_entity::Column::Slug.eq("openfold"))
+    let model = model_backend_entity::Entity::find()
+        .filter(model_backend_entity::Column::Slug.eq(backend.slug()))
         .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
     let target = execution_target_entity::Entity::find()
-        .filter(execution_target_entity::Column::Slug.eq("local-openfold"))
+        .filter(execution_target_entity::Column::Slug.eq(format!("local-{}", backend.slug())))
         .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
@@ -1171,22 +1179,45 @@ async fn submit_openfold_run(
         .await?
         .into_iter()
         .find(|profile| {
-            profile.model_backend_id == backend.id
+            profile.model_backend_id == model.id
                 && profile.execution_target_id == target.id
                 && profile.invocation_kind == "local_subprocess"
         })
         .ok_or_else(seed_required_error)?;
-    let provenance = runs::provenance_snapshot(
-        &backend.slug,
-        backend.version.as_deref(),
-        &target.slug,
-        &profile.invocation_kind,
-        &profile.config_json,
-        &config::openfold_home(),
-        &config::prefix(),
-        &config::openfold_env_prefix(),
-    );
-    let working_dir = local_working_dir(&profile)?;
+    Ok(LocalCatalog {
+        backend_id: model.id,
+        target_id: target.id,
+        profile_id: profile.id,
+        available_resources_json: target.available_resources_json,
+        provenance: runs::provenance_snapshot(
+            &model.slug,
+            model.version.as_deref(),
+            &target.slug,
+            &profile.invocation_kind,
+            &profile.config_json,
+            &config::openfold_home(),
+            &config::prefix(),
+            &backend.env_prefix(),
+        ),
+        working_dir: local_working_dir(&profile)?,
+    })
+}
+
+/// What every queue path prints once the run exists.
+fn report_queued(label: &str, run: &crate::core::entities::runs::Model) {
+    println!("Queued {label} run {}", run.id);
+    println!("status: {}", run.status);
+    println!("input_id: {}", run.input_id);
+    println!("\nNext:");
+    println!("  vizfold execute-run {}", run.id);
+}
+
+async fn submit_openfold_run(
+    database: &sea_orm::DatabaseConnection,
+    args: OpenfoldQueueArgs,
+) -> Result<crate::core::entities::runs::Model, DbErr> {
+    let catalog = local_catalog(database, Backend::Openfold).await?;
+    let working_dir = &catalog.working_dir;
     let fasta_dir_input = args
         .fasta_dir
         .clone()
@@ -1195,8 +1226,8 @@ async fn submit_openfold_run(
         .data_dir
         .clone()
         .unwrap_or_else(|| config::data_dir().to_string_lossy().into_owned());
-    let fasta_dir = canonicalize_local_path("--fasta-dir", &fasta_dir_input, &working_dir)?;
-    let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, &working_dir)?;
+    let fasta_dir = canonicalize_local_path("--fasta-dir", &fasta_dir_input, working_dir)?;
+    let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, working_dir)?;
     let alignment_dir = if args.use_precomputed_alignments {
         let input = args
             .alignment_dir
@@ -1205,12 +1236,12 @@ async fn submit_openfold_run(
         Some(canonicalize_local_path(
             "--alignment-dir",
             &input,
-            &working_dir,
+            working_dir,
         )?)
     } else {
         args.alignment_dir
             .as_deref()
-            .map(|path| canonicalize_local_path("--alignment-dir", path, &working_dir))
+            .map(|path| canonicalize_local_path("--alignment-dir", path, working_dir))
             .transpose()?
     };
     let model_device = args
@@ -1229,7 +1260,7 @@ async fn submit_openfold_run(
         ("model_device".into(), json!(model_device)),
         (
             "cpus".into(),
-            json!(clamp_cpus(args.cpus, &target.available_resources_json)),
+            json!(clamp_cpus(args.cpus, &catalog.available_resources_json)),
         ),
     ]);
     if let Some(alignment_dir) = alignment_dir {
@@ -1239,9 +1270,9 @@ async fn submit_openfold_run(
     let run = runs::submit_run(
         database,
         runs::SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
+            model_backend_id: catalog.backend_id,
+            execution_target_id: catalog.target_id,
+            invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
             input_id: args.input_id,
             input_sequence: args.input_sequence,
@@ -1252,7 +1283,7 @@ async fn submit_openfold_run(
             })
             .to_string(),
             execution_parameters_json: serde_json::Value::Object(execution_parameters).to_string(),
-            provenance_json: Some(provenance),
+            provenance_json: Some(catalog.provenance),
         },
     )
     .await?;
@@ -1264,38 +1295,9 @@ async fn queue_esmfold_run(
     database: &sea_orm::DatabaseConnection,
     args: EsmfoldQueueArgs,
 ) -> Result<(), DbErr> {
-    seed_defaults(database).await?;
-    let backend = model_backend_entity::Entity::find()
-        .filter(model_backend_entity::Column::Slug.eq("esmfold"))
-        .one(database)
-        .await?
-        .ok_or_else(seed_required_error)?;
-    let target = execution_target_entity::Entity::find()
-        .filter(execution_target_entity::Column::Slug.eq("local-esmfold"))
-        .one(database)
-        .await?
-        .ok_or_else(seed_required_error)?;
-    let profile = model_invocation_profiles::list_model_invocation_profiles(database)
-        .await?
-        .into_iter()
-        .find(|profile| {
-            profile.model_backend_id == backend.id
-                && profile.execution_target_id == target.id
-                && profile.invocation_kind == "local_subprocess"
-        })
-        .ok_or_else(seed_required_error)?;
-    let provenance = runs::provenance_snapshot(
-        &backend.slug,
-        backend.version.as_deref(),
-        &target.slug,
-        &profile.invocation_kind,
-        &profile.config_json,
-        &config::openfold_home(),
-        &config::prefix(),
-        &config::esmfold_env_prefix(),
-    );
-    let working_dir = local_working_dir(&profile)?;
-    let fasta = canonicalize_local_path("--fasta", &args.fasta, &working_dir)?;
+    let catalog = local_catalog(database, Backend::Esmfold).await?;
+    let working_dir = &catalog.working_dir;
+    let fasta = canonicalize_local_path("--fasta", &args.fasta, working_dir)?;
     let model_device = args
         .model_device
         .clone()
@@ -1304,9 +1306,9 @@ async fn queue_esmfold_run(
     let run = runs::submit_run(
         database,
         runs::SubmitRunInput {
-            model_backend_id: backend.id,
-            execution_target_id: target.id,
-            invocation_profile_id: profile.id,
+            model_backend_id: catalog.backend_id,
+            execution_target_id: catalog.target_id,
+            invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
             input_id: args.input_id,
             input_sequence: args.input_sequence,
@@ -1324,16 +1326,12 @@ async fn queue_esmfold_run(
                 "model_device": model_device,
             })
             .to_string(),
-            provenance_json: Some(provenance),
+            provenance_json: Some(catalog.provenance),
         },
     )
     .await?;
 
-    println!("Queued ESMFold run {}", run.id);
-    println!("status: {}", run.status);
-    println!("input_id: {}", run.input_id);
-    println!("\nNext:");
-    println!("  vizfold execute-run {}", run.id);
+    report_queued("ESMFold", &run);
     Ok(())
 }
 
@@ -1404,17 +1402,14 @@ async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr
     let models = model_backends::list_model_backends(database).await?;
     print_table(
         &["ID", "SLUG", "LABEL", "VERSION"],
-        models
-            .iter()
-            .map(|model| {
-                vec![
-                    model.id.to_string(),
-                    model.slug.clone(),
-                    model.label.clone(),
-                    model.version.clone().unwrap_or_else(|| "-".into()),
-                ]
-            })
-            .collect(),
+        models.iter().map(|model| {
+            vec![
+                model.id.to_string(),
+                model.slug.clone(),
+                model.label.clone(),
+                model.version.clone().unwrap_or_else(|| "-".into()),
+            ]
+        }),
     );
     Ok(())
 }
@@ -1423,17 +1418,14 @@ async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbEr
     let targets = execution_targets::list_execution_targets(database).await?;
     print_table(
         &["ID", "SLUG", "TYPE", "DESCRIPTION"],
-        targets
-            .iter()
-            .map(|target| {
-                vec![
-                    target.id.to_string(),
-                    target.slug.clone(),
-                    target.target_type.clone(),
-                    target.description.clone().unwrap_or_else(|| "-".into()),
-                ]
-            })
-            .collect(),
+        targets.iter().map(|target| {
+            vec![
+                target.id.to_string(),
+                target.slug.clone(),
+                target.target_type.clone(),
+                target.description.clone().unwrap_or_else(|| "-".into()),
+            ]
+        }),
     );
     Ok(())
 }
@@ -1442,17 +1434,14 @@ async fn list_profiles(database: &sea_orm::DatabaseConnection) -> Result<(), DbE
     let profiles = model_invocation_profiles::list_model_invocation_profiles(database).await?;
     print_table(
         &["ID", "MODEL ID", "TARGET ID", "INVOCATION KIND"],
-        profiles
-            .iter()
-            .map(|profile| {
-                vec![
-                    profile.id.to_string(),
-                    profile.model_backend_id.to_string(),
-                    profile.execution_target_id.to_string(),
-                    profile.invocation_kind.clone(),
-                ]
-            })
-            .collect(),
+        profiles.iter().map(|profile| {
+            vec![
+                profile.id.to_string(),
+                profile.model_backend_id.to_string(),
+                profile.execution_target_id.to_string(),
+                profile.invocation_kind.clone(),
+            ]
+        }),
     );
     Ok(())
 }
@@ -1484,8 +1473,7 @@ async fn list_runs(
                     run.input_id.clone(),
                     run.submitted_at.to_rfc3339(),
                 ]
-            })
-            .collect(),
+            }),
     );
     Ok(())
 }
@@ -1512,18 +1500,14 @@ async fn show_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Result
     println!("artifacts:");
     print_table(
         &["ID", "TYPE ID", "FORMAT", "STORAGE URI"],
-        result
-            .artifacts
-            .iter()
-            .map(|artifact| {
-                vec![
-                    artifact.id.to_string(),
-                    artifact.artifact_type_id.to_string(),
-                    artifact.format.clone(),
-                    artifact.storage_uri.clone(),
-                ]
-            })
-            .collect(),
+        result.artifacts.iter().map(|artifact| {
+            vec![
+                artifact.id.to_string(),
+                artifact.artifact_type_id.to_string(),
+                artifact.format.clone(),
+                artifact.storage_uri.clone(),
+            ]
+        }),
     );
     Ok(())
 }
@@ -1534,7 +1518,8 @@ fn format_time(value: Option<chrono::DateTime<chrono::Utc>>) -> String {
         .unwrap_or_else(|| "-".into())
 }
 
-fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
+fn print_table(headers: &[&str], rows: impl IntoIterator<Item = Vec<String>>) {
+    let rows: Vec<Vec<String>> = rows.into_iter().collect();
     let mut widths: Vec<usize> = headers.iter().map(|header| header.len()).collect();
     for row in &rows {
         for (index, cell) in row.iter().enumerate() {

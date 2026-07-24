@@ -1,9 +1,8 @@
-//! The bundled monomer examples -- the sequences that can fold without an MSA search.
+//! The bundled monomer examples -- the sequences that fold without an MSA search.
 //!
 //! `<OPENFOLD_HOME>/examples/monomer` holds `fasta_dir_<stem>/<stem>.fasta` beside
-//! `alignments/<id>`. An example is offerable only when both exist: without the alignment
-//! directory the fold falls back to the full MSA pipeline, which needs the complete databases and
-//! runs for hours.
+//! `alignments/<id>`. Both must exist to offer one: without the alignments the fold falls back to
+//! the full MSA pipeline, which needs the complete databases and runs for hours.
 
 use std::path::{Path, PathBuf};
 
@@ -39,7 +38,12 @@ pub fn scan(dir: &Path) -> Vec<Example> {
     };
     let mut found: Vec<Example> = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("fasta_dir_"))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("fasta_dir_")
+        })
         .filter_map(|entry| first_fasta(&entry.path()))
         .filter_map(|fasta| parse(&std::fs::read_to_string(fasta).ok()?))
         .filter(|example| alignments.join(&example.id).is_dir())
@@ -62,9 +66,9 @@ fn first_fasta(dir: &Path) -> Option<PathBuf> {
     fastas.into_iter().next()
 }
 
-/// Parse the first record of a FASTA. `>1UBQ_1|Chain A|UBIQUITIN|Homo sapiens (9606)` yields id
-/// `1UBQ_1` and description `UBIQUITIN`; a bare `>6KWC_1` yields an empty description.
-/// ponytail: first record only -- these directories hold one monomer each. Loop the records if a
+/// `>1UBQ_1|Chain A|UBIQUITIN|Homo sapiens (9606)` yields id `1UBQ_1`, description `UBIQUITIN`;
+/// a bare `>6KWC_1` yields no description.
+/// ponytail: first record only -- these directories hold one monomer each. Loop them if a
 /// multi-chain example ever ships.
 fn parse(text: &str) -> Option<Example> {
     let mut lines = text.lines().skip_while(|line| !line.starts_with('>'));
@@ -91,10 +95,8 @@ mod tests {
 
     /// Lay out a monomer tree: (fasta stem, contents, whether `alignments/<id>` exists).
     fn tree(name: &str, entries: &[(&str, &str, bool)]) -> PathBuf {
-        let base = std::env::temp_dir().join(format!(
-            "vizfold-examples-{name}-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("vizfold-examples-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         for (stem, contents, aligned) in entries {
             let fasta_dir = base.join(format!("fasta_dir_{stem}"));

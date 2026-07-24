@@ -2,8 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import { mkdirSync, openSync } from "node:fs";
 import { promisify } from "node:util";
 
-// The CLI owns the executor; the dashboard never parses FASTA or writes the database itself.
-// `vizfold serve` exports VIZFOLD_BIN so this resolves without depending on ~/.local/bin.
+// The CLI owns the executor; the dashboard never parses FASTA or writes the database.
+// `vizfold serve` exports VIZFOLD_BIN so this resolves without relying on ~/.local/bin.
 const BIN = process.env.VIZFOLD_BIN ?? "vizfold";
 const PREFIX = process.env.OPENFOLD_PREFIX ?? "";
 
@@ -38,11 +38,8 @@ export async function queueRun(example: Example, attn: boolean): Promise<number>
   return Number(id);
 }
 
-/**
- * Fold in the background. A fold runs for minutes, far longer than a request should be held open,
- * so the response returns as soon as the run exists and the page polls the status from there.
- * `execute-run` registers the artifacts itself once the fold lands.
- */
+/** Detached: a fold runs for minutes, far longer than a request may be held open. The page polls
+ *  from there, and `execute-run` registers the artifacts itself once it lands. */
 export function foldInBackground(runId: number): void {
   const logs = `${PREFIX}/runs`;
   mkdirSync(logs, { recursive: true });

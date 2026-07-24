@@ -27,23 +27,23 @@ function runRoot(artifacts: ArtifactRow[], id: number): string | null {
   return null;
 }
 
+const entry = (file: string, runsRoot: string, name = path.basename(file)): FileEntry => ({
+  name,
+  url: `/runs/${path.relative(runsRoot, file)}`,
+  isImage: IS_IMAGE.test(file),
+  isStructure: IS_STRUCTURE.test(file),
+});
+
 function browse(dir: string, runsRoot: string): FileEntry[] {
-  let abs: string[];
   try {
-    abs = readdirSync(dir, { recursive: true, withFileTypes: true })
+    return readdirSync(dir, { recursive: true, withFileTypes: true })
       .filter((e) => e.isFile())
-      .map((e) => path.join(e.parentPath, e.name));
+      .map((e) => path.join(e.parentPath, e.name))
+      .map((file) => entry(file, runsRoot, path.relative(dir, file)))
+      .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     return [];
   }
-  return abs
-    .map((file) => ({
-      name: path.relative(dir, file),
-      url: `/runs/${path.relative(runsRoot, file)}`,
-      isImage: IS_IMAGE.test(file),
-      isStructure: IS_STRUCTURE.test(file),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default async function RunPage({
@@ -104,14 +104,12 @@ export default async function RunPage({
           </div>
         ) : (
           artifacts.map((artifact) => {
-            const files =
-              artifact.format === "directory" && runsRoot
+            // A file artifact is just a one-entry listing, so both kinds render the same way.
+            const files = !runsRoot
+              ? []
+              : artifact.format === "directory"
                 ? browse(artifact.storage_uri, runsRoot)
-                : [];
-            const directLink =
-              artifact.format !== "directory" && runsRoot
-                ? `/runs/${path.relative(runsRoot, artifact.storage_uri)}`
-                : null;
+                : [entry(artifact.storage_uri, runsRoot)];
             return (
               <div key={artifact.id} className="artifact-block">
                 <h3>
@@ -122,16 +120,7 @@ export default async function RunPage({
                       : `(${artifact.format})`}
                   </span>
                 </h3>
-                {directLink ? (
-                  <ul className="file-list">
-                    <li>
-                      <a href={directLink}>{path.basename(artifact.storage_uri)}</a>
-                      {IS_STRUCTURE.test(artifact.storage_uri) ? (
-                        <StructureViewer url={directLink} name={path.basename(artifact.storage_uri)} />
-                      ) : null}
-                    </li>
-                  </ul>
-                ) : files.length === 0 ? (
+                {files.length === 0 ? (
                   <p className="field-note">Empty.</p>
                 ) : (
                   <ul className="file-list">
