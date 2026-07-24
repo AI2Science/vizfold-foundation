@@ -1,6 +1,6 @@
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait, Set};
 
-use crate::core::{entities::execution_targets, repositories};
+use crate::core::entities::execution_targets;
 
 use super::validation::require_json_object;
 
@@ -15,7 +15,7 @@ pub struct RegisterExecutionTargetInput {
 pub async fn list_execution_targets(
     db: &DatabaseConnection,
 ) -> Result<Vec<execution_targets::Model>, DbErr> {
-    repositories::execution_targets::list(db).await
+    execution_targets::Entity::find().all(db).await
 }
 
 pub async fn register_execution_target(
@@ -27,5 +27,13 @@ pub async fn register_execution_target(
         &input.available_resources_json,
     )?;
 
-    repositories::execution_targets::create(db, input).await
+    execution_targets::ActiveModel {
+        slug: Set(input.slug),
+        target_type: Set(input.target_type),
+        description: Set(input.description),
+        available_resources_json: Set(input.available_resources_json),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
 }

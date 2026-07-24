@@ -1,6 +1,6 @@
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait, Set};
 
-use crate::core::{entities::model_backends, repositories};
+use crate::core::entities::model_backends;
 
 use super::validation::require_json_object;
 
@@ -17,7 +17,7 @@ pub struct RegisterModelBackendInput {
 pub async fn list_model_backends(
     db: &DatabaseConnection,
 ) -> Result<Vec<model_backends::Model>, DbErr> {
-    repositories::model_backends::list(db).await
+    model_backends::Entity::find().all(db).await
 }
 
 pub async fn register_model_backend(
@@ -33,5 +33,15 @@ pub async fn register_model_backend(
         &input.parameter_schema_json,
     )?;
 
-    repositories::model_backends::create(db, input).await
+    model_backends::ActiveModel {
+        slug: Set(input.slug),
+        label: Set(input.label),
+        version: Set(input.version),
+        description: Set(input.description),
+        artifact_capabilities_json: Set(input.artifact_capabilities_json),
+        parameter_schema_json: Set(input.parameter_schema_json),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
 }

@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::core::{
     config,
     entities::{artifact_types, execution_targets, model_backends, model_invocation_profiles},
-    repositories, services,
+    services,
 };
 
 pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
@@ -202,7 +202,7 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?
     {
         if profile.config_json != local_openfold_config {
-            repositories::model_invocation_profiles::update_config(
+            services::model_invocation_profiles::update_config(
                 db,
                 profile.id,
                 local_openfold_config,

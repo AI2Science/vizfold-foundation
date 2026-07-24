@@ -1,15 +1,15 @@
 use std::path::Path;
 
 use chrono::Utc;
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 
 use crate::core::{
     commands::{CommandRunner, CommandSpec},
     config,
+    entities::{execution_targets, model_backends, model_invocation_profiles, runs as run_entity},
     execution::{ExecutionWorkflowResult, execute_command_workflow},
     model_runners::openfold::{OpenFoldPreflightRunner, plan_openfold_command},
     output_locations::resolve_output_location,
-    repositories,
 };
 
 use super::runs::{self, UpdateRunStatusInput};
@@ -20,21 +20,24 @@ pub async fn execute_openfold_run(
     run_id: i32,
     runner: &dyn CommandRunner,
 ) -> Result<ExecutionWorkflowResult, DbErr> {
-    let run = repositories::runs::find_by_id(db, run_id)
+    let run = run_entity::Entity::find_by_id(run_id)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?;
 
     let started_at = Utc::now();
     let execution = async {
-        let model_backend = repositories::model_backends::find_by_id(db, run.model_backend_id)
+        let model_backend = model_backends::Entity::find_by_id(run.model_backend_id)
+            .one(db)
             .await?
             .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
-        let execution_target =
-            repositories::execution_targets::find_by_id(db, run.execution_target_id)
-                .await?
-                .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
+        let execution_target = execution_targets::Entity::find_by_id(run.execution_target_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
         let invocation_profile =
-            repositories::model_invocation_profiles::find_by_id(db, run.invocation_profile_id)
+            model_invocation_profiles::Entity::find_by_id(run.invocation_profile_id)
+                .one(db)
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
@@ -217,12 +220,13 @@ mod tests {
         },
     };
 
-    use sea_orm::{ConnectionTrait, Database, DbErr, Statement};
+    use sea_orm::{ConnectionTrait, Database, DbErr, EntityTrait, Statement};
     use serde_json::json;
 
     use crate::core::{
         commands::{CommandOutput, CommandRunner, CommandSpec},
-        db, repositories,
+        db,
+        entities::runs as run_entity,
         services::{
             execution_targets::{self, RegisterExecutionTargetInput},
             model_backends::{self, RegisterModelBackendInput},
@@ -472,7 +476,8 @@ mod tests {
             .expect("planned command");
         assert_eq!(command.program, "python3");
         assert_eq!(command.args, vec!["-u", "run_openfold.py"]);
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
@@ -493,7 +498,8 @@ mod tests {
         let run = create_run(&db, &layout, false).await?;
         let (runner, _, _) = runner(7, "OpenFold failed");
         execute_openfold_run(&db, run.id, &runner).await?;
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "failed");
@@ -513,7 +519,8 @@ mod tests {
             result.skipped_execution_reason.as_deref(),
             Some("preflight failed")
         );
-        let updated = repositories::runs::find_by_id(&db, run.id)
+        let updated = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "failed");

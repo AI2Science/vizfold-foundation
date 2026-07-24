@@ -1,17 +1,21 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
-use sea_orm::DbErr;
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use crate::core::{
     commands::LocalCommandRunner,
     config, db,
+    entities::{
+        execution_targets as execution_target_entity, model_backends as model_backend_entity,
+        model_invocation_profiles as model_invocation_profile_entity,
+    },
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
-    repositories::{execution_targets, model_backends, model_invocation_profiles},
     seed::seed_defaults,
     services::{
-        artifacts, openfold_artifacts::register_known_openfold_artifacts,
+        artifacts, execution_targets, model_backends, model_invocation_profiles,
+        openfold_artifacts::register_known_openfold_artifacts,
         openfold_execution::execute_openfold_run, runs,
     },
 };
@@ -501,7 +505,8 @@ async fn register_artifacts(
             run.status
         );
     }
-    let backend = model_backends::find_by_id(database, run.model_backend_id)
+    let backend = model_backend_entity::Entity::find_by_id(run.model_backend_id)
+        .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
     if backend.slug != "openfold" {
@@ -511,7 +516,8 @@ async fn register_artifacts(
         )));
     }
 
-    let profile = model_invocation_profiles::find_by_id(database, run.invocation_profile_id)
+    let profile = model_invocation_profile_entity::Entity::find_by_id(run.invocation_profile_id)
+        .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
@@ -551,7 +557,8 @@ async fn execute_run(database: &sea_orm::DatabaseConnection, run_id: i32) -> Res
         .await?
         .ok_or_else(|| DbErr::Custom(format!("run {run_id} does not exist")))?
         .run;
-    let backend = model_backends::find_by_id(database, run.model_backend_id)
+    let backend = model_backend_entity::Entity::find_by_id(run.model_backend_id)
+        .one(database)
         .await?
         .ok_or_else(|| DbErr::Custom("run model backend does not exist".into()))?;
 
@@ -622,13 +629,17 @@ async fn queue_openfold_run(
     database: &sea_orm::DatabaseConnection,
     args: OpenfoldQueueArgs,
 ) -> Result<(), DbErr> {
-    let backend = model_backends::find_by_slug(database, "openfold")
+    let backend = model_backend_entity::Entity::find()
+        .filter(model_backend_entity::Column::Slug.eq("openfold"))
+        .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
-    let target = execution_targets::find_by_slug(database, "local-openfold")
+    let target = execution_target_entity::Entity::find()
+        .filter(execution_target_entity::Column::Slug.eq("local-openfold"))
+        .one(database)
         .await?
         .ok_or_else(seed_required_error)?;
-    let profile = model_invocation_profiles::list(database)
+    let profile = model_invocation_profiles::list_model_invocation_profiles(database)
         .await?
         .into_iter()
         .find(|profile| {
@@ -788,7 +799,7 @@ fn seed_required_error() -> DbErr {
 }
 
 async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let models = model_backends::list(database).await?;
+    let models = model_backends::list_model_backends(database).await?;
     print_table(
         &["ID", "SLUG", "LABEL", "VERSION"],
         models
@@ -807,7 +818,7 @@ async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr
 }
 
 async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let targets = execution_targets::list(database).await?;
+    let targets = execution_targets::list_execution_targets(database).await?;
     print_table(
         &["ID", "SLUG", "TYPE", "DESCRIPTION"],
         targets
@@ -826,7 +837,7 @@ async fn list_targets(database: &sea_orm::DatabaseConnection) -> Result<(), DbEr
 }
 
 async fn list_profiles(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
-    let profiles = model_invocation_profiles::list(database).await?;
+    let profiles = model_invocation_profiles::list_model_invocation_profiles(database).await?;
     print_table(
         &["ID", "MODEL ID", "TARGET ID", "INVOCATION KIND"],
         profiles

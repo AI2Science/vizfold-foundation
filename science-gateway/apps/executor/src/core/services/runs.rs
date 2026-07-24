@@ -1,11 +1,13 @@
 use std::path::Path;
 
 use chrono::Utc;
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
+    QueryFilter,
+};
 
-use crate::core::{
-    entities::{artifacts, runs},
-    repositories,
+use crate::core::entities::{
+    artifacts, execution_targets, model_backends, model_invocation_profiles, runs,
 };
 
 use super::validation::{reject_unknown_keys, require_json_object};
@@ -38,7 +40,7 @@ pub struct RunWithArtifacts {
 }
 
 pub async fn list_runs(db: &DatabaseConnection) -> Result<Vec<runs::Model>, DbErr> {
-    repositories::runs::list(db).await
+    runs::Entity::find().all(db).await
 }
 
 /// Immutable record of what produced a run. Catalog rows can be edited later; this cannot.
@@ -77,16 +79,18 @@ pub async fn submit_run(
     require_non_empty("input_id", &input.input_id)?;
     require_non_empty("input_sequence", &input.input_sequence)?;
 
-    let backend = repositories::model_backends::find_by_id(db, input.model_backend_id)
+    let backend = model_backends::Entity::find_by_id(input.model_backend_id)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
-    let target = repositories::execution_targets::find_by_id(db, input.execution_target_id)
+    let target = execution_targets::Entity::find_by_id(input.execution_target_id)
+        .one(db)
         .await?
         .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
-    let profile =
-        repositories::model_invocation_profiles::find_by_id(db, input.invocation_profile_id)
-            .await?
-            .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let profile = model_invocation_profiles::Entity::find_by_id(input.invocation_profile_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
     if profile.model_backend_id != input.model_backend_id
         || profile.execution_target_id != input.execution_target_id
@@ -116,7 +120,20 @@ pub async fn submit_run(
     // execution_parameters_json to be a JSON object; model-specific planning performs
     // additional validation where needed.
 
-    repositories::runs::create(db, input).await
+    runs::ActiveModel {
+        model_backend_id: Set(input.model_backend_id),
+        execution_target_id: Set(input.execution_target_id),
+        invocation_profile_id: Set(input.invocation_profile_id),
+        status: Set(input.status),
+        input_id: Set(input.input_id),
+        input_sequence: Set(input.input_sequence),
+        model_parameters_json: Set(input.model_parameters_json),
+        execution_parameters_json: Set(input.execution_parameters_json),
+        provenance_json: Set(input.provenance_json),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
 }
 
 fn require_non_empty(field_name: &str, value: &str) -> Result<(), DbErr> {
@@ -132,18 +149,41 @@ pub async fn update_run_status(
     run_id: i32,
     update: UpdateRunStatusInput,
 ) -> Result<runs::Model, DbErr> {
-    repositories::runs::update_status(db, run_id, update).await
+    let model = runs::Entity::find_by_id(run_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| DbErr::Custom("run does not exist".into()))?;
+
+    let mut active_model: runs::ActiveModel = model.into();
+    active_model.status = Set(update.status);
+
+    if let Some(started_at) = update.started_at {
+        active_model.started_at = Set(started_at);
+    }
+
+    if let Some(completed_at) = update.completed_at {
+        active_model.completed_at = Set(completed_at);
+    }
+
+    if let Some(error_message) = update.error_message {
+        active_model.error_message = Set(error_message);
+    }
+
+    active_model.update(db).await
 }
 
 pub async fn get_run_with_artifacts(
     db: &DatabaseConnection,
     run_id: i32,
 ) -> Result<Option<RunWithArtifacts>, DbErr> {
-    let Some(run) = repositories::runs::find_by_id(db, run_id).await? else {
+    let Some(run) = runs::Entity::find_by_id(run_id).one(db).await? else {
         return Ok(None);
     };
 
-    let artifacts = repositories::artifacts::list_by_run(db, run_id).await?;
+    let artifacts = artifacts::Entity::find()
+        .filter(artifacts::Column::RunId.eq(run_id))
+        .all(db)
+        .await?;
     Ok(Some(RunWithArtifacts { run, artifacts }))
 }
 
