@@ -1,5 +1,6 @@
 {
-  "OPENFOLD_BASE": "/expanse/lustre/projects/$OPENFOLD_ACCOUNT/$USER",
+  "OPENFOLD_ACCOUNT": "$ALLOC",
+  "OPENFOLD_BASE": "/expanse/lustre/projects/$ALLOC/$USER",
   "OPENFOLD_EXAMPLE": "6KWC_1",
   "OPENFOLD_GPU_GRES": "gpu:v100:1",
   "OPENFOLD_GPU_PARTITION": "gpu-shared",
