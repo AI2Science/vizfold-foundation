@@ -43,7 +43,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 ## Submitting a batch job
 
-1. Set environment variables (or edit `scripts/hpc/ice/run_esmf_ice.slurm`):
+1. Set environment variables (or edit `backends/esmfold/scripts/hpc/ice/run_esmf_ice.slurm`):
 
    - `FASTA` – path to input FASTA (single sequence)
    - `OUTDIR` – where to write outputs (e.g. `outputs/esmf_6KWC`)
@@ -54,7 +54,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 ```bash
 export FASTA=examples/monomer/fasta_dir_6KWC/6KWC.fasta
 export OUTDIR=outputs/esmf_6KWC
-sbatch scripts/hpc/ice/run_esmf_ice.slurm
+sbatch backends/esmfold/scripts/hpc/ice/run_esmf_ice.slurm
 ```
 
 3. Monitor:
@@ -78,7 +78,7 @@ echo -e ">tiny\nMKFLKFSLLTAVLLSVVFAFSSCGDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" > /tmp/t
 export FASTA=/tmp/tiny.fasta
 export OUTDIR=outputs/esmf_smoke
 export TRACE_MODE=none
-sbatch scripts/hpc/ice/run_esmf_ice.slurm
+sbatch backends/esmfold/scripts/hpc/ice/run_esmf_ice.slurm
 ```
 
 Then run with trace:

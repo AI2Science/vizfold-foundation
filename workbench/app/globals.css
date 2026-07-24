@@ -289,6 +289,55 @@ textarea {
   border-radius: 8px;
 }
 
+.structure-viewer {
+  margin-top: 10px;
+}
+
+/* 3Dmol builds an absolutely-positioned canvas, so the host needs position + explicit height. */
+.structure-canvas {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.structure-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seg-label {
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+
+.seg-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.seg-btn.seg-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 @media (max-width: 900px) {
   .workspace-grid {
     grid-template-columns: 1fr;

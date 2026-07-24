@@ -24,8 +24,8 @@ classifiers = [
 Homepage = "https://github.com/aqlaboratory/openfold"
 
 [tool.setuptools.packages.find]
-# namespaces defaults to true, which would sweep up every directory in the repo
-# (docs, run, install, outputs, web_app...) as a top-level package.
+# namespaces defaults to true, which would sweep up every sibling directory here
+# (docs, install, viz, imgs...) as a top-level package.
 namespaces = false
 exclude = ["tests*", "scripts*"]
 

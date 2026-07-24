@@ -3,8 +3,11 @@
 # Fold one sequence on a GPU; every path comes from OPENFOLD_* (install.sh prints the invocation).
 set -euo pipefail
 
-# OPENFOLD_HOME if a scheduler spooled this (BASH_SOURCE misses siblings), else BASH_SOURCE. config.sh sets REPO, die.
-. "${OPENFOLD_HOME:-$(dirname "${BASH_SOURCE[0]}")/..}/install/config.sh"
+# sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under the
+# backend subtree. The BASH_SOURCE fallback covers a direct local run (install/ is a sibling here).
+# config.sh sets REPO, OF, die.
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/backends/openfold/install}
+. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/install}/config.sh"
 
 fold::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
@@ -52,7 +55,7 @@ fold::preflight() {
 fold::run() {
     cd "$REPO"
     set -x
-    python3 -u run_pretrained_openfold.py \
+    python3 -u "$OF/run_pretrained_openfold.py" \
         "$FASTA_DIR" \
         "$DATA/pdb_mmcif/mmcif_files" \
         --use_precomputed_alignments "$ALIGNMENT_DIR" \

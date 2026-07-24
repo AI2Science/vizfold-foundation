@@ -4,12 +4,14 @@ import { notFound } from "next/navigation";
 import path from "node:path";
 import { readdirSync } from "node:fs";
 import { getRun, listArtifacts, type ArtifactRow } from "@/lib/db";
+import StructureViewer from "@/app/StructureViewer";
 
 export const dynamic = "force-dynamic";
 
 const IS_IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i;
+const IS_STRUCTURE = /\.(pdb|cif|ent)$/i;
 
-type FileEntry = { name: string; url: string; isImage: boolean };
+type FileEntry = { name: string; url: string; isImage: boolean; isStructure: boolean };
 
 // The run's own directory, <prefix>/runs/<id>. Its parent is the public/runs symlink target, so
 // a file's browser URL is `/runs/` + its path relative to that parent.
@@ -38,6 +40,7 @@ function browse(dir: string, runsRoot: string): FileEntry[] {
       name: path.relative(dir, file),
       url: `/runs/${path.relative(runsRoot, file)}`,
       isImage: IS_IMAGE.test(file),
+      isStructure: IS_STRUCTURE.test(file),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -121,6 +124,9 @@ export default async function RunPage({
                   <ul className="file-list">
                     <li>
                       <a href={directLink}>{path.basename(artifact.storage_uri)}</a>
+                      {IS_STRUCTURE.test(artifact.storage_uri) ? (
+                        <StructureViewer url={directLink} name={path.basename(artifact.storage_uri)} />
+                      ) : null}
                     </li>
                   </ul>
                 ) : files.length === 0 ? (
@@ -135,6 +141,9 @@ export default async function RunPage({
                           ) : null}
                           {file.name}
                         </a>
+                        {file.isStructure ? (
+                          <StructureViewer url={file.url} name={file.name} />
+                        ) : null}
                       </li>
                     ))}
                   </ul>

@@ -8,8 +8,8 @@ CONFIG_SH=1
 # The checkout root every script shares. OPENFOLD_HOME wins (exported by `vizfold install`);
 # otherwise it is three levels up from this lib at backends/openfold/install/config.sh.
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
-# The OpenFold backend subtree. Backend-local files (setup.py, environment.yml, sites/) live here;
-# shared demo assets (examples/, run/) stay at the checkout root.
+# The OpenFold backend subtree. Backend-local files (setup.py, environment.yml, fold.sh, sites/)
+# live here; shared demo assets (examples/) stay at the checkout root.
 OF=${OPENFOLD_DIR:-$REPO/backends/openfold}
 die() { echo "FATAL: $*" >&2; exit 1; }
 
