@@ -1,4 +1,5 @@
 import os
+import numpy as np
 from pymol import cmd
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -126,3 +127,80 @@ def generate_combined_attention_panels(
                         combine_3d_and_arc_images(struct_path, arc_path, out_path, fig_title=generate_title)
                     else:
                         print(f"[Skipped] Missing image for {prefix}")
+
+
+def compute_ca_distance_matrix(pdb_file, chain_id="A"):
+    """Pairwise Cα–Cα distance matrix (Å) for one chain of a predicted structure."""
+    from Bio import PDB
+
+    structure = PDB.PDBParser(QUIET=True).get_structure("protein", pdb_file)
+    coords = np.array([
+        residue["CA"].get_vector().get_array()
+        for model_ in structure
+        for chain in model_ if chain.id == chain_id
+        for residue in chain
+        if PDB.is_aa(residue, standard=True) and "CA" in residue
+    ])
+    diff = coords[:, None, :] - coords[None, :, :]
+    return np.sqrt((diff ** 2).sum(axis=-1))
+
+
+def render_contact_attention_panel(
+    pdb_file,
+    output_path,
+    attention_map=None,
+    chain_id="A",
+    contact_threshold=8.0,
+    region=None,
+    title=None,
+    show_plot=True,
+):
+    """Cα distance map, contact map, and — when an NxN ``attention_map`` is supplied —
+    an attention overlay with contacts marked, saved as one figure.
+
+    The caller passes an already-aggregated attention map (mean over heads/layers)
+    rather than re-running inference here. ``region`` is an optional ``(start, end)``
+    residue window. Lifted from the contact-map work in closed PR #75.
+    """
+    dist = compute_ca_distance_matrix(pdb_file, chain_id)
+    n = dist.shape[0]
+    r0, r1 = region if region else (0, n)
+    extent = [r0 - 0.5, r1 - 0.5, r0 - 0.5, r1 - 0.5]
+    dist_r = dist[r0:r1, r0:r1]
+
+    n_panels = 3 if attention_map is not None else 2
+    fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 6))
+
+    im0 = axes[0].imshow(dist_r, cmap="viridis_r", origin="lower", extent=extent)
+    axes[0].set_title("Cα distance map")
+    plt.colorbar(im0, ax=axes[0], label="Distance (Å)")
+
+    axes[1].imshow(dist_r < contact_threshold, cmap="Greys", origin="lower", extent=extent)
+    axes[1].set_title(f"Contact map (Cα < {contact_threshold} Å)")
+
+    if attention_map is not None:
+        attn = np.asarray(attention_map)
+        if attn.shape != (n, n):
+            raise ValueError(f"attention_map is {attn.shape}, expected ({n}, {n}) to match the structure")
+        attn_r = ((attn + attn.T) / 2)[r0:r1, r0:r1]
+        im2 = axes[2].imshow(attn_r, cmap="hot_r", origin="lower", extent=extent)
+        ci, cj = np.where(dist_r < contact_threshold)
+        axes[2].scatter(cj + r0, ci + r0, s=0.3, c="cyan", alpha=0.5, label=f"Cα < {contact_threshold} Å")
+        axes[2].set_title("Attention vs. contacts")
+        axes[2].legend(markerscale=10, fontsize=8)
+        plt.colorbar(im2, ax=axes[2], label="Attention weight")
+
+    for ax in axes:
+        ax.set_xlabel("Residue index")
+        ax.set_ylabel("Residue index")
+    if title:
+        fig.suptitle(title, fontsize=13, fontweight="bold")
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    print(f"[Saved] Contact/attention panel to {output_path}")

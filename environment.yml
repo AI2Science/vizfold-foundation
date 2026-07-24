@@ -44,6 +44,8 @@ dependencies:
   - PyYAML
   - requests
   - scipy
+  - matplotlib-base      # attention plots (run/viz.py + the visualize_* modules); -base skips the GUI toolkit (renders go to PNG)
+  - pymol-open-source    # 3D structure + attention head renders
   - tqdm
   - typing-extensions
   - wandb
