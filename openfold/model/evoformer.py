@@ -497,6 +497,51 @@ def save_attention_topk(attention_dict, save_dir, layer_name, layer_idx, attn_ty
     print(f"[Done] Saved top {top_k} entries for {attn_type} to {output_path}")
 
 
+def save_attention_full(attention_dict, save_dir, layer_name, layer_idx, attn_type, triangle_residue_idx):
+    """
+    Save the full attention matrices for MSA Row and Triangle Start attention maps.
+
+    Args:
+        attention_dict (dict): Dictionary holding recent attention maps.
+        save_dir (str): Directory to save output files.
+        layer_name (str): Full name of the layer.
+        layer_idx (int): Layer number.
+        attn_type (str): Either "msa_row_attn" or "triangle_start_attn".
+    """
+
+    if layer_name not in attention_dict:
+        print(f"[Warning] Layer {layer_name} not found in recent attention.")
+        return
+
+    attn_array = attention_dict[layer_name]
+
+    if isinstance(attn_array, list):
+        attn_array = attn_array[0] if len(attn_array) == 1 else np.concatenate(attn_array, axis=0)
+
+    if attn_type == "msa_row_attn":
+        attn_array = attn_array[0]  # Shape: (N, S, S)
+    elif attn_type == "triangle_start_attn":
+        if triangle_residue_idx is None:
+            print(f"[Warning] Triangle residue index not provided. Using average of all residues.")
+            attn_array = np.mean(attn_array, axis=0)
+            triangle_residue_idx = 'avg'
+        else:
+            attn_array = attn_array[triangle_residue_idx]
+            triangle_residue_idx = str(triangle_residue_idx)
+    else:
+        raise ValueError(f"Unknown attention type: {attn_type}")
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    if attn_type == "msa_row_attn":
+        output_path = os.path.join(save_dir, f"{attn_type}_layer{layer_idx}.npz")
+    elif attn_type == "triangle_start_attn":
+        output_path = os.path.join(save_dir, f"{attn_type}_layer{layer_idx}_residue_idx_{triangle_residue_idx}.npz")
+
+    np.savez_compressed(output_path, attn=attn_array)
+    print(f"[Done] Saved full attention for {attn_type} to {output_path}")
+
+
 def save_all_topk_from_recent_attention(save_dir, triangle_residue_idx, top_k=500):
     """
     Scan ATTENTION_METADATA.recent_attention and save top-K attention maps for MSA and Triangle.
@@ -533,6 +578,41 @@ def save_all_topk_from_recent_attention(save_dir, triangle_residue_idx, top_k=50
                 attn_type=attn_type,
                 triangle_residue_idx=triangle_residue_idx,
                 top_k=top_k
+            )
+
+
+def save_all_full_from_recent_attention(save_dir, triangle_residue_idx):
+    """
+    Scan ATTENTION_METADATA.recent_attention and save dense attention arrays for MSA and Triangle.
+
+    Args:
+        save_dir (str): Where to store the npz files.
+        triangle_residue_idx (int): Residue index for triangle start/end attention.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    for k, v in ATTENTION_METADATA.recent_attention.items():
+        attn_type, layer_idx = parse_attention_metadata_key(k)
+
+        if attn_type is not None and layer_idx >= 0:
+            if isinstance(v, list) and isinstance(v[0], np.ndarray):
+                try:
+                    v_concat = v[0] if len(v) == 1 else np.concatenate(v, axis=0)
+                except Exception as e:
+                    print(f"[WARNING] Could not concatenate attention for {k}: {e}")
+                    continue
+            else:
+                v_concat = v
+
+            temp_dict = {k: v_concat}
+
+            save_attention_full(
+                attention_dict=temp_dict,
+                save_dir=save_dir,
+                layer_name=k,
+                layer_idx=layer_idx,
+                attn_type=attn_type,
+                triangle_residue_idx=triangle_residue_idx,
             )
 
 
@@ -726,7 +806,10 @@ class EvoformerBlock(MSABlock):
             # compute top-k and save to text file for demo
             if self.attention_config.get("demo_attn", False) and hasattr(ATTENTION_METADATA, "recent_attention"):
                 triangle_residue_idx = self.attention_config.get("triangle_residue_idx", None)
-                save_all_topk_from_recent_attention(self.attn_map_dir, triangle_residue_idx, top_k=500)
+                top_k = self.attention_config.get("top_k", 500)
+                save_all_topk_from_recent_attention(self.attn_map_dir, triangle_residue_idx, top_k=top_k)
+                if self.attention_config.get("save_full_attn", False):
+                    save_all_full_from_recent_attention(self.attn_map_dir, triangle_residue_idx)
                 # Clear after use to free memory
                 ATTENTION_METADATA.recent_attention.clear()
         return m, z
