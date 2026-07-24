@@ -35,8 +35,8 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
 Backends:
 BACKEND   STATUS         ENV PREFIX
 --------  -------------  --------------------------------------------------------
-openfold  installed      /work/nvme/bbol/yjayawardana/vizfold/mamba/envs/openfold-env
-esmfold   not installed  /work/nvme/bbol/yjayawardana/vizfold/esmfold-venv
+openfold  installed      /work/nvme/bbol/yjayawardana/vizfold/mamba/envs/vizfold-openfold
+esmfold   not installed  /work/nvme/bbol/yjayawardana/vizfold/vizfold-esmfold
 ```
 
 The paths above (`OPENFOLD_PREFIX`, `OPENFOLD_DATA_DIR`, the account, partition) are resolved live

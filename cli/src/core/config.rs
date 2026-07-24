@@ -80,20 +80,25 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| openfold_home().join("data"))
 }
 
-/// micromamba env prefix for local OpenFold execution (matches fold.sh's
-/// `${OPENFOLD_ENV_PREFIX:-$PREFIX/mamba/envs/openfold-env}`).
+/// Every environment the install creates is named `vizfold-<backend>`. Mirrors `vizfold::env` in
+/// `lib/config.sh`; a conda env lives under `<prefix>/mamba/envs`, a venv beside it.
+pub fn conda_env(name: &str) -> PathBuf {
+    prefix().join("mamba/envs").join(format!("vizfold-{name}"))
+}
+
+/// micromamba env prefix for local OpenFold execution (matches fold.sh's `$OPENFOLD_ENV_PREFIX`).
 pub fn openfold_env_prefix() -> PathBuf {
     resolved("OPENFOLD_ENV_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(|| prefix().join("mamba/envs/openfold-env"))
+        .unwrap_or_else(|| conda_env("openfold"))
 }
 
 /// venv prefix for the ESMFold backend (matches `backends/esmfold/install/install.sh`'s
-/// `${ESMFOLD_ENV_PREFIX:-$PREFIX/esmfold-venv}`).
+/// `$ESMFOLD_ENV_PREFIX`). A venv, so it sits beside the conda envs rather than under them.
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(|| prefix().join("esmfold-venv"))
+        .unwrap_or_else(|| prefix().join("vizfold-esmfold"))
 }
 
 /// The install-resolved config map as sorted (key, value) string pairs, for `vizfold status`.

@@ -19,7 +19,7 @@ step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1
 setup::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
-    ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
+    ENV_NAME=${OPENFOLD_ENV_NAME:-$(vizfold::env openfold)}
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
         aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;

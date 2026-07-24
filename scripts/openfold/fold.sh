@@ -11,7 +11,7 @@ LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 
 fold::config() {
     PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
-    ENV_NAME=${OPENFOLD_ENV_NAME:-openfold-env}
+    ENV_NAME=${OPENFOLD_ENV_NAME:-$(vizfold::env openfold)}
 }
 
 # torch/DeepSpeed JIT-compile at import; a site's leaked toolchain env breaks it. Re-exec in a curated env (HOME, clean PATH, SLURM/CUDA binding, OPENFOLD_*).

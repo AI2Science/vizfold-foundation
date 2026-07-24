@@ -388,14 +388,14 @@ mod tests {
         let wrapped = activate_env_command(
             &command,
             &PathBuf::from("/work/of"),
-            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+            &PathBuf::from("/work/of/mamba/envs/vizfold-openfold"),
         );
 
         assert_eq!(wrapped.program, "bash");
         assert_eq!(wrapped.args[0], "-c");
         let script = &wrapped.args[1];
         assert!(script.contains("'/work/of/bin/micromamba' shell hook -s bash"));
-        assert!(script.contains("micromamba activate '/work/of/mamba/envs/openfold-env'"));
+        assert!(script.contains("micromamba activate '/work/of/mamba/envs/vizfold-openfold'"));
         assert!(script.contains("activate.d/openfold.sh"));
         assert!(script.contains("TRITON_CACHE_DIR"));
         assert!(script.trim_end().ends_with("exec \"$@\""));
@@ -424,7 +424,7 @@ mod tests {
         let composed = compose_exec_command(
             &command,
             &PathBuf::from("/work/of"),
-            &PathBuf::from("/work/of/mamba/envs/openfold-env"),
+            &PathBuf::from("/work/of/mamba/envs/vizfold-openfold"),
             &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
             true,
         );

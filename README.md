@@ -117,6 +117,13 @@ exactly what you care about and nothing else:
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
+Every environment the install creates is named `vizfold-<backend>` — `vizfold-openfold` and
+`vizfold-workbench` as conda envs under `<prefix>/mamba/envs`, `vizfold-esmfold` as a venv beside
+them. `lib/config.sh`'s `vizfold::env` and `conda_env()` in `cli/src/core/config.rs` are the two
+definitions. Override any of them with `OPENFOLD_ENV_NAME` / `OPENFOLD_ENV_PREFIX` /
+`ESMFOLD_ENV_PREFIX`; an install predating this naming keeps its own paths, because the config it
+wrote outranks these defaults.
+
 A `<site>.json` carries every variable and templates paths off `$VAR` references, resolved
 recursively (`$VAR` against the environment first, then other keys in the same file). The site's
 `<site>.sh` discovers only the one login-specific atom the templates need — the allocation, the

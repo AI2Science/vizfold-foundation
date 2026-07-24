@@ -626,7 +626,8 @@ fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         ".done",
         "params",
         "workbench",
-        "esmfold-venv",
+        "vizfold-esmfold",
+        "esmfold-venv", // pre-rename installs; uninstall must still find one
         "vizfold.db",
     ]
     .iter()
@@ -814,7 +815,7 @@ fn system_node_bin() -> Option<PathBuf> {
 /// own -- clusters ship none (Delta has no `node`, `npm`, or nodejs module). Kept out of every
 /// backend env so the dashboard works before a backend is installed. Returns the bin dir for PATH.
 fn ensure_node() -> Result<PathBuf, DbErr> {
-    let env_dir = config::prefix().join("mamba/envs/vizfold-web");
+    let env_dir = config::conda_env("workbench");
     let bin = env_dir.join("bin");
     if bin.join("node").is_file() {
         return Ok(bin);
@@ -1761,6 +1762,7 @@ mod tests {
             prefix.join("data"),
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
+            prefix.join("vizfold-esmfold"),
             prefix.join("esmfold-venv"),
             base.join(".openfold-pkgs"),
             home.join("openfold/resources/params"),
