@@ -215,7 +215,14 @@ setup::fold_vars() {
     GPU_RES=${OPENFOLD_GPU_RESOURCES:---cpus-per-task=8 --mem=32G}
     GPU_GRES=${OPENFOLD_GPU_GRES:-gpu:1}
     GPU_TIME=${OPENFOLD_GPU_TIME:-02:00:00}
-    LAUNCH="${OPENFOLD_GPU_PARTITION:+srun ${OPENFOLD_GPU_ACCOUNT:+-A $OPENFOLD_GPU_ACCOUNT }-p $OPENFOLD_GPU_PARTITION --gres=$GPU_GRES $GPU_RES -t $GPU_TIME }"
+    # The command below runs in the shell that invoked the install, which slurm::fold_context
+    # classified: on a GPU node it runs as printed, and asking for a partition from inside an
+    # allocation is rejected anyway.
+    case ${OPENFOLD_FOLD_CONTEXT:-none} in
+        node)       LAUNCH= ;;
+        allocation) LAUNCH="srun --ntasks=1 " ;;
+        *)          LAUNCH="${OPENFOLD_GPU_PARTITION:+srun ${OPENFOLD_GPU_ACCOUNT:+-A $OPENFOLD_GPU_ACCOUNT }-p $OPENFOLD_GPU_PARTITION --gres=$GPU_GRES $GPU_RES -t $GPU_TIME }" ;;
+    esac
     EXAMPLE=${OPENFOLD_EXAMPLE:-6KWC_1}
     FOLD_ARGS=${OPENFOLD_FOLD_ARGS:-}
     STRUCTURE=relaxed
