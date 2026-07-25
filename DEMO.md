@@ -41,7 +41,6 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
   OPENFOLD_DRIVER_CUDA = 12.2
   OPENFOLD_ENV_PREFIX = /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
   OPENFOLD_EXAMPLE = 6KWC_1
-  OPENFOLD_FOLD_ARGS =
   OPENFOLD_GPU_ACCOUNT = bbol-delta-gpu
   OPENFOLD_GPU_GRES = gpu:1
   OPENFOLD_GPU_PARTITION = gpuA100x4-interactive
@@ -58,7 +57,7 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
 ```
 
 That key set is fixed: every cluster and either backend writes the same names, and a name this
-install did not settle (`ESMFOLD_ENV_PREFIX`, `OPENFOLD_FOLD_ARGS` above) is written empty, which
+install did not settle (`ESMFOLD_ENV_PREFIX` above) is written empty, which
 every reader treats as unset. The values are resolved live during install — on Delta the prefix and
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
