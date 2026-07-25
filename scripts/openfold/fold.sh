@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Fold one sequence on a GPU; every path comes from OPENFOLD_* (install.sh prints the invocation).
+# Fold one sequence on a GPU; every path comes from OPENFOLD_* (setup.sh prints the invocation).
 set -euo pipefail
 
 # sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under the
@@ -39,7 +39,7 @@ fold::paths() {
 
 fold::activate() {
     local mm=$PREFIX/bin/micromamba
-    [ -x "$mm" ] || die "nothing installed at $PREFIX; run install.sh first"
+    [ -x "$mm" ] || die "nothing installed at $PREFIX; run \`vizfold install openfold\` first"
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
     # By path, not name: the env lives under VIZFOLD_ENV_BASE, not $MAMBA_ROOT_PREFIX/envs.
     mamba::activate "$mm" "$ENV_DIR"

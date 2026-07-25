@@ -117,7 +117,7 @@ ssh <gt_username>@login-ice.pace.gatech.edu
 Navigate to the repository:
 
 ```bash
-cd attention-viz-demo
+cd "$OPENFOLD_HOME"   # the vizfold checkout; the bootstrap clones it to $HOME/vizfold-src
 ```
 
 Activate environment:
@@ -158,7 +158,7 @@ GPU execution confirms cluster compatibility for larger inference workloads.
 
 ## Additional Intermediate Output Validation
 
-The latest shared `feature/esmfold-backend` branch now exports additional intermediate outputs beyond the original encoder attention and activation traces.
+The backend exports intermediate outputs beyond encoder attention and activation traces.
 
 Verified local outputs include:
 

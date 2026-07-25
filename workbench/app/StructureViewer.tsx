@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 // 3Dmol drives WebGL and reads `window`, so the library is imported dynamically inside the
-// effect (never during SSR) and the viewer is built after mount. Ported from the retired Flask
-// web_app demo's 3Dmol viewer: cartoon/stick/line representations + default/chain/residue coloring.
+// effect (never during SSR) and the viewer is built after mount.
 
 type Viewer = ReturnType<(typeof import("3dmol"))["createViewer"]>;
 type Representation = "cartoon" | "stick" | "line";

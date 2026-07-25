@@ -31,9 +31,14 @@ pip install torch
 pip install ./backends/esmfold
 ```
 
-`backends/esmfold/requirements.txt` pins `transformers>=4.36.0`; PyTorch is installed separately.
+
 
 ## Run locally
+
+The executor runs the same script and records the run and its outputs:
+`vizfold queue-run esmfold --input-id 6KWC_1 --input-sequence <SEQ> --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta`,
+then `vizfold execute-run <id>`. The commands below call the script directly — use the install's
+interpreter (`$ESMFOLD_ENV_PREFIX/bin/python`, from `vizfold status`) rather than a bare `python`.
 
 **Structure only (fast):**
 

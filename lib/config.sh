@@ -26,7 +26,7 @@ config::file() {
 # Fill unset vars from a JSON file, never overwriting -- so inline > user file > site defaults.
 # Values are templates: $VAR/${VAR} resolve against the environment first, then against other keys in
 # the same file, recursively -- so a <site>.json builds OPENFOLD_PREFIX off OPENFOLD_BASE off a
-# discovered $ALLOC, in any key order. No commands run; an unresolved name expands to empty.
+# discovered $OPENFOLD_ALLOCATION, in any key order. No commands run; an unresolved name expands to empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
     [ -r "$file" ] && command -v python3 >/dev/null || return 0

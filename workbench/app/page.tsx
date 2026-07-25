@@ -18,7 +18,6 @@ export default async function HomePage() {
       <Poller statuses={runs.map((run) => run.status)} />
       <section className="hero-card">
         <div className="hero-copy">
-          <p className="eyebrow">VizFold v2</p>
           <h1 className="brand-title">VizFold</h1>
           <p className="subtitle">
             Fold a protein and inspect what the model computed — the predicted structure and the

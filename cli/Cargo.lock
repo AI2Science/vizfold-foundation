@@ -576,7 +576,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
- "dotenvy",
  "sea-orm",
  "sea-orm-migration",
  "serde_json",

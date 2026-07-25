@@ -5,24 +5,18 @@ This guide covers running the ESMFold backend and trace export on an ICE cluster
 ## Prerequisites
 
 - Access to ICE with GPU nodes
-- Conda (or module environment) with PyTorch (CUDA), and `transformers` installed
+- The `vizfold` CLI on PATH; `vizfold install esmfold` builds the PyTorch (CUDA) + `transformers` environment for you
 
 ## Environment
 
-### Option A: Conda (simpler)
-
 ```bash
-conda create -n vizfold python=3.10
-conda activate vizfold
-conda install pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
-pip install transformers
-# From repo root:
-pip install -e .
+vizfold install esmfold
+vizfold status          # prints OPENFOLD_HOME and ESMFOLD_ENV_PREFIX
 ```
 
-### Option B: Container (if ICE supports Apptainer/Singularity)
-
-Use a image that includes PyTorch + fair-esm. Not required; mention in job script if available.
+The install creates the venv (PyTorch + Transformers) at `<VIZFOLD_ENV_BASE>/vizfold-esmfold` and
+records `ESMFOLD_ENV_PREFIX` in `~/.config/vizfold/vizfold.json`. See [esmfold.md](esmfold.md) for
+the manual pip path and the CUDA wheel overrides (`ESMFOLD_TORCH_SPEC`, `ESMFOLD_PIP_INDEX_URL`).
 
 ## Interactive GPU session (debugging)
 
@@ -36,8 +30,8 @@ Then:
 
 ```bash
 module load cuda   # or your site’s module
-conda activate vizfold
-cd /path/to/vizfold-foundation
+source "$ESMFOLD_ENV_PREFIX/bin/activate"    # the prefix `vizfold status` reports
+cd "$OPENFOLD_HOME"
 python -c "import torch; print(torch.cuda.is_available())"
 ```
 
@@ -48,6 +42,9 @@ python -c "import torch; print(torch.cuda.is_available())"
    - `FASTA` – path to input FASTA (single sequence)
    - `OUTDIR` – where to write outputs (e.g. `outputs/esmf_6KWC`)
    - `TRACE_MODE` – `none`, `attention`, `activations`, or `attention+activations`
+   - `DEVICE` – torch device (default `cuda`)
+   - `OPENFOLD_HOME` – checkout the job `cd`s into before running; relative `FASTA`/`OUTDIR`
+     resolve there (unset means the submit directory)
 
 2. Submit:
 
@@ -94,8 +91,8 @@ export TRACE_MODE=attention
 | Issue | What to check |
 |-------|----------------|
 | CUDA not found | Load correct `cuda` module; `nvidia-smi` on the node |
-| `torch` not seeing GPU | Install PyTorch with CUDA: `conda install pytorch pytorch-cuda=...` |
-| Missing packages | `pip install transformers`; run from repo root or `pip install -e .` |
+| `torch` not seeing GPU | The venv holds a CPU wheel; reinstall from a CUDA index: `ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu126 vizfold install esmfold` |
+| Missing packages | The job runs a bare `python`; activate the venv (`source $ESMFOLD_ENV_PREFIX/bin/activate`) before `sbatch` |
 | Disk quota | Use `OUTDIR` on scratch or project space, not home if limited |
 | Job killed (OOM) | Increase `--mem` or use shorter sequence / `--trace_mode none` |
 

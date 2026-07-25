@@ -627,8 +627,7 @@ fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         "params",
         "workbench",
         "envs",
-        // Layouts predating the env base; uninstall must still find their environments.
-        "vizfold-esmfold",
+        // The pre-env-base ESMFold layout; uninstall must still find that environment.
         "esmfold-venv",
         "vizfold.db",
     ]
@@ -1150,7 +1149,6 @@ async fn queue_openfold_run(
     Ok(())
 }
 
-/// The queue step without its reporting, so `fold` can chain it into execute and register.
 /// The seeded records a local run is built from, plus what is derived from them. Both queue paths
 /// need all of it and differ only in the backend.
 struct LocalCatalog {
@@ -1765,7 +1763,6 @@ mod tests {
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
             prefix.join("envs"),
-            prefix.join("vizfold-esmfold"),
             prefix.join("esmfold-venv"),
             base.join(".openfold-pkgs"),
             home.join("openfold/resources/params"),

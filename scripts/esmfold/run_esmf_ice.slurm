@@ -11,8 +11,7 @@
 # Usage:
 #   export FASTA=/path/to/seq.fasta OUTDIR=outputs/esmf_run
 #   sbatch run_esmf_ice.slurm
-# Or override on the command line:
-#   sbatch run_esmf_ice.slurm  (uses FASTA and OUTDIR from environment)
+
 #
 # For a quick smoke test (<5 min): use a short FASTA and --trace_mode none
 
@@ -27,23 +26,13 @@ DEVICE="${DEVICE:-cuda}"
 mkdir -p outputs/logs
 mkdir -p "$OUTDIR"
 
-# Uncomment and set for your ICE environment:
-# module load cuda/11.8
-# module load anaconda3
-# source activate vizfold
-
-# Or conda in project:
-# eval "$(conda shell.bash hook)"
-# conda activate vizfold
-
 cd "${OPENFOLD_HOME:-.}"
 
 # Sanity check: fail fast if the environment is not set up
 python -c "import torch; import transformers" 2>/dev/null || {
     echo "ERROR: torch or transformers not importable."
-    echo "Activate your conda env before submitting, e.g.:"
-    echo "  conda activate vizfold"
-    echo "Or uncomment the module/conda lines above in this script."
+    echo "Activate the environment vizfold install esmfold created, then resubmit:"
+    echo "  source \$(vizfold status | awk '/esmfold/ { print \$NF }')/bin/activate"
     exit 1
 }
 

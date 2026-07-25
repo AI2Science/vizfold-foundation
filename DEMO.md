@@ -23,13 +23,26 @@ $ vizfold status
 VizFold status
 
 Config: /u/yjayawardana/.config/vizfold/vizfold.json
-  OPENFOLD_HOME = /u/yjayawardana/vizfold-src
-  OPENFOLD_PREFIX = /work/nvme/bbol/yjayawardana/vizfold
+  ESMFOLD_ENV_PREFIX =
+  OPENFOLD_ACCOUNT = bbol-delta-cpu
+  OPENFOLD_AF2_ROOT = /work/hdd/data/alphafold2/database
   OPENFOLD_DATA_DIR = /work/nvme/bbol/yjayawardana/vizfold/data
-  OPENFOLD_SITE = delta
+  OPENFOLD_DRIVER_CUDA = 12.2
+  OPENFOLD_ENV_PREFIX = /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
+  OPENFOLD_EXAMPLE = 6KWC_1
+  OPENFOLD_FOLD_ARGS =
+  OPENFOLD_GPU_ACCOUNT = bbol-delta-gpu
+  OPENFOLD_GPU_GRES = gpu:1
   OPENFOLD_GPU_PARTITION = gpuA100x4-interactive
+  OPENFOLD_GPU_RESOURCES = --cpus-per-task=8 --mem=32G
   OPENFOLD_GPU_TIME = 01:00:00
-  ...
+  OPENFOLD_HOME = /u/yjayawardana/vizfold-src
+  OPENFOLD_MAX_CUDA = 12.8
+  OPENFOLD_PARTITION = cpu
+  OPENFOLD_PREFIX = /work/nvme/bbol/yjayawardana/vizfold
+  OPENFOLD_SITE = delta
+  VIZFOLD_DB = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db
+  VIZFOLD_ENV_BASE = /work/nvme/bbol/yjayawardana/vizfold/envs
   database = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db (present)
 
 Backends:
@@ -39,9 +52,11 @@ openfold  installed      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openf
 esmfold   not installed  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold
 ```
 
-The paths above (`OPENFOLD_PREFIX`, `OPENFOLD_DATA_DIR`, the account, partition) are resolved live
-during install and written to `vizfold.json`; on Delta they land under your `/work/nvme`
-allocation. Everything after this point reads them from there.
+That key set is fixed: every cluster and either backend writes the same names, and a name this
+install did not settle (`ESMFOLD_ENV_PREFIX`, `OPENFOLD_FOLD_ARGS` above) is written empty, which
+every reader treats as unset. The values are resolved live during install — on Delta the prefix and
+data directory land under your `/work/nvme` allocation. Everything after this point reads them from
+`vizfold.json`.
 
 ## 1. Seed the executor records
 
@@ -109,8 +124,10 @@ when you queue.
 vizfold execute-run 1
 ```
 
-`execute-run` prints each preflight check, then — because a GPU partition is configured but no
-allocation is held — wraps the OpenFold command in `srun -p gpuA100x4-interactive --gres=gpu:1`,
+`execute-run` prints each preflight check — the `gpu` one warns because the login node has none —
+then, because a GPU partition is configured but no allocation is held, wraps the OpenFold command
+in the srun `vizfold.json` describes:
+`srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00`,
 streams its logs, and reports the final status. On Delta the fold itself took ~78 s on one A100
 (a queue wait shows first as `srun: job N queued and waiting for resources`).
 
@@ -118,14 +135,18 @@ streams its logs, and reports the final status. On Delta the fold itself took ~7
 Executing run 1
 
 Preflight: passed
+[warning] gpu: no GPU visible; the run will fall back to CPU
 [passed] program configured: program 'python3' is configured
+[passed] script argument configured: script argument 'scripts/openfold/run_pretrained_openfold.py' follows -u
 [passed] working directory: '/u/yjayawardana/vizfold-src' exists
 [passed] script file: '/u/yjayawardana/vizfold-src/scripts/openfold/run_pretrained_openfold.py' exists
 [passed] input_id: run input_id '6KWC_1' is configured
-[passed] fasta_dir: '/u/yjayawardana/vizfold-src/examples/monomer/fasta_dir_6KWC' exists
+[passed] fasta_dir: '/u/yjayawardana/vizfold-src/examples/monomer/fasta_dir_6KWC' contains one FASTA file with tag '6KWC_1' matching run input_id
 ...
 
 Final status: completed
+
+Run 1 completed in 78s. View it with: vizfold serve
 ```
 
 Verify the structure directly — a relaxed 6KWC prediction is 2839 atoms, and `--demo-attn` wrote
@@ -211,9 +232,10 @@ To confirm the install without the executor at all, `vizfold install openfold` p
 that folds the bundled example straight through `fold.sh` and counts the atoms:
 
 ```bash
-srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 00:30:00 \
-  env OPENFOLD_PREFIX=$OPENFOLD_PREFIX $OPENFOLD_HOME/scripts/openfold/fold.sh 6KWC_1
-grep -c '^ATOM' $OPENFOLD_PREFIX/outputs/6KWC_1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
+srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00 \
+  env OPENFOLD_PREFIX=/work/nvme/bbol/yjayawardana/vizfold \
+  /u/yjayawardana/vizfold-src/scripts/openfold/fold.sh 6KWC_1
+grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/outputs/6KWC_1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
 ```
 
 The account, partition, and resources here are Delta's; `vizfold install openfold` prints the
@@ -244,7 +266,9 @@ full databases).
 
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`
 
-The GPU partition, account, and time cap come from the site profile
-(`backends/openfold/install/sites/<ClusterName>.json`) and are written to `vizfold.json`. If you
-override any `OPENFOLD_GPU_*` value, keep it within the partition's limits (on Delta,
+The GPU partition and time cap come from the site profile
+(`backends/openfold/install/sites/<ClusterName>.json`); the account is not in that file — it is
+worked out during the install (on Delta, `slurm::nvme_alloc` names it from the allocation plus a
+`-delta-gpu` suffix). All three are written to `vizfold.json`. If you override any
+`OPENFOLD_GPU_*` value, keep it within the partition's limits (on Delta,
 `gpuA100x4-interactive` caps at `01:00:00`).

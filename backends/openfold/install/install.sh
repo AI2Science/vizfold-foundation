@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Install a model backend (OpenFold today) on this cluster; dispatch on SLURM ClusterName, add a cluster as backends/openfold/install/sites/<ClusterName>.sh. Invoked by `vizfold install`.
+# Install the OpenFold backend on this cluster; dispatch on the cluster name slurm::cluster resolves (SLURM_CLUSTER_NAME, then scontrol, then slurm.conf), add a cluster as backends/openfold/install/sites/<ClusterName>.sh. Invoked by `vizfold install openfold`.
 set -euo pipefail
 
 # Checkout root (already cloned by the bootstrap) and the OpenFold backend subtree it lives in.

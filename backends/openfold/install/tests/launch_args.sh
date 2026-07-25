@@ -1,5 +1,5 @@
 #!/bin/bash
-# Assertions for slurm::launch_args. Run: bash install/tests/launch_args.sh
+# Assertions for slurm::launch_args and slurm::cluster. Run: bash install/tests/launch_args.sh
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 REPO=$(cd .. && pwd); export REPO
