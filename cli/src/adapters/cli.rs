@@ -1598,15 +1598,10 @@ async fn report_execution(
         );
     }
 
+    // Only exit_code: the command streamed, so its output already went to the terminal and
+    // CommandOutput's stdout/stderr are empty by construction (commands.rs, the stream branch).
     if let Some(output) = outcome.output {
-        println!("\nCommand output:");
-        println!("exit_code: {}", output.exit_code);
-        if !output.stdout.is_empty() {
-            println!("stdout:\n{}", output.stdout);
-        }
-        if !output.stderr.is_empty() {
-            println!("stderr:\n{}", output.stderr);
-        }
+        println!("\nCommand exit_code: {}", output.exit_code);
     }
 
     if let Some(run) = runs::get_run_with_artifacts(database, run_id)
@@ -1723,13 +1718,21 @@ async fn run_execute(
             "Run {} completed{took}. View it with: vizfold serve",
             run.id
         );
-    } else {
-        println!("Run {} finished with status: {}", run.id, run.status);
-        if let Some(message) = run.error_message {
-            println!("{message}");
-        }
     }
-    Ok(())
+
+    // A fold that failed must exit non-zero: this is the command README and setup::ready hand the
+    // user, and a `set -e` script or a SLURM batch step has nothing else to test.
+    if run.status == "completed" {
+        return Ok(());
+    }
+    Err(DbErr::Custom(format!(
+        "run {} finished with status: {}{}",
+        run.id,
+        run.status,
+        run.error_message
+            .map(|message| format!("\n{message}"))
+            .unwrap_or_default()
+    )))
 }
 
 /// A target that is neither a run id nor a bundled example.
