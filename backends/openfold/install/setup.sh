@@ -211,18 +211,7 @@ setup::fold_vars() {
     GPU_RES=${OPENFOLD_GPU_RESOURCES:---cpus-per-task=8 --mem=32G}
     GPU_GRES=${OPENFOLD_GPU_GRES:-gpu:1}
     GPU_TIME=${OPENFOLD_GPU_TIME:-02:00:00}
-    # The command below runs in the shell that invoked the install, which slurm::fold_context
-    # classified: on a GPU node it runs as printed, and asking for a partition from inside an
-    # allocation is rejected anyway.
-    case ${OPENFOLD_FOLD_CONTEXT:-none} in
-        node)       LAUNCH= ;;
-        allocation) LAUNCH="srun --ntasks=1 " ;;
-        *)          LAUNCH="${OPENFOLD_GPU_PARTITION:+srun ${OPENFOLD_GPU_ACCOUNT:+-A $OPENFOLD_GPU_ACCOUNT }-p $OPENFOLD_GPU_PARTITION --gres=$GPU_GRES $GPU_RES -t $GPU_TIME }" ;;
-    esac
     EXAMPLE=${OPENFOLD_EXAMPLE:-6KWC_1}
-    FOLD_ARGS=${OPENFOLD_FOLD_ARGS:-}
-    STRUCTURE=relaxed
-    case $FOLD_ARGS in *skip_relaxation*) STRUCTURE=unrelaxed ;; esac
 }
 
 # Record resolved values, not the caller's -- a consumer shouldn't know our fallbacks.
@@ -239,16 +228,15 @@ setup::ready() {
     cat <<EOF
 == ready (+$((SECONDS))s)
 
-Check it works -- fold the bundled example and count the atoms:
+Check it works -- queue and fold the bundled example, onto a GPU node if one is configured:
 
-  ${LAUNCH}$ENV_DIR/bin/vizfold-openfold $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
-  grep -c '^ATOM' $PREFIX/outputs/$EXAMPLE/predictions/${EXAMPLE}_model_1_ptm_$STRUCTURE.pdb
+  vizfold execute-run $EXAMPLE
 
-A few thousand atoms means it worked. To use the environment directly:
+To drive the model yourself, activate the environment and use its own CLI:
 
   export MAMBA_ROOT_PREFIX=$PREFIX/mamba
   eval "\$($MM shell hook --shell bash)" && micromamba activate $ENV_DIR
-  export OPENFOLD_HOME=$REPO OPENFOLD_DATA_DIR=$DATA
+  openfold --help                      # or: python -m openfold --help
 EOF
 }
 

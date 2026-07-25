@@ -112,7 +112,4 @@ setup(
     # stays here: it needs torch at build time to pick its -gencode flags.
     ext_modules=modules,
     cmdclass={'build_ext': BuildExtension},
-    # A shell entrypoint, so `scripts` rather than pyproject's `project.scripts`
-    # (which only takes Python callables). Lands in <env>/bin, editable or not.
-    scripts=['bin/vizfold-openfold'],
 )

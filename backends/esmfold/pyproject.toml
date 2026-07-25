@@ -16,9 +16,9 @@ dependencies = [
     "numpy>=1.24",
 ]
 
-# The environment's own entrypoint, so a fold needs nothing outside it.
+# The backend's own CLI, also reachable as `python -m esmfold`.
 [project.scripts]
-vizfold-esmfold = "esmfold.cli:main"
+esmfold = "esmfold.cli:main"
 
 [tool.setuptools.packages.find]
 namespaces = false

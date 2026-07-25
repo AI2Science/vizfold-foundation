@@ -68,19 +68,6 @@ slurm::scratch_root() {
     case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
 }
 
-# Where the shell that invoked the install stands, for the fold command setup.sh prints: that
-# command runs there, not on the node setup.sh gets (delta-gh builds on a GPU while the caller waits
-# on a login node). Mirrors gpu_launch in cli/src/core/config.rs.
-slurm::fold_context() {
-    if [ -n "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)" ]; then
-        echo node                                        # a GPU in hand; srun would queue a second job
-    elif [ -n "${SLURM_JOB_ID:-}" ]; then
-        echo allocation                                  # held, but the shell may be off the node
-    else
-        echo none
-    fi
-}
-
 # Build the scheduler argv for setup.sh, one argument per line.
 # $1 account, $2 partition, $3 the literal --pty (or empty when stdout is not a terminal).
 slurm::launch_args() {
@@ -103,7 +90,6 @@ slurm::launch_args() {
 
 # Run the assembled hooks, then run setup.sh on the scheduler (or here when there is none).
 slurm::run() {
-    export OPENFOLD_FOLD_CONTEXT=$(slurm::fold_context)   # classify this shell before srun rewrites its SLURM_*
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v srun >/dev/null 2>&1; then
         exec bash "$OF/install/setup.sh"          # no scheduler: install here
     fi

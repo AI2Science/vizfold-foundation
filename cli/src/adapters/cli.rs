@@ -318,7 +318,7 @@ struct OpenfoldQueueArgs {
     input_id: String,
     #[arg(long)]
     input_sequence: String,
-    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>, as `vizfold-openfold` does.
+    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>.
     #[arg(long)]
     fasta_dir: Option<String>,
     /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
@@ -342,7 +342,7 @@ struct OpenfoldQueueArgs {
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
     /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
-    /// (`vizfold-openfold`'s default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    /// (the default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
@@ -825,11 +825,8 @@ fn backend_health(backend: Backend) -> Component {
     let mut problems: Vec<String> = missing("interpreter", env.join("bin/python"))
         .into_iter()
         .collect();
-    // The entrypoint a fold runs, in the environment that runs it.
-    problems.extend(missing(
-        "entrypoint",
-        env.join(format!("bin/vizfold-{}", backend.slug())),
-    ));
+    // The backend's own CLI, in the environment that runs it.
+    problems.extend(missing("entrypoint", env.join("bin").join(backend.slug())));
     if backend == Backend::Openfold {
         problems.extend(params_problem());
         problems.extend(example_problem());
@@ -1951,7 +1948,7 @@ async fn queue_esmfold_run(
     Ok(())
 }
 
-/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching `vizfold-openfold`'s `${INPUT_ID%_*}`.
+/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>` -- the id up to its last underscore.
 fn default_fasta_dir(input_id: &str) -> String {
     let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
     config::openfold_home()

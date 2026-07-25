@@ -115,7 +115,7 @@ pub fn preflight_openfold(
     Ok(PreflightReport::new(checks))
 }
 
-/// Mirrors `vizfold-openfold`'s `nvidia-smi --query-gpu=name --format=csv,noheader` probe.
+/// Mirrors the fold's own `nvidia-smi --query-gpu=name --format=csv,noheader` probe.
 pub fn detect_gpu() -> Option<String> {
     let output = std::process::Command::new("nvidia-smi")
         .args(["--query-gpu=name", "--format=csv,noheader"])
