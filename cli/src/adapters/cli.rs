@@ -318,7 +318,7 @@ struct OpenfoldQueueArgs {
     input_id: String,
     #[arg(long)]
     input_sequence: String,
-    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id> (fold.sh convention).
+    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>, as `vizfold-openfold` does.
     #[arg(long)]
     fasta_dir: Option<String>,
     /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
@@ -342,7 +342,7 @@ struct OpenfoldQueueArgs {
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
     /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
-    /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    /// (`vizfold-openfold`'s default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
@@ -1951,7 +1951,7 @@ async fn queue_esmfold_run(
     Ok(())
 }
 
-/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching fold.sh's `${INPUT_ID%_*}`.
+/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching `vizfold-openfold`'s `${INPUT_ID%_*}`.
 fn default_fasta_dir(input_id: &str) -> String {
     let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
     config::openfold_home()

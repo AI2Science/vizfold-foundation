@@ -319,7 +319,8 @@ The repository is laid out as:
 - `workbench/` — a Next.js dashboard that reads the executor's SQLite directly (read-only) and renders each run's outputs: an interactive 3D structure viewer for predicted PDBs plus the attention-map images.
 - `backends/<name>/` — one pip/conda-installable package per model backend: its Python package, packaging metadata, environment spec, and env-provisioning installer (`install/`). `backends/openfold/` installs as `import openfold` (conda env, CUDA extension; its dataprep/training tooling is the installed `openfold.scripts` subpackage); `backends/esmfold/` as `import esmfold` (plain venv).
 - `downloaders/<name>/` — data-download scripts. `downloaders/openfold/` holds the AlphaFold2 database/params fetchers (`vizfold download openfold`); ESMFold has none — it pulls weights from HuggingFace at run time.
-- `scripts/<name>/` — execution entrypoints (`run_pretrained_*.py`, `fold.sh`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies. Each backend also installs `vizfold-<name>` into its own environment: one command that folds with every path already filled in from the config.
+- `scripts/<name>/` — the model entrypoints the executor runs (`run_pretrained_*.py`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
+- Each backend installs `vizfold-<name>` into its own environment: one command that folds with every path, database and device already filled in from the config.
 - `lib/` — the backend-neutral shared install library (`config.sh`), owned by no backend.
 - `docs/` — architecture notes and backlog. `examples/` — demo inputs, attention-viz utilities, and notebooks.
 

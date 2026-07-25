@@ -1,18 +1,99 @@
 #!/bin/bash
 
-# The environment's own entrypoint: `vizfold-openfold <input-id> [extra args]` folds with every
-# path, database and device already filled in from the config. The work is fold.sh in the checkout
-# -- which this environment is an editable install of, so there is no second copy to drift.
+# `vizfold-openfold <input-id> [args]` -- fold one sequence on a GPU, with every path, database and
+# device filled in from the config. Anything after the id goes to the model. setup.py installs this
+# into the backend's environment; the executor runs run_pretrained_openfold.py directly instead.
 set -euo pipefail
 
-# config::file()'s one line, needed before we can source the lib that defines it.
+# The checkout, resolved before any library exists to do it: config::file()'s one line, then the
+# OPENFOLD_HOME the config holds. `|| true` because no config yet is a case for the message below.
 CONFIG=${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}
-# `|| true`: no config yet is a case for the message below, not a silent `set -e` exit.
 REPO=${OPENFOLD_HOME:-$(python3 -c '
 import json, sys
 print(json.load(open(sys.argv[1])).get("OPENFOLD_HOME", ""))' "$CONFIG" 2>/dev/null || true)}
-
-FOLD=$REPO/scripts/openfold/fold.sh
-test -x "$FOLD" ||
+SELF=$REPO/backends/openfold/bin/vizfold-openfold
+test -x "$SELF" ||
     { echo "FATAL: no vizfold checkout at '${REPO:-unset}'; run \`vizfold install openfold\`" >&2; exit 1; }
-exec env OPENFOLD_HOME="$REPO" "$FOLD" "$@"
+
+# setup.py copies this into <env>/bin, so the installed copy is only ever a launcher: hand off to
+# the checkout's, which `vizfold update` keeps in step with the binary. At most one extra exec --
+# after it, $0 is $SELF.
+[ "$0" = "$SELF" ] || exec env OPENFOLD_HOME="$REPO" "$SELF" "$@"
+
+export OPENFOLD_HOME=$REPO
+. "$REPO/lib/config.sh"          # REPO, OF, die, vizfold::*, mamba::*
+
+fold::config() {
+    PREFIX=$(vizfold::prefix)
+    ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
+}
+
+# torch/DeepSpeed JIT-compile at import; a site's leaked toolchain env breaks it. Re-exec in a curated env (HOME, clean PATH, SLURM/CUDA binding, OPENFOLD_*).
+fold::reexec() {
+    [ -n "${OPENFOLD_CLEAN_ENV:-}" ] && return
+    local env_prefix=$ENV_DIR clean kv
+    clean=(HOME="$HOME" PATH="$env_prefix/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
+    [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
+    # JIT autotune cache: node-local, not NFS $HOME (79 s vs 8 s inference).
+    clean+=("TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}")
+    while IFS= read -r kv; do clean+=("$kv"); done < <(
+        env | grep -E '^(OPENFOLD_[A-Z0-9_]*|SLURM_[A-Z0-9_]*|CUDA_VISIBLE_DEVICES|GPU_DEVICE_ORDINAL|NVIDIA_VISIBLE_DEVICES)=')
+    exec env -i "${clean[@]}" bash "$0" "$@"
+}
+
+fold::paths() {
+    DATA=${OPENFOLD_DATA_DIR:-$PREFIX/data}
+    FASTA_DIR=${OPENFOLD_FASTA_DIR:-$REPO/examples/monomer/fasta_dir_${INPUT_ID%_*}}
+    ALIGNMENT_DIR=${OPENFOLD_ALIGNMENT_DIR:-$REPO/examples/monomer/alignments}
+    OUTPUT_DIR=${OPENFOLD_OUTPUT_DIR:-$PREFIX/outputs/$INPUT_ID}
+    CONFIG_PRESET=${OPENFOLD_CONFIG_PRESET:-model_1_ptm}
+    MODEL_DEVICE=${OPENFOLD_MODEL_DEVICE:-cuda:0}
+    CPUS=${OPENFOLD_CPUS:-${SLURM_CPUS_PER_TASK:-8}}
+}
+
+fold::activate() {
+    local mm=$PREFIX/bin/micromamba
+    [ -x "$mm" ] || die "nothing installed at $PREFIX; run \`vizfold install openfold\` first"
+    export MAMBA_ROOT_PREFIX=$PREFIX/mamba
+    # By path, not name: the env lives under VIZFOLD_ENV_BASE, not $MAMBA_ROOT_PREFIX/envs.
+    mamba::activate "$mm" "$ENV_DIR"
+}
+
+fold::preflight() {
+    nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null ||
+        die "no GPU visible; run this inside a GPU allocation"
+    test -d "$ALIGNMENT_DIR/$INPUT_ID" ||
+        die "no precomputed alignments at $ALIGNMENT_DIR/$INPUT_ID"
+    mkdir -p "$OUTPUT_DIR"
+}
+
+fold::run() {
+    cd "$REPO"
+    set -x
+    python3 -u "$REPO/scripts/openfold/run_pretrained_openfold.py" \
+        "$FASTA_DIR" \
+        "$DATA/pdb_mmcif/mmcif_files" \
+        --use_precomputed_alignments "$ALIGNMENT_DIR" \
+        --uniref90_database_path "$DATA/uniref90/uniref90.fasta" \
+        --mgnify_database_path "$DATA/mgnify/mgy_clusters_2022_05.fa" \
+        --pdb70_database_path "$DATA/pdb70/pdb70" \
+        --uniclust30_database_path "$DATA/uniclust30/uniclust30_2018_08/uniclust30_2018_08" \
+        --bfd_database_path "$DATA/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt" \
+        --output_dir "$OUTPUT_DIR" \
+        --config_preset "$CONFIG_PRESET" \
+        --model_device "$MODEL_DEVICE" \
+        --cpus "$CPUS" \
+        "$@"
+}
+
+main() {
+    fold::config
+    fold::reexec "$@"
+    INPUT_ID=${1:-${OPENFOLD_INPUT_ID:-6KWC_1}}
+    [ $# -gt 0 ] && shift                     # the rest pass through to the python script
+    fold::paths
+    fold::activate
+    fold::preflight
+    fold::run "$@"
+}
+main "$@"
