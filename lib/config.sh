@@ -79,6 +79,11 @@ mamba::ensure() {
     echo "$mm"
 }
 
+# The previous install's answers. Called explicitly, and deliberately not at source time: loading
+# here would put them in the environment before a caller has run its own discovery, and nothing
+# downstream can then tell a value the user chose from one an earlier install invented. The
+# installers call this after their <site>.json, which fixes the precedence at
+#   inline env > slurm::discover > <site>.json > saved vizfold.json > built-in default
 config::load() { config::fill "$(config::file)" "config"; }
 
 # <site>.sh loads its own <site>.json: same basename, beside it.
@@ -110,5 +115,3 @@ with open(path, "w") as f:
     # has not installed anything usable, and saying so at the end beats failing later somewhere else.
     echo "wrote $file"
 }
-
-config::load

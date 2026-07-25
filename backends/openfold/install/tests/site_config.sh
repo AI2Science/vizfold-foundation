@@ -81,7 +81,7 @@ fi
 # config::load put back in the environment, so it rewrites the earlier values instead of dropping them.
 cp "$SANDBOX/delta.json" "$SANDBOX/before.json"
 (export VIZFOLD_CONFIG=$SANDBOX/delta.json ESMFOLD_ENV_PREFIX=/envs/vizfold-esmfold
- . "$REPO/lib/config.sh" && config::save) >/dev/null 2>&1
+ . "$REPO/lib/config.sh" && config::load && config::save) >/dev/null 2>&1
 python3 - "$SANDBOX/before.json" "$SANDBOX/delta.json" <<'PY' || exit 1
 import json, sys
 before, after = (json.load(open(p)) for p in sys.argv[1:3])

@@ -10,6 +10,7 @@ set -euo pipefail
 # over here). OPENFOLD_HOME is exported by `vizfold install`; the fallback finds lib/ from here.
 CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib/config.sh}
 . "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../lib" && pwd)/config.sh}"
+config::load
 
 REPO=${OPENFOLD_HOME:-$REPO}
 ESM=$REPO/backends/esmfold

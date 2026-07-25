@@ -30,6 +30,7 @@ init::dispatch() {
     . "$SITES/$SITE.sh"                                 # register slurm::discover
     [ -n "${OPENFOLD_PREFIX:-}" ] || slurm::discover    # export the account-specific vars the <site>.json templates need
     config::site_defaults "$SITES/$SITE.sh"             # fill + expand <site>.json (templates resolve off the discovered vars)
+    config::load                                        # then the previous install's answers, under all of it
     slurm::run
 }
 

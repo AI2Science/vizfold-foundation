@@ -65,4 +65,21 @@ done
 # sbatch must be gone entirely.
 grep -q sbatch ./slurm.sh && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
 
+# A saved config must not pin the site. Sourcing the libs no longer loads it, so what an earlier
+# install settled arrives under the site's own defaults instead of ahead of live detection --
+# otherwise an OPENFOLD_SITE written on a login node where scontrol failed ("local") sticks forever.
+# A fresh bash each time: config.sh guards against re-sourcing, so testing this in a subshell of a
+# process that already sourced it would pass no matter what the file does.
+saved=${TMPDIR:-/tmp}/vizfold-saved-config.$$
+printf '{"OPENFOLD_SITE": "local", "OPENFOLD_PREFIX": "/invented/by/an/earlier/install"}\n' > "$saved"
+trap 'rm -f "$conf" "$saved"' EXIT
+got=$(env -u OPENFOLD_SITE -u OPENFOLD_PREFIX VIZFOLD_CONFIG=$saved \
+    bash -c '. "$1"; echo "${OPENFOLD_SITE:-<unset>} ${OPENFOLD_PREFIX:-<unset>}"' bash "$REPO/lib/config.sh")
+check "<unset> <unset>" "$got" "sourcing the libs does not pin the site or prefix from a saved config"
+
+got=$(env -u OPENFOLD_SITE -u OPENFOLD_PREFIX VIZFOLD_CONFIG=$saved \
+    bash -c '. "$1"; config::load 2>/dev/null; echo "${OPENFOLD_SITE:-<unset>} ${OPENFOLD_PREFIX:-<unset>}"' \
+    bash "$REPO/lib/config.sh")
+check "local /invented/by/an/earlier/install" "$got" "an explicit config::load still supplies it"
+
 exit $fail

@@ -7,6 +7,9 @@ set -euo pipefail
 # walking up. The BASH_SOURCE fallback covers a direct local run (lib/ is three levels up).
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
+# For a direct run of this script. Under `vizfold install` everything install.sh settled is already
+# exported, and config::fill never overwrites a set var, so this fills nothing.
+config::load
 
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 sealed() { [ -e "$sentinel/$1" ]; }
