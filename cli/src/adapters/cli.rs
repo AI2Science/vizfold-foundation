@@ -17,8 +17,8 @@ use crate::core::{
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
-        openfold_artifacts::{self, register_known_openfold_artifacts},
-        openfold_execution::execute_run,
+        run_artifacts::{self, register_known_run_artifacts},
+        run_execution::execute_run,
         runs,
     },
 };
@@ -421,7 +421,7 @@ fn default_model_device() -> String {
     let detected = if on_gpu_partition(context, partition.as_deref()) {
         None
     } else {
-        crate::core::model_runners::openfold::detect_gpu()
+        crate::core::preflight::detect_gpu()
     };
     model_device_for(context, partition.as_deref(), detected.as_deref())
 }
@@ -1576,14 +1576,14 @@ async fn register_artifacts(
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
     let existing = artifacts::list_artifacts_for_run(database, run_id).await?;
-    register_known_openfold_artifacts(database, run_id).await?;
+    register_known_run_artifacts(database, run_id).await?;
 
     println!("Registered artifacts for run {run_id}");
     println!("\nOutput workspace:\n  {}", workspace.display());
     println!("\nArtifacts:");
     // The service's own list, not a second copy of it: a directory that exists is registered by
     // the call above, so "exists" and "registered" are the same question.
-    for (artifact_type, path) in openfold_artifacts::known_directories(&workspace) {
+    for (artifact_type, path) in run_artifacts::known_directories(&workspace) {
         let storage_uri = path.display().to_string();
         let state = if !path.is_dir() {
             "skipped -- no such directory"
@@ -1748,7 +1748,7 @@ async fn run_execute(
         report_execution(database, run_id).await?;
         println!();
     }
-    register_known_openfold_artifacts(database, run_id).await?;
+    register_known_run_artifacts(database, run_id).await?;
 
     let run = runs::get_run_with_artifacts(database, run_id)
         .await?

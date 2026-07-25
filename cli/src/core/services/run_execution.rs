@@ -7,10 +7,7 @@ use crate::core::{
     commands::{CommandOutput, CommandRunner, CommandSpec},
     config,
     entities::{execution_targets, model_backends, model_invocation_profiles, runs as run_entity},
-    model_runners::{
-        esmfold::preflight_esmfold,
-        openfold::{plan_openfold_command, preflight_openfold},
-    },
+    model_runners::{esmfold::preflight_esmfold, openfold::preflight_openfold, plan::plan_command},
     output_locations::resolve_output_location,
     preflight::PreflightReport,
 };
@@ -95,8 +92,7 @@ pub async fn execute_run(
         })?;
 
         // The shared schema-driven planner emits either backend's CLI from its parameter schema.
-        let command =
-            plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
+        let command = plan_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
         // Preflight validates the bare command; the runner gets an env-wrapped one so the model's
         // deps resolve. OpenFold activates its micromamba env; ESMFold runs its own python.
@@ -190,7 +186,7 @@ pub async fn execute_run(
                 .await?;
                 // Register produced output directories inline so a completed run has its
                 // artifacts without a separate `register-artifacts` command. Idempotent.
-                super::openfold_artifacts::register_known_openfold_artifacts(db, run_id).await?;
+                super::run_artifacts::register_known_run_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
                     format!(

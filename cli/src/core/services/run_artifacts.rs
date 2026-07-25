@@ -20,7 +20,7 @@ pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::pa
 /// Registers a run's existing output directories -- the workspace and its `attention/` subdir --
 /// and returns the full current artifact list for the run. Both backends route here. Repeated
 /// calls do not add duplicate type/URI entries.
-pub async fn register_known_openfold_artifacts(
+pub async fn register_known_run_artifacts(
     db: &DatabaseConnection,
     run_id: i32,
 ) -> Result<Vec<artifacts::Model>, DbErr> {
@@ -99,7 +99,7 @@ mod tests {
         },
     };
 
-    use super::register_known_openfold_artifacts;
+    use super::register_known_run_artifacts;
 
     async fn test_db() -> Result<DatabaseConnection, DbErr> {
         let db = Database::connect("sqlite::memory:").await?;
@@ -179,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn missing_run_returns_clear_error() -> Result<(), DbErr> {
         let db = test_db().await?;
-        let error = register_known_openfold_artifacts(&db, 999)
+        let error = register_known_run_artifacts(&db, 999)
             .await
             .expect_err("missing run should fail");
         assert!(error.to_string().contains("run 999 does not exist"));
@@ -195,8 +195,8 @@ mod tests {
         let workspace = root.join(run.id.to_string());
         fs::create_dir_all(workspace.join("attention")).expect("output directories should exist");
 
-        let first = register_known_openfold_artifacts(&db, run.id).await?;
-        let second = register_known_openfold_artifacts(&db, run.id).await?;
+        let first = register_known_run_artifacts(&db, run.id).await?;
+        let second = register_known_run_artifacts(&db, run.id).await?;
 
         assert_eq!(first.len(), 2);
         assert_eq!(second.len(), 2);
@@ -219,7 +219,7 @@ mod tests {
         let root = temp_root();
         let run = run_with_output_root(&db, &root).await?;
 
-        let artifacts = register_known_openfold_artifacts(&db, run.id).await?;
+        let artifacts = register_known_run_artifacts(&db, run.id).await?;
 
         assert!(artifacts.is_empty());
         Ok(())
