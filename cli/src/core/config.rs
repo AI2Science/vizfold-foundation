@@ -21,6 +21,35 @@ pub fn is_initialized() -> bool {
     config_file().is_file()
 }
 
+/// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
+/// `install/tests/vocabulary.sh` fails if the two ever differ.
+pub const CONFIG_KEYS: &[&str] = &[
+    "ESMFOLD_ENV_PREFIX",
+    "OPENFOLD_ACCOUNT",
+    "OPENFOLD_AF2_ROOT",
+    "OPENFOLD_DATA_DIR",
+    "OPENFOLD_DRIVER_CUDA",
+    "OPENFOLD_ENV_PREFIX",
+    "OPENFOLD_EXAMPLE",
+    "OPENFOLD_FOLD_ARGS",
+    "OPENFOLD_GPU_ACCOUNT",
+    "OPENFOLD_GPU_GRES",
+    "OPENFOLD_GPU_PARTITION",
+    "OPENFOLD_GPU_RESOURCES",
+    "OPENFOLD_GPU_TIME",
+    "OPENFOLD_HOME",
+    "OPENFOLD_MAX_CUDA",
+    "OPENFOLD_PARTITION",
+    "OPENFOLD_PREFIX",
+    "OPENFOLD_SITE",
+    "VIZFOLD_DB",
+    "VIZFOLD_ENV_BASE",
+];
+
+pub fn config_keys() -> Vec<String> {
+    vizfold_config().keys().cloned().collect()
+}
+
 fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| ".".to_owned())
 }
@@ -43,8 +72,9 @@ fn non_empty(value: Option<&str>) -> Option<String> {
     value.filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
-/// inline env var of the same name > vizfold.json entry > None.
-fn resolved(key: &str) -> Option<String> {
+/// inline env var of the same name > vizfold.json entry > None. Public for code that checks the
+/// config by name rather than consuming one known key.
+pub fn resolved(key: &str) -> Option<String> {
     if let Ok(v) = std::env::var(key)
         && !v.is_empty()
     {
@@ -59,8 +89,12 @@ pub fn openfold_home() -> PathBuf {
         .unwrap_or_else(repository_root)
 }
 
-/// Repo checkout holding `backends/openfold/install/install.sh` (what `vizfold install` runs, cloning it if absent).
-/// `OPENFOLD_HOME` -- the config's own name for it -- else the default clone location (`$HOME/vizfold-src`).
+/// The file whose presence makes a directory a vizfold checkout: OpenFold's installer, the one
+/// `vizfold install` runs. Also `Backend::Openfold.installer()`.
+pub const INSTALLER: &str = "backends/openfold/install/install.sh";
+
+/// Repo checkout holding `INSTALLER`. `OPENFOLD_HOME` -- the config's own name for it -- else the
+/// default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
@@ -87,7 +121,7 @@ pub fn env_base() -> PathBuf {
         .unwrap_or_else(|| prefix().join("envs"))
 }
 
-/// `<env base>/vizfold-<backend>` — a fixed name per backend, conda env and venv alike, so nothing
+/// `<env base>/vizfold-<backend>` — a fixed name per backend, so nothing
 /// has to be told where any of them is.
 pub fn env_dir(name: &str) -> PathBuf {
     env_base().join(format!("vizfold-{name}"))
@@ -103,7 +137,7 @@ pub fn openfold_env_prefix() -> PathBuf {
         .unwrap_or_else(|| env_dir("openfold"))
 }
 
-/// venv prefix for the ESMFold backend, same story as `openfold_env_prefix`.
+/// Environment prefix for the ESMFold backend, same story as `openfold_env_prefix`.
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")
         .map(PathBuf::from)
@@ -240,7 +274,7 @@ pub fn database_path() -> Option<PathBuf> {
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .filter(|root| root.join("backends/openfold/install/install.sh").is_file())
+        .filter(|root| root.join(INSTALLER).is_file())
         .map_or_else(default_src, Path::to_path_buf)
 }
 
@@ -254,7 +288,7 @@ mod tests {
     fn repository_root_names_a_real_checkout() {
         let root = super::repository_root();
         assert!(
-            root.join("backends/openfold/install/install.sh").is_file(),
+            root.join(super::INSTALLER).is_file(),
             "repository_root() must be a checkout, got {}",
             root.display()
         );

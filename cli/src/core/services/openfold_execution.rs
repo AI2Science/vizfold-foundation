@@ -99,7 +99,7 @@ pub async fn execute_run(
             plan_openfold_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
         // Preflight validates the bare command; the runner gets an env-wrapped one so the model's
-        // deps resolve. OpenFold activates its micromamba env; ESMFold runs its venv's python.
+        // deps resolve. OpenFold activates its micromamba env; ESMFold runs its own python.
         // Both gate on the env actually being installed, so tests/dev run the command bare.
         let exec_command = match kind {
             BackendKind::Openfold => {
@@ -114,8 +114,13 @@ pub async fn execute_run(
             }
             BackendKind::Esmfold => {
                 let env_prefix = config::esmfold_env_prefix();
-                let use_venv = env_prefix.join("bin/python").is_file();
-                compose_esmfold_command(&command, &env_prefix, &config::gpu_launch_args(), use_venv)
+                let installed = env_prefix.join("bin/python").is_file();
+                compose_esmfold_command(
+                    &command,
+                    &env_prefix,
+                    &config::gpu_launch_args(),
+                    installed,
+                )
             }
         };
 
@@ -280,17 +285,17 @@ fn compose_exec_command(
     }
 }
 
-/// Wrap a planned ESMFold command for execution. ESMFold installs into a plain venv (no
-/// micromamba, no activate.d hook), so running its interpreter directly -- `<env>/bin/python` --
-/// is the whole activation. srun still wraps it so the fold lands on a GPU node when a partition
-/// is configured. `use_venv` is false in tests/dev (no venv installed): the command runs bare.
+/// Wrap a planned ESMFold command for execution. Its environment carries its own Python and needs
+/// no activate.d hook, so running that interpreter directly -- `<env>/bin/python` -- is the whole
+/// activation. srun still wraps it so the fold lands on a GPU node when a partition is configured.
+/// `installed` is false in tests/dev (nothing to run): the command runs bare.
 fn compose_esmfold_command(
     command: &CommandSpec,
     env_prefix: &Path,
     launch: &[String],
-    use_venv: bool,
+    installed: bool,
 ) -> CommandSpec {
-    let command = if use_venv {
+    let command = if installed {
         CommandSpec {
             program: env_prefix.join("bin/python").display().to_string(),
             ..command.clone()
@@ -653,7 +658,7 @@ mod tests {
 
         assert!(called.load(Ordering::SeqCst));
         assert_eq!(result.output.expect("output").exit_code, 0);
-        // The schema-driven planner emitted the ESMFold CLI; no venv installed in tests, so the
+        // The schema-driven planner emitted the ESMFold CLI; nothing installed in tests, so the
         // program stays bare python3 (not <env>/bin/python).
         let command = command
             .lock()

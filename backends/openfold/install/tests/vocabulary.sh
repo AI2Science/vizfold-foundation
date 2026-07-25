@@ -22,7 +22,7 @@ report() { # $1 label, $2 newline-separated offenders, $3 remedy
 }
 
 # Every resolved("X") in the CLI must be a schema key, or the binary expects what no install writes.
-cli=$(grep -oE 'resolved\("[A-Z_]+"\)' "$REPO/cli/src/core/config.rs" |
+cli=$(grep -oE 'resolved\("[A-Z0-9_]+"\)' "$REPO/cli/src/core/config.rs" |
     sed 's/resolved("//; s/")//' | sort -u)
 report "every name the CLI resolves is in the config schema" \
     "$(comm -23 <(printf '%s\n' $cli) <(printf '%s\n' $schema))" \
@@ -39,12 +39,19 @@ report "every site key is persisted or knowingly install-only" \
 
 # Every $VAR in a site value must be provided by something, or it expands to empty and the install
 # proceeds with a mangled value -- how "$ALLOC-delta-cpu" once became the account "-delta-cpu".
-templated=$(grep -ohE '\$\{?[A-Z_]+\}?' sites/*.json | tr -d '${}' | sort -u)
+templated=$(grep -ohE '\$\{?[A-Z0-9_]+\}?' sites/*.json | tr -d '${}' | sort -u)
 provided=$(printf '%s\n' $schema $install_only USER HOME \
-    $(grep -ohE 'export [A-Z_]+|[A-Z_]+=' sites/*.sh slurm.sh | tr -d '=' | sed 's/export //') |
+    $(grep -ohE 'export [A-Z0-9_]+|[A-Z0-9_]+=' sites/*.sh slurm.sh | tr -d '=' | sed 's/export //') |
     sort -u)
 report "every site template atom is provided by a discover hook or the schema" \
     "$(comm -23 <(printf '%s\n' $templated) <(printf '%s\n' $provided))" \
     "export it from the site's slurm::discover, or it silently expands to empty"
+
+# Either side alone would judge the other's config stale, so the two spellings stay one list.
+cli_schema=$(sed -n '/pub const CONFIG_KEYS/,/^];/p' "$REPO/cli/src/core/config.rs" |
+    grep -oE '"[A-Z0-9_]+"' | tr -d '"' | sort)
+report "the CLI's copy of the schema is the schema" \
+    "$(comm -3 <(printf '%s\n' $cli_schema) <(printf '%s\n' $schema) | tr -d '\t')" \
+    "make CONFIG_KEYS in cli/src/core/config.rs and VIZFOLD_CONFIG_KEYS name the same set"
 
 exit $fail

@@ -13,10 +13,14 @@ REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 OF=$REPO/backends/openfold
 die() { echo "FATAL: $*" >&2; exit 1; }
 
-# Every environment the install creates lives in one base directory under a fixed vizfold-<backend>
-# name -- conda envs and the ESMFold venv alike, so one directory holds them all and nothing has to
-# be told where any of them is. Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
-vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-${OPENFOLD_PREFIX:-$HOME/openfold}/envs}"; }
+# Progress line, shared so every installer's output reads the same.
+log() { echo "== $* (+$((SECONDS))s)"; }
+
+# The install root, and the one base directory every environment it creates lives in under a fixed
+# vizfold-<backend> name -- so one directory holds them all and nothing has to be told where any of
+# them is. Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
+vizfold::prefix() { echo "${OPENFOLD_PREFIX:-$HOME/openfold}"; }
+vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-$(vizfold::prefix)/envs}"; }
 vizfold::env() { echo "$(vizfold::env_base)/vizfold-$1"; }
 
 config::file() {
@@ -56,6 +60,24 @@ for k, v in scope.items():
 
 # Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
+
+# micromamba at <prefix>/bin/micromamba, downloaded once: every backend's environment and the Node
+# one `vizfold serve` builds come from this one copy.
+mamba::ensure() {
+    local prefix=$1 mm=$1/bin/micromamba build
+    if [ ! -x "$mm" ]; then
+        case "$(uname -s)-$(uname -m)" in
+            Linux-aarch64|Linux-arm64)   build=linux-aarch64 ;;
+            Linux-*)                     build=linux-64 ;;
+            Darwin-arm64|Darwin-aarch64) build=osx-arm64 ;;
+            Darwin-*)                    build=osx-64 ;;
+            *) die "no micromamba build for $(uname -s)-$(uname -m)" ;;
+        esac
+        mkdir -p "$prefix"
+        curl -Ls "https://micro.mamba.pm/api/micromamba/$build/latest" | tar -xj -C "$prefix" bin/micromamba
+    fi
+    echo "$mm"
+}
 
 config::load() { config::fill "$(config::file)" "config"; }
 

@@ -16,11 +16,22 @@ vizfold install openfold
 ```
 
 On Delta the install is dispatched by SLURM `ClusterName`, so it needs no site arguments and takes
-~8 min. When it finishes, `vizfold status` shows OpenFold `installed` and a populated config:
+~8 min. When it finishes, `vizfold status` shows every part healthy and a populated config:
 
 ```text
 $ vizfold status
 VizFold status
+
+COMPONENT  STATUS  DETAIL
+---------  ------  ------
+binary     ok      0.5.0 (latest)
+repo       ok      /u/yjayawardana/vizfold-src at v0.5.0
+config     ok      20 keys
+openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
+esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
+scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
+
+Everything checks out.
 
 Config: /u/yjayawardana/.config/vizfold/vizfold.json
   ESMFOLD_ENV_PREFIX =
@@ -44,12 +55,6 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
   VIZFOLD_DB = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db
   VIZFOLD_ENV_BASE = /work/nvme/bbol/yjayawardana/vizfold/envs
   database = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db (present)
-
-Backends:
-BACKEND   STATUS         ENV PREFIX
---------  -------------  --------------------------------------------------------
-openfold  installed      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
-esmfold   not installed  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold
 ```
 
 That key set is fixed: every cluster and either backend writes the same names, and a name this
@@ -57,6 +62,11 @@ install did not settle (`ESMFOLD_ENV_PREFIX`, `OPENFOLD_FOLD_ARGS` above) is wri
 every reader treats as unset. The values are resolved live during install — on Delta the prefix and
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
+
+`status` leads with the health of each part rather than only reporting the config: it checks the key
+set against this binary's, that every path exists, that the environment and the AlphaFold2
+parameters are in place, and that the scheduler knows the accounts and partitions. Anything wrong
+is listed under `Problems:` with the command that fixes it.
 
 ## 1. Seed the executor records
 
@@ -228,15 +238,18 @@ ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu
 
 ## A quicker smoke test
 
-To confirm the install without the executor at all, `vizfold install openfold` prints a one-liner
-that folds the bundled example straight through `fold.sh` and counts the atoms:
+To confirm the install without the executor at all, the environment has its own entrypoint:
+`vizfold-openfold <input-id>` folds with every path, database and device already filled in from the
+config. `vizfold install openfold` prints it for the cluster it ran on:
 
 ```bash
 srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00 \
-  env OPENFOLD_PREFIX=/work/nvme/bbol/yjayawardana/vizfold \
-  /u/yjayawardana/vizfold-src/scripts/openfold/fold.sh 6KWC_1
+  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold/bin/vizfold-openfold 6KWC_1
 grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/outputs/6KWC_1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
 ```
+
+Anything after the input id passes through to the model, so `vizfold-openfold 6KWC_1
+--skip_relaxation` works too.
 
 The account, partition, and resources here are Delta's; `vizfold install openfold` prints the
 command already filled in for whatever cluster it ran on — and prints it without the `srun` when

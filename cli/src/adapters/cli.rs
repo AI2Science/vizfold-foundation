@@ -13,6 +13,7 @@ use crate::core::{
     examples,
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
+    release,
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
@@ -22,7 +23,12 @@ use crate::core::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "vizfold", about = "VizFold executor administration CLI")]
+#[command(
+    name = "vizfold",
+    version,
+    about = "VizFold executor administration CLI",
+    arg_required_else_help = true
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -34,10 +40,14 @@ enum Command {
     Install(InstallArgs),
     /// Download a backend's data (OpenFold AlphaFold2 databases/params).
     Download(DownloadArgs),
-    /// Show resolved config and which backends are installed.
+    /// Show resolved config, which backends are installed, and whether it all checks out.
     Status,
-    /// Remove everything the install generated.
+    /// Remove one backend, or everything the install generated.
     Uninstall(UninstallArgs),
+    /// Update the vizfold checkout the installers and dashboard come from.
+    Update(UpdateArgs),
+    /// Replace this binary with the latest release, then update the checkout to match.
+    SelfUpdate(SelfUpdateArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
     /// Seed the default executor records.
@@ -90,10 +100,10 @@ impl Backend {
 
     /// Installer script, relative to the vizfold checkout. Each backend owns its installer under
     /// `backends/<name>/install/`: OpenFold's picks a site and dispatches the cluster install;
-    /// ESMFold's is a self-contained venv install.
+    /// ESMFold's is a self-contained environment install.
     fn installer(self) -> &'static str {
         match self {
-            Self::Openfold => "backends/openfold/install/install.sh",
+            Self::Openfold => config::INSTALLER,
             Self::Esmfold => "backends/esmfold/install/install.sh",
         }
     }
@@ -118,13 +128,80 @@ impl Backend {
     fn is_installed(self) -> bool {
         self.env_prefix().is_dir()
     }
+
+    /// Everything this backend's installer creates and no one else uses, so `uninstall <backend>`
+    /// removes exactly what `install <backend>` puts back. Fold outputs are results, not install
+    /// state, and never appear here.
+    fn install_paths(self, prefix: &Path, home: &Path) -> Vec<PathBuf> {
+        let mut paths = vec![self.env_prefix()];
+        match self {
+            // The pre-env-base layout, still out there on installs that predate it.
+            Self::Esmfold => paths.push(prefix.join("esmfold-venv")),
+            Self::Openfold => {
+                paths.extend(
+                    ["cutlass", "tmp", "data", ".done", "params"].map(|entry| prefix.join(entry)),
+                );
+                // Where `vizfold download` actually writes; <prefix>/data is only its default.
+                paths.push(config::data_dir());
+                // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
+                paths.extend(
+                    std::fs::read_dir(prefix)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|entry| entry.path())
+                        .filter(|path| file_name(path).starts_with("nvrtc-")),
+                );
+                // Package caches, deliberately parked beside the prefix rather than in it.
+                paths.extend(
+                    prefix
+                        .parent()
+                        .into_iter()
+                        .flat_map(|dir| [dir.join(".openfold-pkgs"), dir.join(".openfold-pip")]),
+                );
+                // Planted in the backend's own subtree by setup.sh and its editable install.
+                let backend = home.join("backends/openfold");
+                paths.extend(
+                    [
+                        "openfold/resources/params",
+                        "openfold/resources/stereo_chemical_props.txt",
+                        "tests/test_data/alphafold/common/stereo_chemical_props.txt",
+                        "openfold.egg-info",
+                        "build",
+                    ]
+                    .map(|entry| backend.join(entry)),
+                );
+            }
+        }
+        paths
+    }
 }
 
 #[derive(Debug, Args)]
 struct UninstallArgs {
+    /// Model backend to remove. Omit to remove every backend, the config, and the run database too.
+    #[arg(value_enum)]
+    backend: Option<Backend>,
     /// Remove without the confirmation prompt.
     #[arg(long, short = 'y')]
     yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct UpdateArgs {
+    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag.
+    #[arg(long, value_name = "REF")]
+    r#ref: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct SelfUpdateArgs {
+    /// Release to install (e.g. v0.5.1). Defaults to the latest published release.
+    #[arg(long, value_name = "TAG")]
+    version: Option<String>,
+    /// Re-download even when this binary already is that release.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Args)]
@@ -241,7 +318,7 @@ struct OpenfoldQueueArgs {
     input_id: String,
     #[arg(long)]
     input_sequence: String,
-    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id> (fold.sh convention).
+    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>, as `vizfold-openfold` does.
     #[arg(long)]
     fasta_dir: Option<String>,
     /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
@@ -265,7 +342,7 @@ struct OpenfoldQueueArgs {
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
     /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
-    /// (fold.sh default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    /// (`vizfold-openfold`'s default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
@@ -344,7 +421,11 @@ pub async fn run() -> Result<(), DbErr> {
     // where things stand before either has run; everything else requires an initialized config.
     if !matches!(
         cli.command,
-        Command::Install(_) | Command::Uninstall(_) | Command::Status
+        Command::Install(_)
+            | Command::Uninstall(_)
+            | Command::Status
+            | Command::Update(_)
+            | Command::SelfUpdate(_)
     ) && !config::is_initialized()
     {
         eprintln!("run `vizfold install openfold` first");
@@ -357,6 +438,8 @@ pub async fn run() -> Result<(), DbErr> {
         Command::Download(args) => return run_download(args.backend, args.dataset),
         Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
+        Command::Update(args) => return run_update(args.r#ref.as_deref()),
+        Command::SelfUpdate(args) => return run_self_update(args),
         Command::Serve(args) => return run_serve(args),
         Command::List(ListArgs {
             resource: ListResource::Examples { json },
@@ -390,6 +473,8 @@ pub async fn run() -> Result<(), DbErr> {
         | Command::Download(_)
         | Command::Status
         | Command::Uninstall(_)
+        | Command::Update(_)
+        | Command::SelfUpdate(_)
         | Command::Serve(_) => {
             unreachable!("handled before DB connect")
         }
@@ -486,18 +571,45 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     )
 }
 
-/// Report resolved config plus which backends are installed. Runs before any install (so it can
-/// say "nothing initialized yet") and needs no database.
+/// Lead with the health of every part that can break on its own, then the config it was resolved
+/// from. Runs before any install, and needs no database.
 fn run_status() -> Result<(), DbErr> {
-    let config_file = config::config_file();
     println!("VizFold status\n");
-    if config::is_initialized() {
-        println!("Config: {}", config_file.display());
-        for (key, value) in config::config_entries() {
-            println!("  {key} = {value}");
+    let components = health();
+    print_table(
+        &["COMPONENT", "STATUS", "DETAIL"],
+        components.iter().map(|component| {
+            vec![
+                component.name.to_owned(),
+                component.state.label().to_owned(),
+                component.detail.clone(),
+            ]
+        }),
+    );
+    let broken = components.iter().filter(|c| !c.problems.is_empty());
+    for (nth, component) in broken.enumerate() {
+        println!("{}", if nth == 0 { "\nProblems:" } else { "" });
+        for problem in &component.problems {
+            println!("  {}: {problem}", component.name);
         }
-    } else {
+        println!("  -> {}", component.remedy);
+    }
+    println!("\n{}\n", summary(&components));
+
+    let config_file = config::config_file();
+    if !config::is_initialized() {
         println!("Config: {} (not initialized)", config_file.display());
+        return Ok(());
+    }
+    println!("Config: {}", config_file.display());
+    for (key, value) in config::config_entries() {
+        // What the checks above read: an inline env var can differ from the file.
+        match std::env::var(&key) {
+            Ok(inline) if !inline.is_empty() && inline != value => {
+                println!("  {key} = {inline}  (env, overriding {value:?})");
+            }
+            _ => println!("  {key} = {value}"),
+        }
     }
     if let Some(database) = config::database_path() {
         let state = if database.is_file() {
@@ -507,74 +619,577 @@ fn run_status() -> Result<(), DbErr> {
         };
         println!("  database = {} ({state})", database.display());
     }
-
-    println!("\nBackends:");
-    print_table(
-        &["BACKEND", "STATUS", "ENV PREFIX"],
-        [Backend::Openfold, Backend::Esmfold]
-            .into_iter()
-            .map(|backend| {
-                let status = if backend.is_installed() {
-                    "installed"
-                } else {
-                    "not installed"
-                };
-                vec![
-                    backend.slug().to_owned(),
-                    status.to_owned(),
-                    backend.env_prefix().display().to_string(),
-                ]
-            }),
-    );
     Ok(())
 }
 
-/// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
-/// from -- the release binary ships only itself. Pins the binary's own version tag
-/// (`VIZFOLD_VERSION` overrides, same name install.sh uses), falling back to the repo default branch.
-fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
-    let repo =
-        std::env::var("VIZFOLD_REPO").unwrap_or_else(|_| "AI2Science/vizfold-foundation".into());
-    let url = format!("https://github.com/{repo}.git");
-    let dest = src.to_string_lossy().into_owned();
-    let pinned = match std::env::var("VIZFOLD_VERSION") {
-        Ok(r) if !r.is_empty() => Some(r),
-        _ => Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
+/// One part of the install that can be broken on its own. `state` is what it is when nothing is
+/// wrong; `health` promotes anything carrying a problem to `Broken`, so no builder tracks both.
+#[derive(Default)]
+struct Component {
+    name: &'static str,
+    state: State,
+    detail: String,
+    problems: Vec<String>,
+    /// Printed under the problems, so it can be set whether or not any were found.
+    remedy: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum State {
+    #[default]
+    Ok,
+    /// Nothing installed it -- most installs run one backend.
+    Absent,
+    /// Could not be checked from here: no scheduler, no network.
+    Unverified,
+    Broken,
+}
+
+impl State {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Absent => "absent",
+            Self::Unverified => "unverified",
+            Self::Broken => "BROKEN",
+        }
+    }
+}
+
+/// Everything `vizfold status` can settle about an install without folding anything.
+fn health() -> Vec<Component> {
+    [
+        binary_health(),
+        repo_health(),
+        config_health(),
+        backend_health(Backend::Openfold),
+        backend_health(Backend::Esmfold),
+        scheduler_health(),
+    ]
+    .into_iter()
+    .map(|component| match component.problems.is_empty() {
+        true => component,
+        false => Component {
+            state: State::Broken,
+            ..component
+        },
+    })
+    .collect()
+}
+
+fn binary_health() -> Component {
+    Component {
+        name: "binary",
+        detail: release::version_line(release::latest_tag().as_deref()),
+        ..Default::default()
+    }
+}
+
+/// The checkout the installers, scripts and dashboard come from. A clone is pinned to this
+/// binary's tag, so drift means the scripts are not the ones it expects -- flagged only for the
+/// clone vizfold made itself; one the user pointed at is theirs to keep on any ref.
+fn repo_health() -> Component {
+    let src = config::vizfold_src();
+    let at = checkout_ref(&src);
+    let expected = release::tag();
+    let problems = match &at {
+        _ if !src.join(config::INSTALLER).is_file() => {
+            vec![format!("{} is not a vizfold checkout", src.display())]
+        }
+        Some(at) if *at != expected && src == config::default_src() => {
+            vec![format!(
+                "the scripts are {at}, but this binary is {expected}"
+            )]
+        }
+        _ => Vec::new(),
     };
+    Component {
+        name: "repo",
+        detail: match &at {
+            Some(at) => format!("{} at {at}", src.display()),
+            None => src.display().to_string(),
+        },
+        problems,
+        remedy: "vizfold update".to_owned(),
+        ..Default::default()
+    }
+}
+
+/// Path-valued config keys, each with the file that proves the path is what the name claims
+/// (empty: the path itself is the whole claim). Every name here must be in `config::CONFIG_KEYS`
+/// -- `checked_keys_are_all_in_the_schema` fails otherwise.
+const CHECKED_PATHS: &[(&str, &str)] = &[
+    ("OPENFOLD_HOME", config::INSTALLER),
+    ("OPENFOLD_PREFIX", ""),
+    ("VIZFOLD_ENV_BASE", ""),
+];
+
+/// The same, but only while OpenFold is installed -- a directory its own uninstall took away is
+/// not a broken config. OPENFOLD_AF2_ROOT is deliberately absent: a missing mirror is how
+/// `setup::config` chooses to download the parameters, and `params_problem` checks the result.
+const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", "")];
+
+/// Config keys only the scheduler can settle, grouped by the one question that answers them.
+const CHECKED_PARTITIONS: &[&str] = &["OPENFOLD_PARTITION", "OPENFOLD_GPU_PARTITION"];
+const CHECKED_ACCOUNTS: &[&str] = &["OPENFOLD_ACCOUNT", "OPENFOLD_GPU_ACCOUNT"];
+
+fn config_health() -> Component {
+    if !config::is_initialized() {
+        return Component {
+            name: "config",
+            state: State::Absent,
+            detail: "not initialized; run `vizfold install <backend>`".to_owned(),
+            ..Default::default()
+        };
+    }
+    let openfold_paths: &[(&str, &str)] = if Backend::Openfold.is_installed() {
+        OPENFOLD_PATHS
+    } else {
+        &[]
+    };
+    let mut problems: Vec<String> = schema_problem().into_iter().collect();
+    problems.extend(
+        CHECKED_PATHS
+            .iter()
+            .chain(openfold_paths)
+            .filter_map(|(key, marker)| path_problem(key, marker)),
+    );
+    Component {
+        name: "config",
+        detail: format!("{} keys", config::config_keys().len()),
+        problems,
+        remedy: "vizfold install <backend>".to_owned(),
+        ..Default::default()
+    }
+}
+
+/// A config carrying other keys than this binary's schema was written by another version of the
+/// installer, so every value under it is suspect -- that is the answer, not the individual paths.
+fn schema_problem() -> Option<String> {
+    let present = config::config_keys();
+    let missing: Vec<&str> = config::CONFIG_KEYS
+        .iter()
+        .filter(|key| !present.iter().any(|had| had == *key))
+        .copied()
+        .collect();
+    let unknown: Vec<&str> = present
+        .iter()
+        .filter(|key| !config::CONFIG_KEYS.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect();
+    if missing.is_empty() && unknown.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "written by a different vizfold ({})",
+        [
+            (!missing.is_empty()).then(|| format!("missing {}", missing.join(", "))),
+            (!unknown.is_empty()).then(|| format!("unknown {}", unknown.join(", "))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("; ")
+    ))
+}
+
+fn path_problem(key: &str, marker: &str) -> Option<String> {
+    let value = config::resolved(key)?;
+    let path = PathBuf::from(&value);
+    let proof = if marker.is_empty() {
+        path
+    } else {
+        path.join(marker)
+    };
+    if proof.exists() {
+        return None;
+    }
+    Some(if marker.is_empty() {
+        format!("{key} = {value}, which does not exist")
+    } else {
+        format!("{key} = {value}, which holds no {marker}")
+    })
+}
+
+/// A backend's own installation: its environment runs, and its fold inputs are where they belong.
+fn backend_health(backend: Backend) -> Component {
+    let env = backend.env_prefix();
+    if !backend.is_installed() {
+        return Component {
+            name: backend.slug(),
+            state: State::Absent,
+            detail: format!("not installed ({})", env.display()),
+            ..Default::default()
+        };
+    }
+    let mut problems: Vec<String> = missing("interpreter", env.join("bin/python"))
+        .into_iter()
+        .collect();
+    // The entrypoint a fold runs, in the environment that runs it.
+    problems.extend(missing(
+        "entrypoint",
+        env.join(format!("bin/vizfold-{}", backend.slug())),
+    ));
+    if backend == Backend::Openfold {
+        problems.extend(params_problem());
+        problems.extend(example_problem());
+    }
+    Component {
+        name: backend.slug(),
+        detail: env.display().to_string(),
+        problems,
+        remedy: format!("vizfold install {}", backend.slug()),
+        ..Default::default()
+    }
+}
+
+fn missing(what: &str, path: PathBuf) -> Option<String> {
+    (!path.is_file()).then(|| format!("no {what} at {}", path.display()))
+}
+
+/// The AlphaFold2 weights, reached through the symlink the install plants in the checkout. An
+/// incomplete database mirror leaves that link dangling, which surfaces only mid-fold otherwise.
+fn params_problem() -> Option<String> {
+    let params = config::openfold_home()
+        .join("backends/openfold/openfold/resources/params/params_model_1_ptm.npz");
+    (!params.exists()).then(|| {
+        format!(
+            "AlphaFold2 parameters missing or a dangling link: {}",
+            params.display()
+        )
+    })
+}
+
+/// The example every `queue-run` defaults to needs both a FASTA and precomputed alignments; with
+/// only one of them the fold silently falls back to a full MSA search.
+fn example_problem() -> Option<String> {
+    let id = config::resolved("OPENFOLD_EXAMPLE")?;
+    examples::find(&id).is_none().then(|| {
+        format!(
+            "no FASTA and alignments for OPENFOLD_EXAMPLE {id} under {}",
+            examples::monomer_dir().display()
+        )
+    })
+}
+
+/// The difference between a fold that queues and one rejected at submission.
+fn scheduler_health() -> Component {
+    let wanted: Vec<String> = CHECKED_PARTITIONS
+        .iter()
+        .chain(CHECKED_ACCOUNTS)
+        .filter_map(|key| config::resolved(key))
+        .collect();
+    if wanted.is_empty() {
+        return Component {
+            name: "scheduler",
+            state: State::Absent,
+            detail: "no accounts or partitions configured".to_owned(),
+            ..Default::default()
+        };
+    }
+    // %100P, not %P: a bare field takes its default width and truncates, which would make a name
+    // as long as gpuA100x4-interactive read as a partition the cluster does not have.
+    let partitions = scheduler_values("sinfo", &["-h", "-o", "%100P"]);
+    let user = format!("user={}", std::env::var("USER").unwrap_or_default());
+    let accounts = scheduler_values(
+        "sacctmgr",
+        &["-nP", "show", "assoc", &user, "format=Account"],
+    );
+    if partitions.is_none() && accounts.is_none() {
+        return Component {
+            name: "scheduler",
+            state: State::Unverified,
+            detail: format!("{} unchecked: no scheduler here", wanted.join(", ")),
+            ..Default::default()
+        };
+    }
+    let problems: Vec<String> = [
+        (CHECKED_PARTITIONS, &partitions, "partition"),
+        (CHECKED_ACCOUNTS, &accounts, "account"),
+    ]
+    .into_iter()
+    .flat_map(|(keys, known, noun)| {
+        keys.iter().filter_map(move |key| {
+            unknown_to_scheduler(key, &config::resolved(key)?, known.as_deref(), noun)
+        })
+    })
+    .collect();
+    Component {
+        name: "scheduler",
+        detail: wanted.join(", "),
+        problems,
+        remedy: "correct them in ~/.config/vizfold/vizfold.json".to_owned(),
+        ..Default::default()
+    }
+}
+
+/// What the scheduler says it has. `None` means it could not be asked -- the command is missing, or
+/// slurmctld is unreachable, as on Delta's login nodes.
+fn scheduler_values(program: &str, args: &[&str]) -> Option<Vec<String>> {
+    let output = output_within(
+        std::process::Command::new(program).args(args),
+        SCHEDULER_TIMEOUT,
+    )?;
+    if !output.status.success() {
+        return None;
+    }
+    let values = scheduler_names(&String::from_utf8_lossy(&output.stdout));
+    (!values.is_empty()).then_some(values)
+}
+
+/// How long one scheduler question gets. Where slurmctld is unreachable -- Delta's login nodes --
+/// sinfo and sacctmgr each block for Slurm's own MessageTimeout, and `status` must not cost that.
+const SCHEDULER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// A command's output, or `None` if it cannot be run or is killed for running long. Only for
+/// output small enough not to fill a pipe buffer while we wait.
+fn output_within(
+    command: &mut std::process::Command,
+    limit: std::time::Duration,
+) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Err(_) => return None,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    }
+}
+
+/// One name per line: `sinfo` pads its field to the requested width and marks the default partition
+/// with a `*` right after the name; `sacctmgr -nP` emits the bare value. Trim before stripping the
+/// marker -- the padding comes after it.
+fn scheduler_names(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(|line| line.trim().trim_end_matches('*').to_owned())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// A configured name the scheduler does not have. `None` for the known set means that question went
+/// unanswered, which is not evidence against the value.
+fn unknown_to_scheduler(
+    key: &str,
+    value: &str,
+    known: Option<&[String]>,
+    noun: &str,
+) -> Option<String> {
+    let known = known?;
+    (!known.iter().any(|name| name == value))
+        .then(|| format!("{key} names {noun} {value}, which this cluster does not have"))
+}
+
+/// The last line of `status`: what to do, in one sentence.
+fn summary(components: &[Component]) -> String {
+    let broken: Vec<&str> = components
+        .iter()
+        .filter(|component| component.state == State::Broken)
+        .map(|component| component.name)
+        .collect();
+    if broken.is_empty() {
+        return "Everything checks out.".to_owned();
+    }
+    format!(
+        "{} of {} components need attention: {}.",
+        broken.len(),
+        components.len(),
+        broken.join(", ")
+    )
+}
+
+/// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard) from --
+/// the release binary ships only itself. Pinned to `release::tag()`, falling back to the default
+/// branch when no such tag exists (a build between releases).
+fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
+    let url = format!("https://github.com/{}.git", release::repo());
+    let dest = src.to_string_lossy().into_owned();
     println!("Fetching the vizfold checkout into {dest} ...");
     let clone = |args: &[&str]| std::process::Command::new("git").args(args).status();
-    if let Some(r) = &pinned
-        && let Ok(s) = clone(&["clone", "--depth", "1", "--branch", r, &url, &dest])
-        && s.success()
+    if let Ok(status) = clone(&[
+        "clone",
+        "--depth",
+        "1",
+        "--branch",
+        &release::tag(),
+        &url,
+        &dest,
+    ]) && status.success()
     {
         return Ok(());
     }
     match clone(&["clone", "--depth", "1", &url, &dest]) {
-        Ok(s) if s.success() => Ok(()),
+        Ok(status) if status.success() => Ok(()),
         _ => Err(DbErr::Custom(format!(
             "failed to clone {url} into {dest}; set OPENFOLD_HOME to an existing checkout"
         ))),
     }
 }
 
-/// Undo `vizfold install`: the install prefix's generated trees, the caches beside it, what it
-/// planted in the checkout, the run database and the install config. Resolved here rather than
-/// in an `install/uninstall.sh` because the checkout holding that script is itself one of the
-/// things being removed. Kept: fold outputs, a checkout the user pointed at, and this binary.
-fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
-    let prefix = config::prefix();
-    let mut targets = install_paths(&prefix, &config::openfold_home());
-    // Only the clone the install made itself: a checkout the user pointed at is theirs, and one
-    // holding the prefix holds the fold outputs too.
+/// Move the checkout the installers, scripts and dashboard come from to a ref -- by default this
+/// binary's own release tag, which a fresh clone is pinned to and is meant to match. The install's
+/// droppings are gitignored, so a checkout that only ever had installs run in it is clean here.
+fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
     let src = config::vizfold_src();
-    if src == config::default_src() && !prefix.starts_with(&src) {
-        targets.push(src);
+    let target = wanted.unwrap_or(&release::tag()).to_owned();
+    if !src.join(config::INSTALLER).is_file() {
+        return clone_checkout(&src);
     }
-    if let Some(database) = config::database_path() {
-        let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
-        targets.extend([sidecar("-wal"), sidecar("-shm"), database]);
+    if !src.join(".git").exists() {
+        return Err(DbErr::Custom(format!(
+            "{} is not a git checkout; nothing to update",
+            src.display()
+        )));
     }
-    targets.push(config::config_file());
+    if !git(&src, &["status", "--porcelain"]).is_some_and(|out| out.trim().is_empty()) {
+        return Err(DbErr::Custom(format!(
+            "{} has uncommitted changes; commit or discard them first",
+            src.display()
+        )));
+    }
+    println!("Updating {} to {target} ...", src.display());
+    // The clone is shallow and single-branch: the ref has to be fetched by name to exist here at
+    // all, and only FETCH_HEAD names it afterwards -- a branch gets no local ref to check out.
+    run_to_completion(
+        "fetch",
+        &mut git_cmd(
+            &src,
+            &["fetch", "--depth", "1", "--tags", "origin", &target],
+        ),
+    )?;
+    run_to_completion(
+        "checkout",
+        &mut git_cmd(&src, &["checkout", "--force", "FETCH_HEAD"]),
+    )?;
+    println!(
+        "{} is now at {}",
+        src.display(),
+        checkout_ref(&src).unwrap_or(target)
+    );
+    Ok(())
+}
+
+fn git_cmd(dir: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    command
+}
+
+/// One read-only git question, answered as trimmed stdout. `None` when git cannot answer at all --
+/// not a checkout, no git on this machine.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = git_cmd(dir, args).output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// What the checkout is actually on: its tag if it sits exactly on one, else a short commit.
+fn checkout_ref(src: &Path) -> Option<String> {
+    git(src, &["describe", "--tags", "--exact-match"])
+        .or_else(|| git(src, &["rev-parse", "--short", "HEAD"]))
+        .filter(|value| !value.is_empty())
+}
+
+/// Replace the running binary with a release build of it, then hand the new one its own checkout
+/// to update -- the scripts are pinned per version. Staged beside the binary, because a rename is
+/// atomic only within one filesystem.
+fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
+    let exe = std::env::current_exe()
+        .map_err(|error| DbErr::Custom(format!("cannot locate this binary: {error}")))?;
+    let current = release::current();
+    let tag = match args.version {
+        Some(version) => version,
+        None => release::latest_tag().ok_or_else(|| {
+            DbErr::Custom(
+                "could not reach github.com for the latest release; pass --version to pin one"
+                    .to_owned(),
+            )
+        })?,
+    };
+    let wanted = release::version_of(&tag).to_owned();
+    if wanted == current && !args.force {
+        println!("vizfold {current} is already the latest release.");
+        return Ok(());
+    }
+    let asset = release::asset(std::env::consts::OS, std::env::consts::ARCH);
+    let url = release::asset_url(&tag, &asset);
+    let staged = exe.with_file_name(format!(".{asset}.incoming"));
+    println!("Updating vizfold {current} -> {wanted}\n  {url}");
+    let fetched = fetch_release(&url, &staged, &wanted);
+    if fetched.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    fetched?;
+    std::fs::rename(&staged, &exe).map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        DbErr::Custom(format!(
+            "cannot replace {}: {error}; re-run where you can write it",
+            exe.display()
+        ))
+    })?;
+    println!("vizfold {wanted} is installed at {}", exe.display());
+
+    // The new binary, not this one, knows which checkout its own scripts came from.
+    println!();
+    match std::process::Command::new(&exe).arg("update").status() {
+        Ok(status) if status.success() => Ok(()),
+        _ => {
+            println!("The checkout could not be updated; run `vizfold update` yourself.");
+            Ok(())
+        }
+    }
+}
+
+/// Download a release asset and prove it is a working binary of the version it claims, so a
+/// truncated or foreign-architecture download is caught before it replaces anything.
+fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
+    run_to_completion(
+        "download",
+        std::process::Command::new("curl")
+            .args(["-fSL", url, "-o"])
+            .arg(staged),
+    )?;
+    std::fs::set_permissions(staged, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .map_err(|error| DbErr::Custom(format!("cannot make the download executable: {error}")))?;
+    let reported = std::process::Command::new(staged)
+        .arg("--version")
+        .output()
+        .map_err(|error| DbErr::Custom(format!("the download will not run here: {error}")))?;
+    let reported = String::from_utf8_lossy(&reported.stdout).trim().to_owned();
+    if !reported.contains(wanted) {
+        return Err(DbErr::Custom(format!(
+            "the download reports itself as {reported:?}, not {wanted}; leaving this binary alone"
+        )));
+    }
+    Ok(())
+}
+
+/// Undo `vizfold install`, for one backend or for all of it. Resolved here rather than in an
+/// `install/uninstall.sh` because the checkout holding that script is itself one of the things
+/// being removed. Kept either way: fold outputs, a checkout the user pointed at, and this binary.
+fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
+    let (prefix, home) = (config::prefix(), config::openfold_home());
+    let mut targets = match args.backend {
+        Some(backend) => backend.install_paths(&prefix, &home),
+        None => [Backend::Openfold, Backend::Esmfold]
+            .into_iter()
+            .flat_map(|backend| backend.install_paths(&prefix, &home))
+            .chain(shared_paths(&prefix, &home))
+            .collect(),
+    };
 
     // Relative paths mean an empty config value resolved into one; never delete off the cwd.
     targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
@@ -588,12 +1203,13 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             .iter()
             .any(|other| other != path && path.starts_with(other))
     });
+    let what = args.backend.map_or("vizfold", Backend::slug);
     if targets.is_empty() {
-        println!("Nothing to remove.");
+        println!("Nothing to remove for {what}.");
         return Ok(());
     }
 
-    println!("This removes:");
+    println!("This removes everything {what} installed:");
     for target in &targets {
         println!("  {}", target.display());
     }
@@ -607,59 +1223,57 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             Err(error) => eprintln!("warning: could not remove {}: {error}", target.display()),
         }
     }
-    if let Some(dir) = config::config_file().parent() {
-        let _ = std::fs::remove_dir(dir); // ours, but only if the uninstall emptied it
+    match args.backend {
+        Some(backend) => println!(
+            "\nKept: the config, the run database, and every other backend.\nReinstall with: vizfold install {what}",
+            what = backend.slug()
+        ),
+        None => {
+            // Only once emptied: remove_dir refuses otherwise, which is the whole guard.
+            for dir in [
+                config::config_file().parent().map(Path::to_path_buf),
+                Some(config::env_base()),
+                Some(prefix.join("envs")),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let _ = std::fs::remove_dir(dir);
+            }
+            println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
+        }
     }
-    println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
     Ok(())
 }
 
-/// What an install writes under the prefix and into the checkout (`install/setup.sh`), minus
-/// `<prefix>/outputs` -- those are run results, not install state.
-fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = [
-        "bin/micromamba",
-        "mamba",
-        "cutlass",
-        "tmp",
-        "data",
-        ".done",
-        "params",
-        "workbench",
-        "envs",
-        // The pre-env-base ESMFold layout; uninstall must still find that environment.
-        "esmfold-venv",
-        "vizfold.db",
-    ]
-    .iter()
-    .map(|entry| prefix.join(entry))
-    .collect();
-    // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
-    paths.extend(
-        std::fs::read_dir(prefix)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| file_name(path).starts_with("nvrtc-")),
-    );
-    // Package caches, deliberately parked beside the prefix rather than in it.
-    paths.extend(
-        prefix
-            .parent()
-            .into_iter()
-            .flat_map(|dir| [dir.join(".openfold-pkgs"), dir.join(".openfold-pip")]),
-    );
-    paths.extend(
-        [
-            "openfold/resources/params",
-            "openfold/resources/stereo_chemical_props.txt",
-            "tests/test_data/alphafold/common/stereo_chemical_props.txt",
-            "openfold.egg-info", // both left by the editable install of the checkout
-            "build",
-        ]
-        .map(|entry| home.join(entry)),
-    );
+/// What no one backend owns, so only a full uninstall removes it. The checkout only when the
+/// install cloned it itself: one the user pointed at is theirs, and one holding the prefix holds
+/// the fold outputs too.
+fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
+    // Named entries, never the env base itself: VIZFOLD_ENV_BASE may point at a directory of the
+    // user's own environments, of which only the `vizfold-` ones are ours. The backends bring
+    // theirs; nothing but a full uninstall takes the one `serve` provisions Node into.
+    let mut paths = vec![
+        config::env_dir("workbench"),
+        prefix.join("vizfold.db"),
+        config::config_file(),
+        // micromamba and its root serve every environment, so they outlive any one backend.
+        prefix.join("bin/micromamba"),
+        prefix.join("mamba"),
+    ];
+    // The staged copy only: `serve_dir` stages one here when the prefix is somewhere other than
+    // the checkout, and with no prefix settled the two are one path -- the source tree.
+    if prefix != home {
+        paths.push(prefix.join("workbench"));
+    }
+    let src = config::vizfold_src();
+    if src == config::default_src() && !prefix.starts_with(&src) {
+        paths.push(src);
+    }
+    if let Some(database) = config::database_path() {
+        let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
+        paths.extend([sidecar("-wal"), sidecar("-shm"), database]);
+    }
     paths
 }
 
@@ -1337,7 +1951,7 @@ async fn queue_esmfold_run(
     Ok(())
 }
 
-/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching fold.sh's `${INPUT_ID%_*}`.
+/// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>`, matching `vizfold-openfold`'s `${INPUT_ID%_*}`.
 fn default_fasta_dir(input_id: &str) -> String {
     let stem = input_id.rsplit_once('_').map_or(input_id, |(head, _)| head);
     config::openfold_home()
@@ -1737,40 +2351,198 @@ mod tests {
             Cli::try_parse_from(["vizfold", "uninstall"])
                 .expect("uninstall command should parse")
                 .command,
-            Command::Uninstall(UninstallArgs { yes: false })
+            Command::Uninstall(UninstallArgs {
+                backend: None,
+                yes: false
+            })
         ));
         assert!(matches!(
             Cli::try_parse_from(["vizfold", "uninstall", "--yes"])
                 .expect("uninstall --yes should parse")
                 .command,
-            Command::Uninstall(UninstallArgs { yes: true })
+            Command::Uninstall(UninstallArgs {
+                backend: None,
+                yes: true
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "uninstall", "esmfold"])
+                .expect("uninstall <backend> should parse")
+                .command,
+            Command::Uninstall(UninstallArgs {
+                backend: Some(Backend::Esmfold),
+                yes: false
+            })
         ));
     }
 
     #[test]
-    fn install_paths_cover_generated_trees_but_not_run_outputs() {
+    fn openfold_install_paths_cover_generated_trees_but_not_run_outputs() {
         let base = std::env::temp_dir().join(format!("vizfold-uninstall-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(prefix.join("nvrtc-12.2")).unwrap();
         std::fs::create_dir_all(prefix.join("outputs")).unwrap();
 
-        let paths = super::install_paths(&prefix, &home);
+        let paths = Backend::Openfold.install_paths(&prefix, &home);
 
         for expected in [
-            prefix.join("mamba"),
+            prefix.join("cutlass"),
             prefix.join("data"),
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
-            prefix.join("envs"),
-            prefix.join("esmfold-venv"),
             base.join(".openfold-pkgs"),
-            home.join("openfold/resources/params"),
+            // Under the backend subtree, where setup.sh actually plants them.
+            home.join("backends/openfold/openfold/resources/params"),
+            home.join("backends/openfold/openfold.egg-info"),
         ] {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
         assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
+        // micromamba serves the workbench env too; one backend's uninstall must not take it.
+        for shared in [prefix.join("mamba"), prefix.join("bin/micromamba")] {
+            assert!(!paths.contains(&shared), "{} is shared", shared.display());
+        }
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// The reinstall invariant: `vizfold install <backend>` has to put back exactly what its own
+    /// uninstall took, and nothing else may go with it.
+    #[test]
+    fn one_backend_leaves_the_other_and_everything_shared_alone() {
+        let base = std::env::temp_dir().join(format!("vizfold-scoped-{}", std::process::id()));
+        let (prefix, home) = (base.join("prefix"), base.join("checkout"));
+
+        let openfold = Backend::Openfold.install_paths(&prefix, &home);
+        let esmfold = Backend::Esmfold.install_paths(&prefix, &home);
+        let shared = super::shared_paths(&prefix, &home);
+
+        assert!(
+            openfold.iter().all(|path| !esmfold.contains(path)),
+            "the two backends share a path"
+        );
+        for owned in openfold.iter().chain(&esmfold) {
+            assert!(
+                !shared.contains(owned),
+                "{} is a backend's, not shared",
+                owned.display()
+            );
+        }
+        assert!(shared.contains(&config::config_file()), "config is shared");
+        // Removing the base itself once took a whole home directory with it.
+        assert!(
+            !shared.contains(&config::env_base()),
+            "the env base is the user's; only its vizfold- entries are ours"
+        );
+        assert!(
+            shared.contains(&config::env_dir("workbench")),
+            "no backend owns the workbench env, so only a full uninstall takes it"
+        );
+        assert!(
+            shared.contains(&prefix.join("workbench")),
+            "a staged workbench is shared"
+        );
+        // With no prefix settled the two are one path, and that one is the source tree.
+        assert!(
+            !super::shared_paths(&home, &home).contains(&home.join("workbench")),
+            "the checkout's own workbench must survive"
+        );
+    }
+
+    /// The checks name config keys as strings; a name outside the schema would report on a value
+    /// no install ever writes.
+    #[test]
+    fn checked_keys_are_all_in_the_schema() {
+        let checked = super::CHECKED_PATHS
+            .iter()
+            .chain(super::OPENFOLD_PATHS)
+            .map(|(key, _)| *key)
+            .chain(super::CHECKED_PARTITIONS.iter().copied())
+            .chain(super::CHECKED_ACCOUNTS.iter().copied())
+            .chain(["OPENFOLD_EXAMPLE"]);
+        for key in checked {
+            assert!(
+                config::CONFIG_KEYS.contains(&key),
+                "{key} is checked but is not a config key"
+            );
+        }
+    }
+
+    /// Real `sinfo -h -o %100P`: the default partition marked, the field padded out, one row per
+    /// node-state group. A name must survive both, or a configured partition reads as missing.
+    #[test]
+    fn scheduler_names_survive_the_padding_and_the_default_marker() {
+        let stdout = format!(
+            "{:<100}\n{:<100}\n{:<100}\n\n",
+            "cpu*", "cpu*", "gpuA100x4-interactive"
+        );
+        assert_eq!(
+            super::scheduler_names(&stdout),
+            ["cpu", "cpu", "gpuA100x4-interactive"]
+        );
+        assert_eq!(
+            super::scheduler_names("bbol-delta-gpu\n"),
+            ["bbol-delta-gpu"]
+        );
+        assert!(super::scheduler_names("\n \n").is_empty());
+    }
+
+    #[test]
+    fn an_unanswered_scheduler_question_is_not_a_problem() {
+        let known = ["cpu".to_owned(), "gpuA100x4-interactive".to_owned()];
+        let problem = |known: Option<&[String]>, value| {
+            super::unknown_to_scheduler("OPENFOLD_PARTITION", value, known, "partition")
+        };
+        assert_eq!(problem(None, "cpu"), None, "unasked is not answered");
+        assert_eq!(problem(Some(&known), "cpu"), None, "a name it has");
+        assert!(
+            problem(Some(&known), "gpu-nope")
+                .is_some_and(|p| p.contains("gpu-nope") && p.contains("OPENFOLD_PARTITION")),
+            "a name it does not have, said with the key that set it"
+        );
+    }
+
+    /// Only `Broken` counts: an uninstalled backend and an unreachable scheduler must not make an
+    /// otherwise healthy install report a problem.
+    #[test]
+    fn the_summary_counts_only_what_is_broken() {
+        let component = |name, state| super::Component {
+            name,
+            state,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::summary(&[
+                component("binary", super::State::Ok),
+                component("esmfold", super::State::Absent),
+                component("scheduler", super::State::Unverified),
+            ]),
+            "Everything checks out."
+        );
+        assert_eq!(
+            super::summary(&[
+                component("binary", super::State::Ok),
+                component("repo", super::State::Broken),
+                component("config", super::State::Broken),
+            ]),
+            "2 of 3 components need attention: repo, config."
+        );
+    }
+
+    /// A component is broken exactly when it carries a problem, so no builder has to keep a state
+    /// and a problem list in step by hand.
+    #[test]
+    fn health_promotes_any_component_with_a_problem() {
+        for component in super::health() {
+            assert_eq!(
+                component.state == super::State::Broken,
+                !component.problems.is_empty(),
+                "{} reports {:?} with {} problem(s)",
+                component.name,
+                component.state,
+                component.problems.len()
+            );
+        }
     }
 
     #[test]

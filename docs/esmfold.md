@@ -5,8 +5,10 @@ The ESMFold backend runs [ESMFold](https://github.com/facebookresearch/esm) via 
 ## Install
 
 **Option A – `vizfold install` (recommended)**  
-The executor CLI provisions a self-contained venv (PyTorch + Transformers) and records it in
-`~/.config/vizfold/vizfold.json`:
+The executor CLI provisions a self-contained environment — its own Python 3.11, PyTorch,
+Transformers, and the `esmfold` package with its `vizfold-esmfold` entrypoint — and records it in
+`~/.config/vizfold/vizfold.json`. It brings its own interpreter rather than building on the host's,
+which on a cluster login node is routinely older than the package needs:
 
 ```bash
 vizfold install esmfold
@@ -21,29 +23,30 @@ ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu128 \
   vizfold install esmfold
 ```
 
-**Option B – pip (manual, after PyTorch is installed)**  
-Install PyTorch first (its own wheel index for a CUDA build), then the esmfold project — which
-pulls Transformers from `backends/esmfold/requirements.txt` and installs the `esmfold` package so
-`import esmfold` resolves:
+**Option B – pip (manual, into a Python ≥3.10 environment)**  
+`backends/esmfold/pyproject.toml` declares everything the backend imports, so one command is
+enough. Install PyTorch first only when you need a specific CUDA build — pip then finds the
+`torch>=2.1` requirement already satisfied and leaves that build alone:
 
 ```bash
-pip install torch
-pip install ./backends/esmfold
+pip install ./backends/esmfold          # torch, transformers, numpy, and the esmfold package
 ```
 
 
 
 ## Run locally
 
-The executor runs the same script and records the run and its outputs:
+The executor runs the same entrypoint and records the run and its outputs:
 `vizfold queue-run esmfold --input-id 6KWC_1 --input-sequence <SEQ> --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta`,
-then `vizfold execute-run <id>`. The commands below call the script directly — use the install's
-interpreter (`$ESMFOLD_ENV_PREFIX/bin/python`, from `vizfold status`) rather than a bare `python`.
+then `vizfold execute-run <id>`. The commands below call it directly, through the environment's own
+`vizfold-esmfold` (`$ESMFOLD_ENV_PREFIX/bin/vizfold-esmfold`, from `vizfold status`) — it needs
+nothing from the checkout. `scripts/esmfold/run_pretrained_esmf.py` runs the same function by path,
+under the same interpreter.
 
 **Structure only (fast):**
 
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+vizfold-esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode none
@@ -52,7 +55,7 @@ python scripts/esmfold/run_pretrained_esmf.py \
 **Structure + attention + activations:**
 
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+vizfold-esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --model facebook/esmfold_v1 \
@@ -65,7 +68,7 @@ python scripts/esmfold/run_pretrained_esmf.py \
 **Limit layers/heads (saves memory and disk):**
 
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+vizfold-esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention \
@@ -76,7 +79,7 @@ python scripts/esmfold/run_pretrained_esmf.py \
 **Structure + IPA attention + per-recycle backbone (structure module traces):**
 
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+vizfold-esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention+activations \

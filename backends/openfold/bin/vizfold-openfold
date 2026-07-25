@@ -1,16 +1,30 @@
 #!/bin/bash
 
-# Fold one sequence on a GPU; every path comes from OPENFOLD_* (setup.sh prints the invocation).
+# `vizfold-openfold <input-id> [args]` -- fold one sequence on a GPU, with every path, database and
+# device filled in from the config. Anything after the id goes to the model. setup.py installs this
+# into the backend's environment; the executor runs run_pretrained_openfold.py directly instead.
 set -euo pipefail
 
-# sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under the
-# backend subtree. The BASH_SOURCE fallback covers a direct local run (install/ is a sibling here).
-# config.sh sets REPO, OF, die.
-LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
-. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../lib}/config.sh"
+# The checkout, resolved before any library exists to do it: config::file()'s one line, then the
+# OPENFOLD_HOME the config holds. `|| true` because no config yet is a case for the message below.
+CONFIG=${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}
+REPO=${OPENFOLD_HOME:-$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("OPENFOLD_HOME", ""))' "$CONFIG" 2>/dev/null || true)}
+SELF=$REPO/backends/openfold/bin/vizfold-openfold
+test -x "$SELF" ||
+    { echo "FATAL: no vizfold checkout at '${REPO:-unset}'; run \`vizfold install openfold\`" >&2; exit 1; }
+
+# setup.py copies this into <env>/bin, so the installed copy is only ever a launcher: hand off to
+# the checkout's, which `vizfold update` keeps in step with the binary. At most one extra exec --
+# after it, $0 is $SELF.
+[ "$0" = "$SELF" ] || exec env OPENFOLD_HOME="$REPO" "$SELF" "$@"
+
+export OPENFOLD_HOME=$REPO
+. "$REPO/lib/config.sh"          # REPO, OF, die, vizfold::*, mamba::*
 
 fold::config() {
-    PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
+    PREFIX=$(vizfold::prefix)
     ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
 }
 

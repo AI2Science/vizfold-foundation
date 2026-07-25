@@ -8,7 +8,6 @@ set -euo pipefail
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
 
-log()    { echo "== $* (+$((SECONDS))s)"; }
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 sealed() { [ -e "$sentinel/$1" ]; }
 seal()   { mkdir -p "$sentinel"; touch "$sentinel/$1"; }
@@ -17,7 +16,7 @@ older()  { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ 
 step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1"; }
 
 setup::config() {
-    PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
+    PREFIX=$(vizfold::prefix)
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
@@ -52,10 +51,7 @@ setup::preflight() {
     test -f "$OF/setup.py" || die "$REPO is not an OpenFold checkout"
 }
 
-setup::micromamba() {
-    local mm_arch; case $(uname -m) in aarch64|arm64) mm_arch=linux-aarch64 ;; *) mm_arch=linux-64 ;; esac
-    curl -Ls "https://micro.mamba.pm/api/micromamba/$mm_arch/latest" | tar -xj -C "$PREFIX" bin/micromamba
-}
+setup::micromamba() { mamba::ensure "$PREFIX" >/dev/null; }
 
 # By path + --no-rc so a ~/.condarc envs_dirs/channels can't hijack a reproducible env.
 setup::env() {
@@ -245,7 +241,7 @@ setup::ready() {
 
 Check it works -- fold the bundled example and count the atoms:
 
-  ${LAUNCH}env OPENFOLD_PREFIX=$PREFIX $REPO/scripts/openfold/fold.sh $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
+  ${LAUNCH}$ENV_DIR/bin/vizfold-openfold $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
   grep -c '^ATOM' $PREFIX/outputs/$EXAMPLE/predictions/${EXAMPLE}_model_1_ptm_$STRUCTURE.pdb
 
 A few thousand atoms means it worked. To use the environment directly:

@@ -7,6 +7,7 @@ pub mod migrations;
 pub mod model_runners;
 pub mod output_locations;
 pub mod preflight;
+pub mod release;
 pub mod seed;
 pub mod services;
 
