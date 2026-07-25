@@ -153,6 +153,30 @@ Attention storage is O(N²). For long proteins the script warns and suggests:
 - `--trace_mode activations` (no attention), or
 - `--layers 0,1,2` to save only a few layers.
 
-## Running on ICE (SLURM)
+## Running on a cluster
 
-See [hpc_ice.md](hpc_ice.md) for batch submission, environment setup, and a short smoke test.
+`vizfold install esmfold` picks the cluster, allocation and install prefix the same way
+`vizfold install openfold` does, so there is no batch script to edit and nothing to submit by hand.
+Folds go to a GPU node whenever the site settled a GPU partition:
+
+```bash
+vizfold install esmfold
+vizfold fold 6KWC_1 --backend esmfold
+```
+
+Two things worth knowing:
+
+- **`OPENFOLD_GPU_*` governs ESMFold folds too.** The GPU partition, account, gres, resources and
+  time that `vizfold status` shows are what an ESMFold run is `srun`'d onto — the names are
+  OpenFold-prefixed for historical reasons, but nothing about them is OpenFold-specific.
+- **The environment installs a CPU torch build by default.** For a CUDA build, point the installer
+  at the matching wheel index:
+
+  ```bash
+  ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu126 vizfold install esmfold
+  ```
+
+  `ESMFOLD_TORCH_SPEC` pins the spec itself (default `torch`), e.g. `torch==2.5.1`. Neither is part
+  of the saved config: they describe how to build the environment, not what the install settled, so
+  pass them again on a re-install. The installer's verify step prints which build you ended up with
+  (`torch 2.5.1 cuda True`).

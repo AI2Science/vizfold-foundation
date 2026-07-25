@@ -110,6 +110,41 @@ PY
      echo "FAIL settle_site drifted from the snapshot"; echo "  want: $want"; echo "  got:  $got"; exit 1
  fi) || exit 1
 
+# Installing ESMFold first must not decide anything for a later OpenFold install. It used to
+# persist OPENFOLD_PREFIX=$HOME/openfold -- its own private fallback, not a choice anybody made --
+# and because the saved config was loaded before discovery ran, OpenFold then skipped its own
+# discovery entirely: the build landed on a quota'd $HOME and GPU jobs got the CPU account.
+(export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
+ export VIZFOLD_CONFIG=$SANDBOX/esmfold-first.json OPENFOLD_HOME=$REPO
+ unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
+
+ # What `vizfold install esmfold` records on a machine with no site (the workstation case).
+ . "$REPO/lib/config.sh"
+ export ESMFOLD_ENV_PREFIX=$SANDBOX/home/openfold/envs/vizfold-esmfold
+ config::save >/dev/null
+
+ python3 - "$SANDBOX/esmfold-first.json" <<'PY' || exit 1
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+if cfg.get("OPENFOLD_PREFIX"):
+    print("FAIL the esmfold install persisted a prefix nobody chose:", cfg["OPENFOLD_PREFIX"])
+    sys.exit(1)
+PY
+
+ # Now OpenFold, on Delta. Its own discovery must run and win.
+ (. "$REPO/lib/slurm.sh"
+  sacctmgr() { echo bbka; }
+  slurm::cluster() { echo delta; }
+  vizfold::settle_site >/dev/null 2>&1
+  got="$OPENFOLD_PREFIX $OPENFOLD_ACCOUNT $OPENFOLD_GPU_ACCOUNT"
+  want="/work/nvme/bbka/x-test/vizfold bbka-delta-cpu bbka-delta-gpu"
+  if [ "$got" = "$want" ]; then
+      echo "ok   an esmfold-first install leaves openfold's discovery intact"
+  else
+      echo "FAIL esmfold-first derailed the openfold install"
+      echo "  want: $want"; echo "  got:  $got"; exit 1
+  fi)) || exit 1
+
 # An inline choice must survive the install. Every key setup::config_save writes is a resolution,
 # not an assignment, so a database or data directory the user picked is recorded as picked --
 # overwriting either would move their run history or their staged datasets out from under them.

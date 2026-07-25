@@ -135,8 +135,13 @@ impl Backend {
     fn install_paths(self, prefix: &Path, home: &Path) -> Vec<PathBuf> {
         let mut paths = vec![self.env_prefix()];
         match self {
-            // The pre-env-base layout, still out there on installs that predate it.
-            Self::Esmfold => paths.push(prefix.join("esmfold-venv")),
+            Self::Esmfold => {
+                // The pre-env-base layout, still out there on installs that predate it.
+                paths.push(prefix.join("esmfold-venv"));
+                // Its pip cache, parked beside the prefix by its installer. Its own name, so this
+                // never removes OpenFold's.
+                paths.extend(prefix.parent().map(|dir| dir.join(".esmfold-pip")));
+            }
             Self::Openfold => {
                 // `params` is where installs before the data-dir move put the weights; a target
                 // that does not exist is filtered out below, so it costs nothing and still

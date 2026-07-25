@@ -1,23 +1,33 @@
 #!/bin/bash
 
-# Install the ESMFold backend into an environment that can fold on its own. No SLURM/site machinery
-# and no AF2 databases -- ESMFold needs no CUDA build and pulls its weights from HuggingFace at run
-# time. Invoked by `vizfold install esmfold`. Idempotent.
+# Install the ESMFold backend into an environment that can fold on its own: no AF2 databases and no
+# CUDA build, weights come from HuggingFace at run time. The build runs here rather than on a
+# compute node -- a pip install needs neither -- but the site still decides *where*, so this asks
+# the platform the same question `vizfold install openfold` does.
+# Invoked by `vizfold install esmfold`. Idempotent.
 set -euo pipefail
 
-# config.sh is the backend-neutral shared install lib (repo-root lib/), owned by no backend. It
-# fills unset vars from ~/.config/vizfold/vizfold.json (so an openfold install's PREFIX etc. carry
-# over here). OPENFOLD_HOME is exported by `vizfold install`; the fallback finds lib/ from here.
-CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib/config.sh}
-. "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../lib" && pwd)/config.sh}"
-config::load
+# lib/ is the backend-neutral shared install machinery, owned by no backend; slurm.sh pulls in
+# config.sh and interactive.sh. OPENFOLD_HOME is exported by `vizfold install`; the fallback finds
+# lib/ from here.
+LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
+. "${LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../lib" && pwd)}/slurm.sh"
 
-REPO=${OPENFOLD_HOME:-$REPO}
+# Cluster, allocation, install prefix, then the saved config under all of it. Without this the
+# prefix defaulted to $HOME/openfold -- which put a multi-GB torch environment on a quota'd home
+# and, once persisted, made every later OpenFold install skip its own discovery.
+vizfold::settle_site
+
 ESM=$REPO/backends/esmfold
 PREFIX=$(vizfold::prefix)
 ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
 # A cluster login node's python3 is routinely older than the package needs, so we bring our own.
 PYTHON_VERSION=3.11
+# Beside the prefix, like setup.sh's caches. MAMBA_ROOT_PREFIX already parks the conda packages
+# there; without this the 2.5-3 GB torch wheel still lands in ~/.cache/pip, which is exactly the
+# quota this install moved off $HOME to avoid. Its own name, not .openfold-pip: `vizfold uninstall
+# esmfold` must not delete the other backend's cache.
+export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$PREFIX/../.esmfold-pip}
 test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
 
 esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers, esmfold' 2>/dev/null; }
@@ -58,12 +68,14 @@ print("entrypoint", entrypoint)
 PY
 }
 
-# Record what was resolved so `vizfold status` and the DB commands see this install.
+# Record what was resolved so `vizfold status` and the DB commands see this install. Only what
+# something actually settled: OPENFOLD_PREFIX is written by vizfold::settle_site when a site or the
+# caller chose one, and recording this backend's private fallback instead would hand every later
+# install a prefix nobody picked. ESMFOLD_ENV_PREFIX is absolute, so the env is findable regardless.
 esmfold::config_save() {
     log config
-    export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX ESMFOLD_ENV_PREFIX=$ENV
-    export VIZFOLD_ENV_BASE=$(vizfold::env_base)
-    export VIZFOLD_DB=${VIZFOLD_DB:-$PREFIX/vizfold.db}
+    export OPENFOLD_HOME=$REPO ESMFOLD_ENV_PREFIX=$ENV
+    export VIZFOLD_DB=${VIZFOLD_DB:-${OPENFOLD_PREFIX:+$OPENFOLD_PREFIX/vizfold.db}}
     config::save
 }
 
@@ -81,11 +93,14 @@ main() {
 
 ESMFold env: $ENV
 
-Fold the bundled example (downloads facebook/esmfold_v1 on first run):
+Check it works -- fold the bundled example, onto a GPU node if one is configured
+(downloads facebook/esmfold_v1 on first run):
 
-  $ENV/bin/esmfold \\
-    --fasta $REPO/examples/monomer/fasta_dir_6KWC/6KWC.fasta \\
-    --out $PREFIX/outputs/esmf_6KWC --trace_mode none
+  vizfold fold ${OPENFOLD_EXAMPLE:-6KWC_1} --backend esmfold
+
+To drive the model yourself, the environment installs its own CLI:
+
+  $ENV/bin/esmfold --help
 EOF
 }
 main "$@"
