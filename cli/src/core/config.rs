@@ -22,7 +22,7 @@ pub fn is_initialized() -> bool {
 }
 
 /// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
-/// `install/tests/vocabulary.sh` fails if the two ever differ.
+/// `tests/vocabulary.sh` fails if the two ever differ.
 pub const CONFIG_KEYS: &[&str] = &[
     "ESMFOLD_ENV_PREFIX",
     "OPENFOLD_ACCOUNT",
@@ -31,7 +31,6 @@ pub const CONFIG_KEYS: &[&str] = &[
     "OPENFOLD_DRIVER_CUDA",
     "OPENFOLD_ENV_PREFIX",
     "OPENFOLD_EXAMPLE",
-    "OPENFOLD_FOLD_ARGS",
     "OPENFOLD_GPU_ACCOUNT",
     "OPENFOLD_GPU_GRES",
     "OPENFOLD_GPU_PARTITION",
@@ -154,10 +153,13 @@ pub fn config_entries() -> Vec<(String, String)> {
     entries
 }
 
+/// Mirrors `vizfold::prefix` in `lib/config.sh`, down to the fallback: the installer's default is
+/// `$HOME/openfold`, and answering with the checkout instead made `status` and `uninstall` describe
+/// a different directory than the one an install would use.
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(openfold_home)
+        .unwrap_or_else(|| PathBuf::from(format!("{}/openfold", home_dir())))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

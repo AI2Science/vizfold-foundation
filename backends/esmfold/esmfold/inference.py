@@ -110,51 +110,6 @@ class ESMFoldRunner:
         self._tokenizer = None
 
 
-    def load_model(
-        self,
-        model_name: Optional[str] = None,
-        device: Optional[str] = None,
-        dtype: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Load the model. Returns the model object."""
-        if model_name is not None:
-            self.model_name = model_name
-        if device is not None:
-            self.device = device
-        if dtype is not None:
-            self.dtype = dtype
-        return self._load_model()
-
-    def run_inference(
-        self,
-        fasta_path: str,
-        out_dir: str,
-        trace_cfg: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """Run inference and optionally write traces."""
-        trace_mode = "attention+activations"
-        top_k = 50
-        if trace_cfg:
-            trace_mode = trace_cfg.get("trace_mode", trace_mode)
-            top_k = trace_cfg.get("top_k", top_k)
-        return self.run(
-            fasta_path=fasta_path,
-            out_dir=out_dir,
-            trace_mode=trace_mode,
-            top_k=top_k,
-            **kwargs,
-        )
-
-    def supports_attention(self) -> bool:
-        """Whether this backend can extract attention maps."""
-        return True
-
-    def supports_activations(self) -> bool:
-        """Whether this backend can extract layer activations (hidden states)."""
-        return True
-
     # --- Internal model loading ---
 
     def _load_model(self) -> Any:

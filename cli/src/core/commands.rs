@@ -46,7 +46,21 @@ impl CommandRunner for LocalCommandRunner {
         };
 
         if spec.stream {
-            let status = command.status().await.map_err(spawn_error)?;
+            // The model's own chatter is progress, not this command's result, so it goes to stderr
+            // and leaves stdout for what the caller asked for -- `execute-run --json` prints one
+            // JSON line there and anything interleaved ahead of it makes the line unparseable.
+            // Copied rather than redirected by fd so it streams live on every platform.
+            command.stdout(std::process::Stdio::piped());
+            let mut child = command.spawn().map_err(spawn_error)?;
+            let relay = child.stdout.take().map(|mut out| {
+                tokio::spawn(
+                    async move { tokio::io::copy(&mut out, &mut tokio::io::stderr()).await },
+                )
+            });
+            let status = child.wait().await.map_err(spawn_error)?;
+            if let Some(relay) = relay {
+                let _ = relay.await;
+            }
             return Ok(CommandOutput {
                 exit_code: status.code().unwrap_or(-1),
                 stdout: String::new(),

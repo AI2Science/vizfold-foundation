@@ -41,7 +41,6 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
   OPENFOLD_DRIVER_CUDA = 12.2
   OPENFOLD_ENV_PREFIX = /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
   OPENFOLD_EXAMPLE = 6KWC_1
-  OPENFOLD_FOLD_ARGS =
   OPENFOLD_GPU_ACCOUNT = bbol-delta-gpu
   OPENFOLD_GPU_GRES = gpu:1
   OPENFOLD_GPU_PARTITION = gpuA100x4-interactive
@@ -58,7 +57,7 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
 ```
 
 That key set is fixed: every cluster and either backend writes the same names, and a name this
-install did not settle (`ESMFOLD_ENV_PREFIX`, `OPENFOLD_FOLD_ARGS` above) is written empty, which
+install did not settle (`ESMFOLD_ENV_PREFIX` above) is written empty, which
 every reader treats as unset. The values are resolved live during install — on Delta the prefix and
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
@@ -93,15 +92,14 @@ vizfold list profiles
 ## 2. Queue a run
 
 Queue the bundled example, 6KWC (a ~190-residue monomer). On a cluster install the input paths all
-default off the config and the checkout examples, so the only flags you need are the sequence and
-its id — plus `--demo-attn` to also dump attention maps:
+default off the config and the checkout examples, and the sequence is read from the FASTA, so the
+id is the only flag you need:
 
 ```bash
-vizfold queue-run openfold \
-  --input-id 6KWC_1 \
-  --input-sequence GSTIQPGTGYNNGYFYSYWNDGHGGVTYTNGPGGQFSVNWSNSGEFVGGKGWQPGTKNKVINFSGSYNPNGNSYLSVYGWSRNPLIEYYIVENFGTYNPSTGATKLGEVTSDGSVYDIYRTQRVNQPSIIGTATFYQYWSVRRNHRSSGSVNTANHFNAWAQQGLTLGTMDYQIVAVQGYFSSGSASITVS \
-  --demo-attn
+vizfold queue-run openfold --input-id 6KWC_1
 ```
+
+Attention maps are dumped by default; pass `--attn=false` to skip them.
 
 ```text
 Queued OpenFold run 1
@@ -109,32 +107,32 @@ status: submitted
 input_id: 6KWC_1
 
 Next:
-  vizfold execute-run 1
+  vizfold fold 1
 ```
 
 What the omitted flags default to (all overridable — see `vizfold queue-run openfold --help`):
 
 | Flag | Default on a cluster install |
 | --- | --- |
-| `--fasta-dir` | `$OPENFOLD_HOME/examples/monomer/fasta_dir_6KWC` |
+| `--fasta` | `$OPENFOLD_HOME/examples/monomer/fasta_dir_6KWC` |
 | `--alignment-dir` | `$OPENFOLD_HOME/examples/monomer/alignments` |
 | `--data-dir` | `$OPENFOLD_DATA_DIR` (the staged AlphaFold2 databases) |
 | `--model-device` | `cuda:0` — a GPU partition is configured, so the fold will `srun` onto a GPU node |
 | `--use-precomputed-alignments` | `true` — reuse `alignment-dir/6KWC_1`, skipping the MSA search |
 
-The FASTA file in `fasta-dir` must have a header matching `--input-id` (here `>6KWC_1`);
-`--input-sequence` is that sequence, recorded with the run. With precomputed alignments enabled the
-directory `alignment-dir/<input-id>` (here `examples/monomer/alignments/6KWC_1`) must exist. The
-queue step canonicalizes and stores absolute paths in the run record, so all inputs must be present
-when you queue.
+The id and the sequence both come from the FASTA's header record, so they cannot disagree with what
+is folded; pass `--fasta <path>` to fold one of your own and `--input-id` becomes optional. With
+precomputed alignments enabled the directory `alignment-dir/<input-id>` (here
+`examples/monomer/alignments/6KWC_1`) must exist. The queue step canonicalizes and stores absolute
+paths in the run record, so all inputs must be present when you queue.
 
 ## 3. Execute the run
 
 ```bash
-vizfold execute-run 1
+vizfold fold 1
 ```
 
-`execute-run` prints each preflight check — the `gpu` one warns because the login node has none —
+`fold` prints each preflight check — the `gpu` one warns because the login node has none —
 then, because a GPU partition is configured but no allocation is held, wraps the OpenFold command
 in the srun `vizfold.json` describes:
 `srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00`,
@@ -159,7 +157,7 @@ Final status: completed
 Run 1 completed in 78s. View it with: vizfold serve
 ```
 
-Verify the structure directly — a relaxed 6KWC prediction is 2839 atoms, and `--demo-attn` wrote
+Verify the structure directly — a relaxed 6KWC prediction is 2839 atoms, and `--attn` wrote
 one text trace per layer/head:
 
 ```bash
@@ -170,11 +168,11 @@ $ ls /work/nvme/bbol/yjayawardana/vizfold/runs/1/attention | wc -l
 ```
 
 Outputs land in the run workspace `$OPENFOLD_PREFIX/runs/<run-id>`: `predictions/` (relaxed and
-unrelaxed PDBs, `timings.json`) and, with `--demo-attn`, `attention/`.
+unrelaxed PDBs, `timings.json`) and, with `--attn`, `attention/`.
 
 ## 4. Register artifacts
 
-`execute-run` already did this — a completed run whose outputs were never registered is invisible
+`fold` already did this — a completed run whose outputs were never registered is invisible
 to the workbench, so registration rides along with execution. The command remains for re-running it
 against a run whose outputs appeared later; it is idempotent and reports what is already present.
 
@@ -277,7 +275,7 @@ full databases).
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`
 
 The GPU partition and time cap come from the site profile
-(`backends/openfold/install/sites/<ClusterName>.json`); the account is not in that file — it is
+(`sites/<ClusterName>.json`); the account is not in that file — it is
 worked out during the install (on Delta, `slurm::nvme_alloc` names it from the allocation plus a
 `-delta-gpu` suffix). All three are written to `vizfold.json`. If you override any
 `OPENFOLD_GPU_*` value, keep it within the partition's limits (on Delta,

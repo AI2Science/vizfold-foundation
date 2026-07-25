@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
 
-use crate::core::{config, migrations::MigratorTrait, seed, services::model_backends};
+use crate::core::{config, migrations::MigratorTrait};
 
 pub async fn connect_and_migrate() -> Result<DatabaseConnection, DbErr> {
     if let Some(parent) = config::database_path().as_deref().and_then(Path::parent) {
@@ -47,27 +47,6 @@ fn name_pre_baseline_database(error: DbErr) -> DbErr {
             ))
         }
         _ => error,
-    }
-}
-
-pub struct ExecutionCore {
-    db: DatabaseConnection,
-}
-
-impl ExecutionCore {
-    pub async fn bootstrap() -> Result<Self, DbErr> {
-        let db = connect_and_migrate().await?;
-        seed::seed_defaults(&db).await?;
-        Ok(Self { db })
-    }
-
-    pub async fn check_readiness(&self) -> Result<(), DbErr> {
-        let _ = model_backends::list_model_backends(&self.db).await?;
-        Ok(())
-    }
-
-    pub fn db(&self) -> &DatabaseConnection {
-        &self.db
     }
 }
 

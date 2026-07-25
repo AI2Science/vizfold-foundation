@@ -1,9 +1,9 @@
 #!/bin/bash
 # One vocabulary: the binary must not resolve a name the config never carries, and a <site>.json
-# must not set a name nothing consumes. Run: bash install/tests/vocabulary.sh
+# must not set a name nothing consumes. Run: bash tests/vocabulary.sh
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-REPO=$(cd ../../.. && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO"
 VIZFOLD_CONFIG=/nonexistent/vocabulary-test.json; export VIZFOLD_CONFIG
 . "$REPO/lib/config.sh"
 
@@ -41,7 +41,7 @@ report "every site key is persisted or knowingly install-only" \
 # proceeds with a mangled value -- how "$ALLOC-delta-cpu" once became the account "-delta-cpu".
 templated=$(grep -ohE '\$\{?[A-Z0-9_]+\}?' sites/*.json | tr -d '${}' | sort -u)
 provided=$(printf '%s\n' $schema $install_only USER HOME \
-    $(grep -ohE 'export [A-Z0-9_]+|[A-Z0-9_]+=' sites/*.sh slurm.sh | tr -d '=' | sed 's/export //') |
+    $(grep -ohE 'export [A-Z0-9_]+|[A-Z0-9_]+=' sites/*.sh lib/slurm.sh | tr -d '=' | sed 's/export //') |
     sort -u)
 report "every site template atom is provided by a discover hook or the schema" \
     "$(comm -23 <(printf '%s\n' $templated) <(printf '%s\n' $provided))" \

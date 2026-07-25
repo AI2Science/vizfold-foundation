@@ -3,11 +3,14 @@ on: [pull_request, push]
 jobs:
   install-tests:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backends/openfold
     steps:
       - uses: actions/checkout@v7
-      - run: bash install/tests/launch_args.sh
-      - run: bash install/tests/site_config.sh
-      - run: bash install/tests/vocabulary.sh
+      # A script that does not parse is a broken install nobody finds until a cluster runs it.
+      - name: every shell script parses
+        run: |
+          fail=0
+          for f in $(git ls-files '*.sh' '*.slurm'); do bash -n "$f" || fail=1; done
+          exit $fail
+      - run: bash tests/launch_args.sh
+      - run: bash tests/site_config.sh
+      - run: bash tests/vocabulary.sh

@@ -7,6 +7,9 @@ set -euo pipefail
 # walking up. The BASH_SOURCE fallback covers a direct local run (lib/ is three levels up).
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
+# For a direct run of this script. Under `vizfold install` everything install.sh settled is already
+# exported, and config::fill never overwrites a set var, so this fills nothing.
+config::load
 
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 sealed() { [ -e "$sentinel/$1" ]; }
@@ -23,7 +26,7 @@ setup::config() {
         aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
         *)             ENV_YML=$OF/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
     esac
-    DATA=$PREFIX/data
+    DATA=${OPENFOLD_DATA_DIR:-$PREFIX/data}          # a schema key, so it has to be readable too
     ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
     MM=$PREFIX/bin/micromamba
     CUTLASS=$PREFIX/cutlass
@@ -154,15 +157,17 @@ setup::link_mirror() {
     fi
 }
 
-# No mirror: fetch params (4 GB, into the prefix) and the mmCIFs the examples cite.
+# No mirror: fetch params (4 GB, into the data dir) and the mmCIFs the examples cite.
+# $DATA, not $PREFIX: `vizfold download openfold alphafold_params` hands the same script the same
+# directory, and the two must land the weights where the other one looks for them.
 setup::fetch_params() {
-    rm -rf "$PREFIX/params"   # a half-extracted tar would pass a single-file check
-    bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$PREFIX"
+    rm -rf "$DATA/params"   # a half-extracted tar would pass a single-file check
+    bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$DATA"
 }
 
 setup::fetch_templates() {
     log templates
-    ln -sfn "$PREFIX/params" "$OF/openfold/resources/params"
+    ln -sfn "$DATA/params" "$OF/openfold/resources/params"
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
     # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. || true tolerates a 404; assert catches total failure.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
@@ -220,7 +225,9 @@ setup::config_save() {
     export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX VIZFOLD_ENV_BASE=$(vizfold::env_base)
     export OPENFOLD_ENV_PREFIX=$CONDA_PREFIX OPENFOLD_DATA_DIR=$DATA OPENFOLD_MAX_CUDA=$MAX_CUDA
     export OPENFOLD_GPU_RESOURCES=$GPU_RES OPENFOLD_EXAMPLE=$EXAMPLE OPENFOLD_GPU_GRES=$GPU_GRES
-    export OPENFOLD_GPU_TIME=$GPU_TIME VIZFOLD_DB=$PREFIX/vizfold.db
+    # Every other key here is a resolution, not an assignment: overwriting a database somebody
+    # chose would move their run history out from under them. Matches esmfold's installer.
+    export OPENFOLD_GPU_TIME=$GPU_TIME VIZFOLD_DB=${VIZFOLD_DB:-$PREFIX/vizfold.db}
     config::save
 }
 
@@ -230,7 +237,7 @@ setup::ready() {
 
 Check it works -- queue and fold the bundled example, onto a GPU node if one is configured:
 
-  vizfold execute-run $EXAMPLE
+  vizfold fold $EXAMPLE
 
 To drive the model yourself, activate the environment and use its own CLI:
 
@@ -266,5 +273,5 @@ main() {
 }
 
 # A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
-[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$OF/install/sites/$OPENFOLD_SITE.sh" ] && . "$OF/install/sites/$OPENFOLD_SITE.sh"
+[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/sites/$OPENFOLD_SITE.sh"
 main "$@"

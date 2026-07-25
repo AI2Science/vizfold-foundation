@@ -1,13 +1,13 @@
 #!/bin/bash
-# Every site's fully-resolved install config, snapshotted. Run: bash install/tests/site_config.sh
-# Accept an intended change: bash install/tests/site_config.sh -u
+# Every site's fully-resolved install config, snapshotted. Run: bash tests/site_config.sh
+# Accept an intended change: bash tests/site_config.sh -u
 #
 # A <site>.json that restates a default and one that omits it must resolve identically, so this runs
 # the real flow -- slurm::discover, <site>.json templating, slurm::run's exports, setup.sh's
 # defaults -- and compares what config::save would write plus the vars that drive the build job.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-REPO=$(cd ../../.. && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO"
 EXPECTED=tests/site_config.expected
 SANDBOX=${TMPDIR:-/tmp}/vizfold-site-config-$$
 trap 'rm -rf "$SANDBOX"' EXIT
@@ -33,15 +33,15 @@ resolve() {
     export USER=x-test HOME=$SANDBOX/home OPENFOLD_SITE=$site
     export VIZFOLD_CONFIG=$SANDBOX/$site.json OPENFOLD_HOME=$REPO
 
-    . ./slurm.sh
-    . "sites/$site.sh"
+    . "$REPO/lib/slurm.sh"
+    . "$SITES/$site.sh"
     # After the sources, so these win: slurm.sh defines its own scratch_root.
     uname() { [ "${1:-}" = -m ] && echo "$arch" || command uname "$@"; }
     sacctmgr() { echo bbka; }
     slurm::scratch_root() { echo "$SCRATCH"; }
 
     [ -n "$skip" ] || slurm::discover
-    config::site_defaults "sites/$site.sh"
+    config::site_defaults "$SITES/$site.sh"
 
     # What slurm::run settles before handing off to setup.sh.
     export OPENFOLD_PREFIX=${OPENFOLD_PREFIX:-$(slurm::default_prefix)}
@@ -63,7 +63,7 @@ resolve() {
 
 mkdir -p "$SANDBOX/home"
 # setup.sh's defaults, taken from setup.sh so they cannot drift; a file, not <(), for bash 3.2.
-sed '/^main() {/,$d' setup.sh > "$SANDBOX/setup-defs.sh"
+sed '/^main() {/,$d' backends/openfold/install/setup.sh > "$SANDBOX/setup-defs.sh"
 # Subshell per site: exported OPENFOLD_* and the site's hooks must not leak into the next.
 # Substitute the quoted value, not the bare path: a $REPO of /w would rewrite every /work path.
 actual=$(for f in sites/*.json; do f=${f##*/}; (resolve "${f%.json}" 2>/dev/null); done |
@@ -81,7 +81,7 @@ fi
 # config::load put back in the environment, so it rewrites the earlier values instead of dropping them.
 cp "$SANDBOX/delta.json" "$SANDBOX/before.json"
 (export VIZFOLD_CONFIG=$SANDBOX/delta.json ESMFOLD_ENV_PREFIX=/envs/vizfold-esmfold
- . "$REPO/lib/config.sh" && config::save) >/dev/null 2>&1
+ . "$REPO/lib/config.sh" && config::load && config::save) >/dev/null 2>&1
 python3 - "$SANDBOX/before.json" "$SANDBOX/delta.json" <<'PY' || exit 1
 import json, sys
 before, after = (json.load(open(p)) for p in sys.argv[1:3])
@@ -91,6 +91,76 @@ if lost or set(after) != set(before):
     sys.exit(1)
 print("ok   a second backend's install preserves every settled value")
 PY
+
+# vizfold::settle_site is the one entry point both installers use to pick a cluster and a prefix.
+# The snapshot above walks the same layers by hand, so this pins the two together: the shared
+# function must land a real site on exactly the values the snapshot records for it.
+(export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
+ export VIZFOLD_CONFIG=$SANDBOX/settle.json OPENFOLD_HOME=$REPO
+ unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
+ . "$REPO/lib/slurm.sh"
+ sacctmgr() { echo bbka; }
+ slurm::cluster() { echo delta; }                     # as if run on a Delta login node
+ vizfold::settle_site >/dev/null 2>&1
+ got="$OPENFOLD_SITE $OPENFOLD_PREFIX"
+ want="delta /work/nvme/bbka/x-test/vizfold"
+ if [ "$got" = "$want" ]; then
+     echo "ok   settle_site lands a site on the values the snapshot records"
+ else
+     echo "FAIL settle_site drifted from the snapshot"; echo "  want: $want"; echo "  got:  $got"; exit 1
+ fi) || exit 1
+
+# Installing ESMFold first must not decide anything for a later OpenFold install. It used to
+# persist OPENFOLD_PREFIX=$HOME/openfold -- its own private fallback, not a choice anybody made --
+# and because the saved config was loaded before discovery ran, OpenFold then skipped its own
+# discovery entirely: the build landed on a quota'd $HOME and GPU jobs got the CPU account.
+(export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
+ export VIZFOLD_CONFIG=$SANDBOX/esmfold-first.json OPENFOLD_HOME=$REPO
+ unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
+
+ # What `vizfold install esmfold` records on a machine with no site (the workstation case).
+ . "$REPO/lib/config.sh"
+ export ESMFOLD_ENV_PREFIX=$SANDBOX/home/openfold/envs/vizfold-esmfold
+ config::save >/dev/null
+
+ python3 - "$SANDBOX/esmfold-first.json" <<'PY' || exit 1
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+if cfg.get("OPENFOLD_PREFIX"):
+    print("FAIL the esmfold install persisted a prefix nobody chose:", cfg["OPENFOLD_PREFIX"])
+    sys.exit(1)
+PY
+
+ # Now OpenFold, on Delta. Its own discovery must run and win.
+ (. "$REPO/lib/slurm.sh"
+  sacctmgr() { echo bbka; }
+  slurm::cluster() { echo delta; }
+  vizfold::settle_site >/dev/null 2>&1
+  got="$OPENFOLD_PREFIX $OPENFOLD_ACCOUNT $OPENFOLD_GPU_ACCOUNT"
+  want="/work/nvme/bbka/x-test/vizfold bbka-delta-cpu bbka-delta-gpu"
+  if [ "$got" = "$want" ]; then
+      echo "ok   an esmfold-first install leaves openfold's discovery intact"
+  else
+      echo "FAIL esmfold-first derailed the openfold install"
+      echo "  want: $want"; echo "  got:  $got"; exit 1
+  fi)) || exit 1
+
+# An inline choice must survive the install. Every key setup::config_save writes is a resolution,
+# not an assignment, so a database or data directory the user picked is recorded as picked --
+# overwriting either would move their run history or their staged datasets out from under them.
+(export VIZFOLD_DB=$SANDBOX/chosen.db OPENFOLD_DATA_DIR=$SANDBOX/chosen-data
+ resolve delta >/dev/null 2>&1
+ python3 - "$SANDBOX/delta.json" "$SANDBOX" <<'PY' || exit 1
+import json, sys
+cfg, sandbox = json.load(open(sys.argv[1])), sys.argv[2]
+want = {"VIZFOLD_DB": f"{sandbox}/chosen.db", "OPENFOLD_DATA_DIR": f"{sandbox}/chosen-data"}
+kept = {k: cfg.get(k) for k in want}
+if kept != want:
+    print("FAIL the install overwrote a value set inline:", kept, "wanted", want)
+    sys.exit(1)
+print("ok   an inline database and data directory survive the install")
+PY
+) || exit 1
 
 if [ "${1:-}" = -u ]; then
     printf '%s\n' "$actual" > "$EXPECTED"

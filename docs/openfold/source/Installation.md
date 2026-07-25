@@ -18,8 +18,9 @@ At this time, only Linux systems are supported.
         `mamba env create -n openfold_env -f environment.yml`
       Mamba is recommended as the dependencies required by OpenFold are quite large and mamba can speed up the process.
     - Activate the environment, e.g `conda activate openfold_env`
-1. Run the setup script to configure kernels and folding resources.
-	> scripts/install_third_party_dependencies.sh
+1. Configure kernels and folding resources. `vizfold install openfold` does this for you; by hand it is
+   `pip install --no-build-isolation .`, a CUTLASS checkout exported as `$CUTLASS_PATH`, and the
+   `stereo_chemical_props.txt` download.
 1. Prepend the conda environment to the `$LD_LIBRARY_PATH` and `$LIBRARY_PATH`., e.g. 
 
 	```

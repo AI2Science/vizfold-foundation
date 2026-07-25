@@ -7,11 +7,10 @@ use crate::core::{
     commands::CommandSpec,
     entities::{model_invocation_profiles, runs},
     output_locations::resolve_output_location,
-    preflight::{PreflightCheck, PreflightReport},
-};
-
-use super::openfold::{
-    base_command_checks, detect_gpu, gpu_check, input_id_check, output_dir_check,
+    preflight::{
+        PreflightCheck, PreflightReport, base_command_checks, detect_gpu, gpu_check,
+        input_id_check, output_dir_check,
+    },
 };
 
 /// Preflight for an ESMFold `run_pretrained_esmf.py` command. ESMFold is single-sequence

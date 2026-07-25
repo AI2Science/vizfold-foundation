@@ -79,6 +79,11 @@ mamba::ensure() {
     echo "$mm"
 }
 
+# The previous install's answers. Called explicitly, and deliberately not at source time: loading
+# here would put them in the environment before a caller has run its own discovery, and nothing
+# downstream can then tell a value the user chose from one an earlier install invented. The
+# installers call this after their <site>.json, which fixes the precedence at
+#   inline env > slurm::discover > <site>.json > saved vizfold.json > built-in default
 config::load() { config::fill "$(config::file)" "config"; }
 
 # <site>.sh loads its own <site>.json: same basename, beside it.
@@ -90,7 +95,7 @@ VIZFOLD_CONFIG_KEYS="OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_SITE OPENFOLD_DATA_D
 VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX ESMFOLD_ENV_PREFIX OPENFOLD_MAX_CUDA OPENFOLD_DRIVER_CUDA
 OPENFOLD_ACCOUNT OPENFOLD_PARTITION OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION
 OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE
-OPENFOLD_FOLD_ARGS VIZFOLD_DB"
+VIZFOLD_DB"
 
 # Every key, every time -- empty for what this install did not settle. config::load has already put
 # the previous install's values in the environment, so a second backend rewrites them rather than
@@ -104,8 +109,9 @@ import json, os, sys
 path, names = sys.argv[1], sys.argv[2:]
 with open(path, "w") as f:
     json.dump({n: os.environ.get(n, "") for n in names}, f, indent=2, sort_keys=True)
-    f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS &&
-        echo "wrote $file" || echo "warning: could not write $file" >&2
+    f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS ||
+        die "could not write $file"
+    # Not a warning: everything downstream reads this file, so an install that could not write it
+    # has not installed anything usable, and saying so at the end beats failing later somewhere else.
+    echo "wrote $file"
 }
-
-config::load

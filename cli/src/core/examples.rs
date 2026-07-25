@@ -29,6 +29,18 @@ pub fn find(id: &str) -> Option<Example> {
     scan_default().into_iter().find(|example| example.id == id)
 }
 
+/// The single sequence at `path`, which may be the FASTA itself or a directory holding one.
+/// The id and the sequence come from the file rather than from the caller, so they cannot
+/// contradict what is actually folded.
+pub fn from_path(path: &Path) -> Option<Example> {
+    let fasta = if path.is_dir() {
+        first_fasta(path)?
+    } else {
+        path.to_path_buf()
+    };
+    parse(&std::fs::read_to_string(fasta).ok()?)
+}
+
 /// Every example in `dir` that has both a FASTA and a matching alignment directory, cheapest
 /// first -- residue count is what someone picking an example is actually choosing on.
 pub fn scan(dir: &Path) -> Vec<Example> {
