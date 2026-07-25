@@ -237,7 +237,7 @@ setup::ready() {
 
 Check it works -- queue and fold the bundled example, onto a GPU node if one is configured:
 
-  vizfold execute-run $EXAMPLE
+  vizfold fold $EXAMPLE
 
 To drive the model yourself, activate the environment and use its own CLI:
 

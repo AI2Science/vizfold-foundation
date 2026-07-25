@@ -17,7 +17,8 @@ use crate::core::{
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
-        openfold_artifacts::register_known_openfold_artifacts, openfold_execution::execute_run,
+        openfold_artifacts::{self, register_known_openfold_artifacts},
+        openfold_execution::execute_run,
         runs,
     },
 };
@@ -58,8 +59,9 @@ enum Command {
     Show(ShowArgs),
     /// Queue a run for a supported model backend.
     QueueRun(QueueRunArgs),
-    /// Execute a queued run, or fold a bundled example in one step.
-    ExecuteRun(ExecuteRunArgs),
+    /// Fold a bundled example or a FASTA in one step, or execute a queued run.
+    #[command(alias = "execute-run")]
+    Fold(ExecuteRunArgs),
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
 }
@@ -127,6 +129,13 @@ impl Backend {
 
     fn is_installed(self) -> bool {
         self.env_prefix().is_dir()
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Openfold => "OpenFold",
+            Self::Esmfold => "ESMFold",
+        }
     }
 
     /// Everything this backend's installer creates and no one else uses, so `uninstall <backend>`
@@ -227,11 +236,15 @@ struct ListArgs {
 
 #[derive(Debug, Args)]
 struct ExecuteRunArgs {
-    /// A queued run's id, or a bundled example to queue and fold in one step
-    /// (`vizfold list examples`).
+    /// What to fold: a bundled example id (`vizfold list examples`), a path to a FASTA, or a
+    /// queued run's id.
     target: String,
-    /// Dump per-layer, per-head attention maps. Applies when queueing an example; an
-    /// already-queued run keeps whatever it was queued with.
+    /// Which backend folds it. Defaults to the only one installed, or openfold when both are.
+    /// Ignored for an already-queued run, which carries its own.
+    #[arg(long, value_enum)]
+    backend: Option<Backend>,
+    /// Dump per-layer, per-head attention maps. Applies when queueing; an already-queued run
+    /// keeps whatever it was queued with.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     attn: bool,
     /// Print only the run as JSON, for tools driving the CLI.
@@ -289,11 +302,11 @@ enum QueueRunModel {
 
 #[derive(Clone, Debug, Args)]
 struct EsmfoldQueueArgs {
+    /// Name recorded for this run. Defaults to the FASTA's header tag, which is the only value
+    /// the backends accept anyway.
     #[arg(long)]
-    input_id: String,
-    #[arg(long)]
-    input_sequence: String,
-    /// Single-sequence FASTA file to fold (ESMFold takes a file, not a directory).
+    input_id: Option<String>,
+    /// FASTA to fold: the file, or a directory holding exactly one.
     #[arg(long)]
     fasta: String,
     /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
@@ -322,13 +335,14 @@ struct EsmfoldQueueArgs {
 
 #[derive(Clone, Debug, PartialEq, Eq, Args)]
 struct OpenfoldQueueArgs {
+    /// Name recorded for this run. Defaults to the FASTA's header tag, which is the only value
+    /// preflight accepts anyway.
     #[arg(long)]
-    input_id: String,
-    #[arg(long)]
-    input_sequence: String,
-    /// FASTA directory. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>.
-    #[arg(long)]
-    fasta_dir: Option<String>,
+    input_id: Option<String>,
+    /// FASTA to fold: the file, or a directory holding exactly one. `--fasta-dir` is the old
+    /// spelling. Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>.
+    #[arg(long, alias = "fasta-dir")]
+    fasta: Option<String>,
     /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
     #[arg(long)]
     data_dir: Option<String>,
@@ -339,14 +353,20 @@ struct OpenfoldQueueArgs {
     /// HPC flow) or a GPU is visible locally, otherwise cpu.
     #[arg(long)]
     model_device: Option<String>,
-    #[arg(long, default_value_t = default_cpus())]
-    cpus: i64,
+    /// CPU threads for the data pipeline. Defaults to this machine's core count, clamped to what
+    /// the execution target allows.
+    #[arg(long)]
+    cpus: Option<i64>,
+    /// Residue index offset passed through to the model.
     #[arg(long, default_value_t = 1)]
     residue_idx: i64,
-    #[arg(long)]
-    demo_attn: bool,
+    /// Dump per-layer, per-head attention maps. `--demo-attn` is the old spelling.
+    #[arg(long, alias = "demo-attn", default_value_t = true, action = ArgAction::Set)]
+    attn: bool,
+    /// Write the model's raw output tensors alongside the structure.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     save_outputs: bool,
+    /// How many recycling iterations to keep outputs for.
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
     /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
@@ -360,14 +380,13 @@ impl OpenfoldQueueArgs {
     /// `queue_run_openfold_defaults_match_for_example` pins so the two cannot drift.
     fn for_example(example: &examples::Example, attn: bool) -> Self {
         Self {
-            input_id: example.id.clone(),
-            input_sequence: example.sequence.clone(),
-            demo_attn: attn,
-            fasta_dir: None,
+            input_id: Some(example.id.clone()),
+            attn,
+            fasta: None,
             data_dir: None,
             alignment_dir: None,
             model_device: None,
-            cpus: default_cpus(),
+            cpus: None,
             residue_idx: 1,
             save_outputs: true,
             num_recycles_save: 1,
@@ -475,7 +494,7 @@ pub async fn run() -> Result<(), DbErr> {
             QueueRunModel::Openfold(args) => queue_openfold_run(&database, args).await?,
             QueueRunModel::Esmfold(args) => queue_esmfold_run(&database, args).await?,
         },
-        Command::ExecuteRun(args) => run_execute(&database, args).await?,
+        Command::Fold(args) => run_execute(&database, args).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
         Command::Install(_)
         | Command::Download(_)
@@ -1556,33 +1575,27 @@ async fn register_artifacts(
         .await?
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
-    let expected_paths = [
-        ("run_output_directory", workspace.clone()),
-        ("attention_output_directory", workspace.join("attention")),
-    ];
     let existing = artifacts::list_artifacts_for_run(database, run_id).await?;
-    let artifacts = register_known_openfold_artifacts(database, run_id).await?;
+    register_known_openfold_artifacts(database, run_id).await?;
 
     println!("Registered artifacts for run {run_id}");
     println!("\nOutput workspace:\n  {}", workspace.display());
     println!("\nArtifacts:");
-    for (artifact_type, path) in expected_paths {
+    // The service's own list, not a second copy of it: a directory that exists is registered by
+    // the call above, so "exists" and "registered" are the same question.
+    for (artifact_type, path) in openfold_artifacts::known_directories(&workspace) {
         let storage_uri = path.display().to_string();
-        if !path.is_dir() {
-            println!("  [skipped] {artifact_type} -> path does not exist: {storage_uri}");
+        let state = if !path.is_dir() {
+            "skipped -- no such directory"
         } else if existing
             .iter()
             .any(|artifact| artifact.storage_uri == storage_uri)
         {
-            println!("  [already present] {artifact_type} -> {storage_uri}");
-        } else if artifacts
-            .iter()
-            .any(|artifact| artifact.storage_uri == storage_uri)
-        {
-            println!("  [registered] {artifact_type} -> {storage_uri}");
+            "already present"
         } else {
-            println!("  [skipped] {artifact_type} -> not registered");
-        }
+            "registered"
+        };
+        println!("  [{state}] {artifact_type} -> {storage_uri}");
     }
     Ok(())
 }
@@ -1687,17 +1700,42 @@ async fn run_execute(
     let run_id = match args.target.parse::<i32>() {
         Ok(run_id) => run_id,
         Err(_) => {
-            let example =
-                examples::find(&args.target).ok_or_else(|| unknown_target(&args.target))?;
-            let run = submit_openfold_run(
-                database,
-                OpenfoldQueueArgs::for_example(&example, args.attn),
-            )
-            .await?;
+            // A bundled example id, else a path to a FASTA of the user's own.
+            let (example, fasta) = match examples::find(&args.target) {
+                Some(example) => (example, None),
+                None => {
+                    let path = Path::new(&args.target);
+                    let example = (path.extension().is_some() || path.exists())
+                        .then(|| examples::from_path(path))
+                        .flatten()
+                        .ok_or_else(|| unknown_target(&args.target))?;
+                    (example, Some(args.target.clone()))
+                }
+            };
+            let backend = args.backend.map_or_else(default_backend, Ok)?;
+            let run = match backend {
+                Backend::Openfold => {
+                    submit_openfold_run(
+                        database,
+                        OpenfoldQueueArgs {
+                            fasta: fasta.clone(),
+                            ..OpenfoldQueueArgs::for_example(&example, args.attn)
+                        },
+                    )
+                    .await?
+                }
+                Backend::Esmfold => {
+                    let fasta = fasta.unwrap_or_else(|| default_fasta_dir(&example.id));
+                    submit_esmfold_run(database, EsmfoldQueueArgs::for_fasta(fasta)).await?
+                }
+            };
             if !args.json {
                 println!(
-                    "Queued OpenFold run {} ({}, {} residues)\n",
-                    run.id, example.id, example.residues
+                    "Queued {} run {} ({}, {} residues)\n",
+                    backend.label(),
+                    run.id,
+                    example.id,
+                    example.residues
                 );
             }
             run.id
@@ -1839,7 +1877,7 @@ fn report_queued(label: &str, run: &crate::core::entities::runs::Model) {
     println!("status: {}", run.status);
     println!("input_id: {}", run.input_id);
     println!("\nNext:");
-    println!("  vizfold execute-run {}", run.id);
+    println!("  vizfold fold {}", run.id);
 }
 
 async fn submit_openfold_run(
@@ -1848,15 +1886,19 @@ async fn submit_openfold_run(
 ) -> Result<crate::core::entities::runs::Model, DbErr> {
     let catalog = local_catalog(database, Backend::Openfold).await?;
     let working_dir = &catalog.working_dir;
-    let fasta_dir_input = args
-        .fasta_dir
-        .clone()
-        .unwrap_or_else(|| default_fasta_dir(&args.input_id));
+    let fasta_input = match (&args.fasta, &args.input_id) {
+        (Some(fasta), _) => fasta.clone(),
+        (None, Some(id)) => default_fasta_dir(id),
+        (None, None) => return Err(DbErr::Custom("pass --fasta or --input-id".to_owned())),
+    };
     let data_dir_input = args
         .data_dir
         .clone()
         .unwrap_or_else(|| config::data_dir().to_string_lossy().into_owned());
-    let fasta_dir = canonicalize_local_path("--fasta-dir", &fasta_dir_input, working_dir)?;
+    let fasta_dir = canonicalize_local_path("--fasta", &fasta_input, working_dir)?;
+    // The id and sequence come from the FASTA, so they cannot contradict what is folded --
+    // preflight rejects a run whose id is not the header tag, so it was the only legal value.
+    let example = read_fasta(&fasta_dir)?;
     let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, working_dir)?;
     let alignment_dir = if args.use_precomputed_alignments {
         let input = args
@@ -1890,7 +1932,10 @@ async fn submit_openfold_run(
         ("model_device".into(), json!(model_device)),
         (
             "cpus".into(),
-            json!(clamp_cpus(args.cpus, &catalog.available_resources_json)),
+            json!(clamp_cpus(
+                args.cpus.unwrap_or_else(default_cpus),
+                &catalog.available_resources_json
+            )),
         ),
     ]);
     if let Some(alignment_dir) = alignment_dir {
@@ -1904,11 +1949,13 @@ async fn submit_openfold_run(
             execution_target_id: catalog.target_id,
             invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
-            input_id: args.input_id,
-            input_sequence: args.input_sequence,
+            input_id: args.input_id.unwrap_or(example.id),
+            input_sequence: example.sequence,
+            // demo_attn on the wire: it is the Python argument name, the seed schema key, and what
+            // the model library reads. Only the flag spelling changed.
             model_parameters_json: json!({
                 "save_outputs": args.save_outputs,
-                "demo_attn": args.demo_attn,
+                "demo_attn": args.attn,
                 "num_recycles_save": args.num_recycles_save,
             })
             .to_string(),
@@ -1925,9 +1972,19 @@ async fn queue_esmfold_run(
     database: &sea_orm::DatabaseConnection,
     args: EsmfoldQueueArgs,
 ) -> Result<(), DbErr> {
+    let run = submit_esmfold_run(database, args).await?;
+    report_queued("ESMFold", &run);
+    Ok(())
+}
+
+async fn submit_esmfold_run(
+    database: &sea_orm::DatabaseConnection,
+    args: EsmfoldQueueArgs,
+) -> Result<crate::core::entities::runs::Model, DbErr> {
     let catalog = local_catalog(database, Backend::Esmfold).await?;
     let working_dir = &catalog.working_dir;
     let fasta = canonicalize_local_path("--fasta", &args.fasta, working_dir)?;
+    let example = read_fasta(&fasta)?;
     let model_device = args
         .model_device
         .clone()
@@ -1940,8 +1997,8 @@ async fn queue_esmfold_run(
             execution_target_id: catalog.target_id,
             invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
-            input_id: args.input_id,
-            input_sequence: args.input_sequence,
+            input_id: args.input_id.unwrap_or(example.id),
+            input_sequence: example.sequence,
             model_parameters_json: json!({
                 "model": args.model,
                 "trace_mode": args.trace_mode,
@@ -1961,8 +2018,40 @@ async fn queue_esmfold_run(
     )
     .await?;
 
-    report_queued("ESMFold", &run);
-    Ok(())
+    Ok(run)
+}
+
+impl EsmfoldQueueArgs {
+    /// The one-command path's defaults, matching what clap applies to `queue-run esmfold`.
+    fn for_fasta(fasta: String) -> Self {
+        Self {
+            input_id: None,
+            fasta,
+            model_device: None,
+            model: "facebook/esmfold_v1".to_owned(),
+            trace_mode: "attention+activations".to_owned(),
+            layers: "all".to_owned(),
+            dtype: "float32".to_owned(),
+            save_fp16: false,
+            structure_traces: false,
+        }
+    }
+}
+
+/// The backend a bare `vizfold fold` uses: the only one installed, else OpenFold when both are.
+/// Naming one explicitly (`--backend`) always wins, so this only has to handle the common cases.
+fn default_backend() -> Result<Backend, DbErr> {
+    match (
+        Backend::Openfold.is_installed(),
+        Backend::Esmfold.is_installed(),
+    ) {
+        (false, true) => Ok(Backend::Esmfold),
+        (true, _) => Ok(Backend::Openfold),
+        (false, false) => Err(DbErr::Custom(
+            "no backend is installed; run `vizfold install openfold` or `vizfold install esmfold`"
+                .to_owned(),
+        )),
+    }
 }
 
 /// `<OPENFOLD_HOME>/examples/monomer/fasta_dir_<id-stem>` -- the id up to its last underscore.
@@ -2003,22 +2092,43 @@ fn local_working_dir(
         })
 }
 
+/// A relative path means what the shell means by it, so it is tried against the user's cwd first
+/// and only then against the target's working directory -- resolving it solely against the
+/// checkout made `--fasta ./my.fasta` work from one directory on the machine and nowhere else.
 fn canonicalize_local_path(field: &str, path: &str, working_dir: &str) -> Result<String, DbErr> {
     let original_path = Path::new(path);
-    let attempted_path = if original_path.is_absolute() {
-        PathBuf::from(original_path)
-    } else {
-        PathBuf::from(working_dir).join(original_path)
-    };
+    if original_path.is_absolute() {
+        return canonicalize_at(field, path, original_path);
+    }
+    std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join(original_path))
+        .filter(|candidate| candidate.exists())
+        .map_or_else(
+            || canonicalize_at(field, path, &PathBuf::from(working_dir).join(original_path)),
+            |candidate| canonicalize_at(field, path, &candidate),
+        )
+}
 
-    std::fs::canonicalize(&attempted_path)
+fn canonicalize_at(field: &str, original: &str, attempted: &Path) -> Result<String, DbErr> {
+    std::fs::canonicalize(attempted)
         .map(|path| path.display().to_string())
         .map_err(|error| {
             DbErr::Custom(format!(
-                "{field} original path '{path}' could not be resolved at '{}': {error}",
-                attempted_path.display()
+                "{field} original path '{original}' could not be resolved at '{}': {error}",
+                attempted.display()
             ))
         })
+}
+
+/// The one sequence at a resolved FASTA path, as the source of a run's id and sequence.
+fn read_fasta(path: &str) -> Result<examples::Example, DbErr> {
+    examples::from_path(Path::new(path)).ok_or_else(|| {
+        DbErr::Custom(format!(
+            "no FASTA record at '{path}': expected a .fasta/.fa file, or a directory holding one, \
+             with a '>' header and a sequence"
+        ))
+    })
 }
 
 fn seed_required_error() -> DbErr {
@@ -2219,8 +2329,6 @@ mod tests {
             "openfold",
             "--input-id",
             "6KWC_1",
-            "--input-sequence",
-            "GSTI",
             "--fasta-dir",
             "fasta",
             "--data-dir",
@@ -2228,22 +2336,21 @@ mod tests {
         ])
         .expect("queue-run command should parse");
 
+        // --fasta-dir is the old spelling of --fasta and still parses into it.
         assert!(matches!(
             cli.command,
             Command::QueueRun(QueueRunArgs {
                 model: QueueRunModel::Openfold(OpenfoldQueueArgs {
                     input_id,
-                    input_sequence,
-                    fasta_dir,
+                    fasta,
                     data_dir,
-                    demo_attn: false,
+                    attn: true,
                     use_precomputed_alignments: true,
-                    cpus,
+                    cpus: None,
                     ..
                 })
-            }) if input_id == "6KWC_1" && input_sequence == "GSTI"
-                && fasta_dir.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
-                && cpus == default_cpus()
+            }) if input_id.as_deref() == Some("6KWC_1")
+                && fasta.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
         ));
     }
 
@@ -2255,8 +2362,6 @@ mod tests {
             "esmfold",
             "--input-id",
             "6KWC_1",
-            "--input-sequence",
-            "GSTI",
             "--fasta",
             "6KWC.fasta",
             "--trace-mode",
@@ -2277,8 +2382,8 @@ mod tests {
                     ref model,
                     ..
                 })
-            }) if input_id == "6KWC_1" && fasta == "6KWC.fasta" && trace_mode == "attention"
-                && model == "facebook/esmfold_v1"
+            }) if input_id.as_deref() == Some("6KWC_1") && fasta == "6KWC.fasta"
+                && trace_mode == "attention" && model == "facebook/esmfold_v1"
         ));
     }
 
@@ -2290,15 +2395,13 @@ mod tests {
             "openfold",
             "--input-id",
             "6KWC_1",
-            "--input-sequence",
-            "GSTI",
             "--fasta-dir",
             "fasta",
             "--data-dir",
             "data",
             "--cpus",
             "4",
-            "--demo-attn",
+            "--demo-attn=true",
             "--use-precomputed-alignments=false",
         ])
         .expect("queue-run command should parse");
@@ -2307,8 +2410,8 @@ mod tests {
             cli.command,
             Command::QueueRun(QueueRunArgs {
                 model: QueueRunModel::Openfold(OpenfoldQueueArgs {
-                    cpus: 4,
-                    demo_attn: true,
+                    cpus: Some(4),
+                    attn: true,
                     use_precomputed_alignments: false,
                     ..
                 })
@@ -2652,8 +2755,9 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Command::ExecuteRun(ExecuteRunArgs {
+            Command::Fold(ExecuteRunArgs {
                 ref target,
+                backend: None,
                 attn: true,
                 json: false,
             }) if target == "1"
@@ -2669,7 +2773,7 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Command::ExecuteRun(ExecuteRunArgs {
+            Command::Fold(ExecuteRunArgs {
                 ref target,
                 attn: false,
                 ..
@@ -2687,9 +2791,7 @@ mod tests {
             "openfold",
             "--input-id",
             "1UBQ_1",
-            "--input-sequence",
-            "MQIFVKTL",
-            "--demo-attn",
+            "--attn=true",
         ])
         .expect("queue-run command should parse");
         let Command::QueueRun(QueueRunArgs {
@@ -2735,20 +2837,27 @@ mod tests {
         db::migrate_database(&database).await?;
         seed::seed_defaults(&database).await?;
 
+        // A real FASTA: the id and sequence are read from it rather than passed in, so this also
+        // pins that derivation.
+        let fasta_dir =
+            std::fs::canonicalize(crate::core::examples::monomer_dir().join("fasta_dir_6KWC"))
+                .expect("the bundled 6KWC example should exist")
+                .display()
+                .to_string();
+
         queue_openfold_run(
             &database,
             OpenfoldQueueArgs {
-                input_id: "6KWC_1".into(),
-                input_sequence: "GSTI".into(),
-                fasta_dir: Some(".".into()),
-                data_dir: Some(".".into()),
-                alignment_dir: Some(".".into()),
+                input_id: None,
+                fasta: Some(fasta_dir.clone()),
+                data_dir: Some(local_path.clone()),
+                alignment_dir: Some(local_path.clone()),
                 model_device: Some("cpu".into()),
                 // Exceeds the seeded local-openfold target's cpus.maximum of 14, so the queued
                 // run must reflect the clamped value, not the raw request.
-                cpus: 18,
+                cpus: Some(18),
                 residue_idx: 1,
-                demo_attn: true,
+                attn: true,
                 save_outputs: true,
                 num_recycles_save: 1,
                 use_precomputed_alignments: true,
@@ -2759,7 +2868,15 @@ mod tests {
         let runs = runs::list_runs(&database).await?;
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "submitted");
-        assert_eq!(runs[0].input_id, "6KWC_1");
+        assert_eq!(
+            runs[0].input_id, "6KWC_1",
+            "the id comes from the FASTA header"
+        );
+        assert_eq!(
+            runs[0].input_sequence.len(),
+            191,
+            "the sequence comes from the FASTA"
+        );
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].model_parameters_json)
                 .expect("model parameters should be valid JSON"),
@@ -2768,7 +2885,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
                 .expect("execution parameters should be valid JSON"),
-            json!({"fasta_dir": local_path, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
+            json!({"fasta_dir": fasta_dir, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
         );
 
         let provenance: serde_json::Value = serde_json::from_str(
@@ -2801,15 +2918,14 @@ mod tests {
         let error = queue_openfold_run(
             &database,
             OpenfoldQueueArgs {
-                input_id: "6KWC_1".into(),
-                input_sequence: "GSTI".into(),
-                fasta_dir: Some(missing_path.into()),
+                input_id: Some("6KWC_1".into()),
+                fasta: Some(missing_path.into()),
                 data_dir: Some(".".into()),
                 alignment_dir: None,
                 model_device: Some("cpu".into()),
-                cpus: 1,
+                cpus: Some(1),
                 residue_idx: 1,
-                demo_attn: false,
+                attn: false,
                 save_outputs: true,
                 num_recycles_save: 1,
                 use_precomputed_alignments: false,
@@ -2819,7 +2935,7 @@ mod tests {
         .expect_err("missing local path should fail");
 
         assert!(error.to_string().contains(
-            "--fasta-dir original path 'definitely-missing-vizfold-local-path' could not be resolved"
+            "--fasta original path 'definitely-missing-vizfold-local-path' could not be resolved"
         ));
         assert!(
             error

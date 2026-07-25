@@ -7,6 +7,16 @@ use crate::core::{
 
 use super::artifacts::{self as artifact_service, RecordArtifactByTypeSlugInput};
 
+/// The directories a registration considers, in order. `register-artifacts` reports against
+/// exactly this list rather than restating it, so the report cannot claim a set the registration
+/// never looked at.
+pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::path::PathBuf); 2] {
+    [
+        ("run_output_directory", workspace.to_path_buf()),
+        ("attention_output_directory", workspace.join("attention")),
+    ]
+}
+
 /// Registers a run's existing output directories -- the workspace and its `attention/` subdir --
 /// and returns the full current artifact list for the run. Both backends route here. Repeated
 /// calls do not add duplicate type/URI entries.
@@ -24,14 +34,9 @@ pub async fn register_known_openfold_artifacts(
         .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
     let workspace = resolve_output_location(&profile, &run)?;
 
-    register_directory_if_present(db, run_id, "run_output_directory", &workspace).await?;
-    register_directory_if_present(
-        db,
-        run_id,
-        "attention_output_directory",
-        &workspace.join("attention"),
-    )
-    .await?;
+    for (slug, path) in known_directories(&workspace) {
+        register_directory_if_present(db, run_id, slug, &path).await?;
+    }
 
     artifact_service::list_artifacts_for_run(db, run_id).await
 }

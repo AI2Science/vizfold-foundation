@@ -23,15 +23,9 @@ export async function listExamples(): Promise<Example[]> {
 
 /** Record the run and return its id. Queueing only writes the row, so this is near-instant. */
 export async function queueRun(example: Example, attn: boolean): Promise<number> {
-  const args = [
-    "queue-run",
-    "openfold",
-    "--input-id",
-    example.id,
-    "--input-sequence",
-    example.sequence,
-    ...(attn ? ["--demo-attn"] : []),
-  ];
+  // --attn takes a value and defaults to true, so it has to be passed either way; the CLI reads
+  // the sequence out of the example's FASTA itself.
+  const args = ["queue-run", "openfold", "--input-id", example.id, `--attn=${attn}`];
   const { stdout } = await run(BIN, args);
   const id = stdout.match(/Queued OpenFold run (\d+)/)?.[1];
   if (!id) throw new Error(`no run id in queue-run output: ${stdout.trim()}`);
@@ -41,6 +35,9 @@ export async function queueRun(example: Example, attn: boolean): Promise<number>
 /** Detached: a fold runs for minutes, far longer than a request may be held open. The page polls
  *  from there, and `execute-run` registers the artifacts itself once it lands. */
 export function foldInBackground(runId: number): void {
+  // Without a prefix this used to resolve to "/runs" and try to mkdir at the filesystem root,
+  // 500ing after the run row was already written.
+  if (!PREFIX) throw new Error("OPENFOLD_PREFIX is unset; start the dashboard with `vizfold serve`");
   const logs = `${PREFIX}/runs`;
   mkdirSync(logs, { recursive: true });
   const log = openSync(`${logs}/${runId}.submit.log`, "a");

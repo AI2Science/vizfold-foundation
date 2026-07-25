@@ -270,8 +270,9 @@ key that changes something shows up in the diff. Run it after editing any site f
 ## Commands
 
 `vizfold <command>`. After a backend is installed, folding a bundled example is one command —
-`execute-run <example-id>` queues it, runs it, and registers its outputs. For a sequence of your
-own, `queue-run` first and hand `execute-run` the run id it prints. `serve` opens the dashboard
+`fold <example-id>` queues it, runs it, and registers its outputs. A sequence of your own is the
+same command with a path: `fold ./my.fasta`. `queue-run` records a run without executing it, and
+`fold` takes the id it prints. `serve` opens the dashboard
 over the results. `vizfold <command> --help` details any one.
 
 ```text
@@ -283,8 +284,8 @@ update                   Move the checkout to this binary's release tag
 self-update              Replace this binary with the latest release, checkout included
 seed                     Seed the default executor records (the submit path does this for you)
 queue-run                Queue a run for a backend (queue-run openfold|esmfold ...)
-execute-run <target>     Fold a bundled example, or execute a queued run by id
-register-artifacts <id>  Re-register a run's artifacts (execute-run already does)
+fold <target>            Fold a bundled example or a FASTA, or execute a queued run by id
+register-artifacts <id>  Re-register a run's artifacts (fold already does)
 list                     List records (list examples|models|targets|profiles|runs)
 show                     Show one executor record (show run <id>)
 serve                    Start the workbench dashboard
@@ -320,7 +321,7 @@ The repository is laid out as:
 - `backends/<name>/` — one pip/conda-installable package per model backend: its Python package, packaging metadata, environment spec, and env-provisioning installer (`install/`). `backends/openfold/` installs as `import openfold` (conda env, CUDA extension; its dataprep/training tooling is the installed `openfold.scripts` subpackage); `backends/esmfold/` as `import esmfold` (micromamba env with its own Python, no CUDA build).
 - `downloaders/<name>/` — data-download scripts. `downloaders/openfold/` holds the AlphaFold2 database/params fetchers (`vizfold download openfold`); ESMFold has none — it pulls weights from HuggingFace at run time.
 - `scripts/<name>/` — the model entrypoints the executor runs (`run_pretrained_*.py`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
-- Each backend's package installs its own CLI into its environment as `<name>` (also `python -m <name>`), usable without the `vizfold` binary. Through vizfold, `queue-run`/`execute-run` are the way in — they fill the model's arguments from the config and record the run.
+- Each backend's package installs its own CLI into its environment as `<name>` (also `python -m <name>`), usable without the `vizfold` binary. Through vizfold, `queue-run`/`fold` are the way in — they fill the model's arguments from the config and record the run.
 - `lib/` — the backend-neutral shared install machinery (`config.sh`, `slurm.sh`, `interactive.sh`), owned by no backend. `sites/` — one `<ClusterName>.sh`/`.json` pair per supported cluster; `tests/` — the install-side test suites.
 - `docs/` — architecture notes and backlog. `examples/` — demo inputs, attention-viz utilities, and notebooks.
 

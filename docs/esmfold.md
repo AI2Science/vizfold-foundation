@@ -37,8 +37,8 @@ pip install ./backends/esmfold          # torch, transformers, numpy, and the es
 ## Run locally
 
 The executor runs the same entrypoint and records the run and its outputs:
-`vizfold queue-run esmfold --input-id 6KWC_1 --input-sequence <SEQ> --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta`,
-then `vizfold execute-run <id>`. The commands below call it directly, through the environment's own
+`vizfold fold 6KWC_1 --backend esmfold`, or `vizfold fold ./my.fasta` for a sequence of your own.
+The commands below call it directly, through the environment's own
 `esmfold` (`$ESMFOLD_ENV_PREFIX/bin/esmfold`, from `vizfold status`; `python -m esmfold` is the same) — it needs
 nothing from the checkout. `scripts/esmfold/run_pretrained_esmf.py` runs the same function by path,
 under the same interpreter.
