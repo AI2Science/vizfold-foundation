@@ -8,7 +8,6 @@ set -euo pipefail
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
 
-log()    { echo "== $* (+$((SECONDS))s)"; }
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 sealed() { [ -e "$sentinel/$1" ]; }
 seal()   { mkdir -p "$sentinel"; touch "$sentinel/$1"; }
@@ -17,7 +16,7 @@ older()  { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ 
 step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1"; }
 
 setup::config() {
-    PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
+    PREFIX=$(vizfold::prefix)
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in

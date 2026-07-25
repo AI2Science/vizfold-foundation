@@ -10,7 +10,7 @@ LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../lib}/config.sh"
 
 fold::config() {
-    PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
+    PREFIX=$(vizfold::prefix)
     ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
 }
 

@@ -1,24 +1,10 @@
-"""
-ESMFold inference with VizFold-compatible trace export -- the backend's entrypoint.
+"""ESMFold inference with VizFold-compatible trace export -- the backend's entrypoint.
 
-Installed as `vizfold-esmfold` in the environment, so a fold needs nothing from the checkout;
-scripts/esmfold/run_pretrained_esmf.py calls the same `main` for running it by path.
-
-Produces an archive under --out with:
-  meta.json, structure/, trace/attention/, trace/activations/, trace/index.json, logs.txt
-
-Example:
-  vizfold-esmfold \\
-    --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \\
-    --out outputs/esmf_6KWC \\
-    --model facebook/esmfold_v1 \\
-    --device cuda \\
-    --trace_mode attention+activations \\
-    --layers all \\
-    --save_fp16
+Installed as `vizfold-esmfold` in the environment, so a fold needs nothing from the checkout.
+Writes an archive under --out: meta.json, structure/, trace/attention/, trace/activations/,
+trace/index.json, logs.txt. `--help` lists the flags.
 """
 import argparse
-import json
 import os
 import sys
 

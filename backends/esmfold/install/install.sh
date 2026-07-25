@@ -13,11 +13,9 @@ set -euo pipefail
 CFG=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib/config.sh}
 . "${CFG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../lib" && pwd)/config.sh}"
 
-log() { echo "== $* (+$((SECONDS))s)"; }
-
 REPO=${OPENFOLD_HOME:-$REPO}
 ESM=$REPO/backends/esmfold
-PREFIX=${OPENFOLD_PREFIX:-$HOME/openfold}
+PREFIX=$(vizfold::prefix)
 ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
 # The package needs >=3.10, which a cluster login node's python3 routinely is not -- so the
 # environment brings its own rather than inheriting whichever one happens to be on PATH.

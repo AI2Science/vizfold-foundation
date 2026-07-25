@@ -2,10 +2,20 @@
 //! called on a given platform. `install.sh` bootstraps from the same URLs and derives the same
 //! names, so the two must agree -- `asset_names_match_the_bootstrap_installer` holds them together.
 
-/// This build's version. `clone_checkout` pins the checkout to the matching tag, so the two move
-/// together and `self-update` has to move both.
+/// This build's version. The checkout is pinned to the matching tag, so the two move together and
+/// `self-update` has to move both.
 pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// The release tag whose scripts this binary expects: its own, unless `VIZFOLD_VERSION` pins
+/// another -- the same override `install.sh` takes when choosing which binary to download. Every
+/// path that clones, moves or judges the checkout reads it here.
+pub fn tag() -> String {
+    match std::env::var("VIZFOLD_VERSION") {
+        Ok(tag) if !tag.is_empty() => tag,
+        _ => format!("v{}", current()),
+    }
 }
 
 pub fn repo() -> String {
@@ -20,10 +30,6 @@ pub fn repo() -> String {
 pub fn asset(os: &str, arch: &str) -> String {
     let os = if os == "macos" { "darwin" } else { os };
     format!("vizfold-{os}-{arch}")
-}
-
-pub fn asset_here() -> String {
-    asset(std::env::consts::OS, std::env::consts::ARCH)
 }
 
 pub fn asset_url(tag: &str, asset: &str) -> String {
@@ -70,8 +76,9 @@ pub fn version_of(tag: &str) -> &str {
     tag.trim().trim_start_matches('v')
 }
 
-/// The `Version:` line `vizfold status` opens with.
-pub fn version_line(current: &str, latest: Option<&str>) -> String {
+/// This build against the newest release, as the `binary` health row reads.
+pub fn version_line(latest: Option<&str>) -> String {
+    let current = current();
     match latest.map(version_of) {
         None => format!("{current} (latest release unknown)"),
         Some(latest) if latest == current => format!("{current} (latest)"),
@@ -115,16 +122,18 @@ mod tests {
         assert_eq!(version_of("0.5.0"), "0.5.0");
     }
 
+    /// The three answers, against whatever version this build actually is.
     #[test]
     fn the_version_line_says_which_of_the_three_states_this_is() {
-        assert_eq!(version_line("0.5.0", Some("v0.5.0")), "0.5.0 (latest)");
+        let current = super::current();
+        assert_eq!(version_line(Some(current)), format!("{current} (latest)"));
         assert_eq!(
-            version_line("0.4.0", Some("v0.5.0")),
-            "0.4.0 (latest 0.5.0 -- run `vizfold self-update`)"
+            version_line(Some("v99.0.0")),
+            format!("{current} (latest 99.0.0 -- run `vizfold self-update`)")
         );
         assert_eq!(
-            version_line("0.5.0", None),
-            "0.5.0 (latest release unknown)"
+            version_line(None),
+            format!("{current} (latest release unknown)")
         );
     }
 }

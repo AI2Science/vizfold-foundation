@@ -16,11 +16,22 @@ vizfold install openfold
 ```
 
 On Delta the install is dispatched by SLURM `ClusterName`, so it needs no site arguments and takes
-~8 min. When it finishes, `vizfold status` shows OpenFold `installed` and a populated config:
+~8 min. When it finishes, `vizfold status` shows every part healthy and a populated config:
 
 ```text
 $ vizfold status
 VizFold status
+
+COMPONENT  STATUS  DETAIL
+---------  ------  ------
+binary     ok      0.5.0 (latest)
+repo       ok      /u/yjayawardana/vizfold-src at v0.5.0
+config     ok      20 keys
+openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
+esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
+scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
+
+Everything checks out.
 
 Config: /u/yjayawardana/.config/vizfold/vizfold.json
   ESMFOLD_ENV_PREFIX =
@@ -44,12 +55,6 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
   VIZFOLD_DB = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db
   VIZFOLD_ENV_BASE = /work/nvme/bbol/yjayawardana/vizfold/envs
   database = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db (present)
-
-Backends:
-BACKEND   STATUS         ENV PREFIX
---------  -------------  --------------------------------------------------------
-openfold  installed      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
-esmfold   not installed  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold
 ```
 
 That key set is fixed: every cluster and either backend writes the same names, and a name this
@@ -58,11 +63,10 @@ every reader treats as unset. The values are resolved live during install — on
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
 
-Below the table, `status` prints a `Checks:` section that verifies those values rather than just
-reporting them — the key set matches this binary's, every path exists, the environment and the
-AlphaFold2 parameters are in place, and the scheduler knows the accounts and partitions. It closes
-with a verdict line; anything it could not check here (no scheduler on this host, a backend nobody
-installed) is marked unverified rather than failed.
+`status` leads with the health of each part rather than only reporting the config: it checks the key
+set against this binary's, that every path exists, that the environment and the AlphaFold2
+parameters are in place, and that the scheduler knows the accounts and partitions. Anything wrong
+is listed under `Problems:` with the command that fixes it.
 
 ## 1. Seed the executor records
 

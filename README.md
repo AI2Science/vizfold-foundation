@@ -146,18 +146,17 @@ exactly what you care about and nothing else:
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
-`vizfold status` prints what those layers settled on, then reports the health of every part that
-can break on its own — the binary against the newest release, the checkout, the config, each
-backend, and the scheduler:
+`vizfold status` leads with the health of every part that can break on its own — the binary against
+the newest release, the checkout, the config, each backend, and the scheduler — and prints what
+those layers settled on below it:
 
 ```text
-Health:
 COMPONENT  STATUS  DETAIL
 ---------  ------  ------
 binary     ok      0.5.0 (latest)
 repo       ok      /u/you/vizfold-src at v0.5.0
-config     ok      20 keys, every path present
-openfold   BROKEN  1 problem(s)
+config     ok      20 keys
+openfold   BROKEN  /work/nvme/bbol/you/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/you/vizfold/envs/vizfold-esmfold)
 scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
 
@@ -176,7 +175,7 @@ installed is `absent`; neither counts against the install.
 
 Every environment the install creates lives in one base directory under a fixed name:
 `$VIZFOLD_ENV_BASE/vizfold-<backend>`, defaulting to `<prefix>/envs`. That is
-`vizfold-openfold` and `vizfold-workbench` (conda) and `vizfold-esmfold` (a venv) — same directory,
+`vizfold-openfold`, `vizfold-workbench` and `vizfold-esmfold` — same directory,
 same shape, so nothing has to be told where any of them is. `vizfold::env` in `lib/config.sh` and
 `env_dir()` in `cli/src/core/config.rs` are the two definitions, and each names the other.
 
