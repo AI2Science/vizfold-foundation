@@ -666,7 +666,9 @@ fn config_checks() -> PreflightReport {
     }
 
     // One call per scheduler question, asked once and answered for every key it settles.
-    let partitions = scheduler_values("sinfo", &["-h", "-o", "%P"]);
+    // %100P, not %P: a bare field takes its default width and silently truncates, which would make
+    // a name as long as gpuA100x4-interactive look like a partition the cluster does not have.
+    let partitions = scheduler_values("sinfo", &["-h", "-o", "%100P"]);
     let user = format!("user={}", std::env::var("USER").unwrap_or_default());
     let accounts = scheduler_values(
         "sacctmgr",
@@ -766,13 +768,19 @@ fn scheduler_values(program: &str, args: &[&str]) -> Option<Vec<String>> {
     if !output.status.success() {
         return None;
     }
-    let values: Vec<String> = String::from_utf8_lossy(&output.stdout)
+    let values = scheduler_names(&String::from_utf8_lossy(&output.stdout));
+    (!values.is_empty()).then_some(values)
+}
+
+/// One name per line: `sinfo` pads its field to the requested width and marks the default partition
+/// with a `*` right after the name; `sacctmgr -nP` emits the bare value. Trim before stripping the
+/// marker -- the padding comes after it.
+fn scheduler_names(stdout: &str) -> Vec<String> {
+    stdout
         .lines()
-        // sinfo marks the default partition with a trailing '*'.
         .map(|line| line.trim().trim_end_matches('*').to_owned())
         .filter(|line| !line.is_empty())
-        .collect();
-    (!values.is_empty()).then_some(values)
+        .collect()
 }
 
 fn known_to_scheduler(
@@ -2098,6 +2106,25 @@ mod tests {
                 "{key} is checked but is not a config key"
             );
         }
+    }
+
+    /// Real `sinfo -h -o %100P`: the default partition marked, the field padded out, one row per
+    /// node-state group. A name must survive both, or a configured partition reads as missing.
+    #[test]
+    fn scheduler_names_survive_the_padding_and_the_default_marker() {
+        let stdout = format!(
+            "{:<100}\n{:<100}\n{:<100}\n\n",
+            "cpu*", "cpu*", "gpuA100x4-interactive"
+        );
+        assert_eq!(
+            super::scheduler_names(&stdout),
+            ["cpu", "cpu", "gpuA100x4-interactive"]
+        );
+        assert_eq!(
+            super::scheduler_names("bbol-delta-gpu\n"),
+            ["bbol-delta-gpu"]
+        );
+        assert!(super::scheduler_names("\n \n").is_empty());
     }
 
     #[test]
