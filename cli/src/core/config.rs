@@ -36,6 +36,13 @@ fn vizfold_config() -> &'static Map<String, Value> {
     })
 }
 
+/// Empty is unset. The config carries a fixed key set, so every name the install did not settle is
+/// present with an empty value, and those must fall through to the caller's default like a missing
+/// key -- exactly as an empty env var already does.
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value.filter(|v| !v.is_empty()).map(str::to_owned)
+}
+
 /// inline env var of the same name > vizfold.json entry > None.
 fn resolved(key: &str) -> Option<String> {
     if let Ok(v) = std::env::var(key)
@@ -43,10 +50,7 @@ fn resolved(key: &str) -> Option<String> {
     {
         return Some(v);
     }
-    vizfold_config()
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+    non_empty(vizfold_config().get(key).and_then(Value::as_str))
 }
 
 pub fn openfold_home() -> PathBuf {
@@ -245,7 +249,16 @@ fn repository_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{SlurmContext, env_base, env_dir, gpu_launch};
+    use super::{SlurmContext, env_base, env_dir, gpu_launch, non_empty};
+
+    /// The fixed key set writes "" for every name the install did not settle, so a consumer must
+    /// not tell those apart from a missing key.
+    #[test]
+    fn an_empty_config_value_reads_as_unset() {
+        assert_eq!(non_empty(Some("")), None);
+        assert_eq!(non_empty(None), None);
+        assert_eq!(non_empty(Some("gpu:a100:1")), Some("gpu:a100:1".to_owned()));
+    }
 
     /// Every environment is `<base>/vizfold-<backend>` — one directory, a fixed name each. Keeps
     /// the Rust side in step with `vizfold::env` in lib/config.sh.

@@ -33,7 +33,8 @@ config::fill() {
     echo "$label: $file" >&2
     # `if`, not `&&`: a skipped last line would return non-zero and abort a set -e caller.
     while IFS='=' read -r key value; do
-        if [ -n "$key" ] && [ -z "${!key:-}" ]; then export "$key=$value"; fi
+        # An empty value is "not settled", never an answer: it must not mask the layer below it.
+        if [ -n "$key" ] && [ -n "$value" ] && [ -z "${!key:-}" ]; then export "$key=$value"; fi
     done < <(python3 -c '
 import json, os, re, sys
 try:
@@ -61,7 +62,16 @@ config::load() { config::fill "$(config::file)" "config"; }
 # <site>.sh loads its own <site>.json: same basename, beside it.
 config::site_defaults() { config::fill "${1%.sh}.json" "site defaults"; }
 
-# Only names that are set are written, so an unused one leaves no empty key.
+# The config's schema. The same binary reads it everywhere, so it holds the same names everywhere:
+# one fixed set, whatever the cluster settled and whichever backend was installed last.
+VIZFOLD_CONFIG_KEYS="OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_SITE OPENFOLD_DATA_DIR OPENFOLD_AF2_ROOT
+VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX ESMFOLD_ENV_PREFIX OPENFOLD_MAX_CUDA OPENFOLD_DRIVER_CUDA
+OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES
+OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE OPENFOLD_FOLD_ARGS VIZFOLD_DB"
+
+# Every key, every time -- empty for what this install did not settle. config::load has already put
+# the previous install's values in the environment, so a second backend rewrites them rather than
+# dropping the keys it does not know about.
 config::save() {
     local file
     file=$(config::file)
@@ -70,9 +80,8 @@ config::save() {
 import json, os, sys
 path, names = sys.argv[1], sys.argv[2:]
 with open(path, "w") as f:
-    json.dump({n: os.environ[n] for n in names if os.environ.get(n)},
-              f, indent=2, sort_keys=True)
-    f.write("\n")' "$file" "$@" &&
+    json.dump({n: os.environ.get(n, "") for n in names}, f, indent=2, sort_keys=True)
+    f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS &&
         echo "wrote $file" || echo "warning: could not write $file" >&2
 }
 

@@ -181,6 +181,14 @@ base); the templates in the `.json` derive the rest. Every value it settles on �
 expanded — is written to `~/.config/vizfold/vizfold.json`, so other tools can read where things
 ended up instead of guessing.
 
+That file has a fixed shape. The same binary reads it on every cluster, so it holds the same keys
+on every cluster: the schema is `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`, and a name the install
+did not settle is written empty rather than left out. Empty means unset everywhere that reads it —
+`${VAR:-default}` in bash, `non_empty` in `cli/src/core/config.rs` — so an unsettled key falls
+through to the same default a missing one would, and never masks a `<site>.json` value beneath it.
+Both backends save the whole schema, so installing one after the other rewrites the shared keys
+instead of dropping the ones it doesn't know about.
+
 ### Adding a cluster
 
 Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a

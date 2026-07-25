@@ -30,7 +30,7 @@ resolve() {
     eval "$(site_env "$site")"
     [ "$site" = delta-gh ] && arch=aarch64                     # the one non-x86 site
 
-    export USER=x-test HOME=$SANDBOX/home
+    export USER=x-test HOME=$SANDBOX/home OPENFOLD_SITE=$site
     export VIZFOLD_CONFIG=$SANDBOX/$site.json OPENFOLD_HOME=$REPO
 
     . ./slurm.sh
@@ -69,6 +69,29 @@ sed '/^main() {/,$d' setup.sh > "$SANDBOX/setup-defs.sh"
 # Substitute the quoted value, not the bare path: a $REPO of /w would rewrite every /work path.
 actual=$(for f in sites/*.json; do f=${f##*/}; (resolve "${f%.json}" 2>/dev/null); done |
     sed "s#\"$REPO\"#\"{REPO}\"#g; s#\"$SANDBOX/#\"{SANDBOX}/#g")
+
+# The same binary reads this file on every cluster, so the key set must not depend on the cluster.
+shapes=$(for f in "$SANDBOX"/*.json; do
+    python3 -c 'import json,sys; print(*sorted(json.load(open(sys.argv[1]))))' "$f"
+done | sort -u)
+if [ "$(printf '%s\n' "$shapes" | wc -l)" -ne 1 ]; then
+    echo "FAIL config key set differs by site:"; printf '%s\n' "$shapes"; exit 1
+fi
+
+# ...nor on which backend installed last: a second install re-saves the schema from what
+# config::load put back in the environment, so it rewrites the earlier values instead of dropping them.
+cp "$SANDBOX/delta.json" "$SANDBOX/before.json"
+(export VIZFOLD_CONFIG=$SANDBOX/delta.json ESMFOLD_ENV_PREFIX=/envs/vizfold-esmfold
+ . "$REPO/lib/config.sh" && config::save) >/dev/null 2>&1
+python3 - "$SANDBOX/before.json" "$SANDBOX/delta.json" <<'PY' || exit 1
+import json, sys
+before, after = (json.load(open(p)) for p in sys.argv[1:3])
+lost = {k: v for k, v in before.items() if v and after.get(k) != v}
+if lost or set(after) != set(before):
+    print("FAIL a second backend's install dropped or changed:", lost or set(before) ^ set(after))
+    sys.exit(1)
+print("ok   a second backend's install preserves every settled value")
+PY
 
 if [ "${1:-}" = -u ]; then
     printf '%s\n' "$actual" > "$EXPECTED"
