@@ -607,9 +607,11 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
     ("OPENFOLD_HOME", "backends/openfold/install/install.sh"),
     ("OPENFOLD_PREFIX", ""),
     ("VIZFOLD_ENV_BASE", ""),
-    ("OPENFOLD_DATA_DIR", ""),
-    ("OPENFOLD_AF2_ROOT", ""),
 ];
+
+/// The same, but only while OpenFold is installed: a database directory its own uninstall took
+/// away is not a broken config, it is an uninstalled backend -- which the table above already says.
+const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", ""), ("OPENFOLD_AF2_ROOT", "")];
 
 /// What `vizfold status` can settle about a config without folding anything: it holds the keys this
 /// binary expects, every path it names is there, each installed backend's environment has an
@@ -619,22 +621,31 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
 fn config_checks() -> PreflightReport {
     let mut checks = vec![schema_check()];
 
-    checks.extend(CHECKED_PATHS.iter().filter_map(|(key, marker)| {
-        let value = config::value(key)?;
-        let path = PathBuf::from(&value);
-        let proof = if marker.is_empty() {
-            path.clone()
-        } else {
-            path.join(marker)
-        };
-        Some(if proof.exists() {
-            PreflightCheck::passed(*key, value)
-        } else if marker.is_empty() {
-            PreflightCheck::failed(*key, format!("{value} does not exist"))
-        } else {
-            PreflightCheck::failed(*key, format!("{value} holds no {marker}"))
-        })
-    }));
+    let openfold_paths = Backend::Openfold
+        .is_installed()
+        .then_some(OPENFOLD_PATHS)
+        .unwrap_or_default();
+    checks.extend(
+        CHECKED_PATHS
+            .iter()
+            .chain(openfold_paths)
+            .filter_map(|(key, marker)| {
+                let value = config::value(key)?;
+                let path = PathBuf::from(&value);
+                let proof = if marker.is_empty() {
+                    path.clone()
+                } else {
+                    path.join(marker)
+                };
+                Some(if proof.exists() {
+                    PreflightCheck::passed(*key, value)
+                } else if marker.is_empty() {
+                    PreflightCheck::failed(*key, format!("{value} does not exist"))
+                } else {
+                    PreflightCheck::failed(*key, format!("{value} holds no {marker}"))
+                })
+            }),
+    );
 
     for backend in [Backend::Openfold, Backend::Esmfold] {
         if !backend.is_installed() {
@@ -2104,13 +2115,17 @@ mod tests {
     /// no install ever writes.
     #[test]
     fn checked_keys_are_all_in_the_schema() {
-        let checked = super::CHECKED_PATHS.iter().map(|(key, _)| *key).chain([
-            "OPENFOLD_EXAMPLE",
-            "OPENFOLD_PARTITION",
-            "OPENFOLD_GPU_PARTITION",
-            "OPENFOLD_ACCOUNT",
-            "OPENFOLD_GPU_ACCOUNT",
-        ]);
+        let checked = super::CHECKED_PATHS
+            .iter()
+            .chain(super::OPENFOLD_PATHS)
+            .map(|(key, _)| *key)
+            .chain([
+                "OPENFOLD_EXAMPLE",
+                "OPENFOLD_PARTITION",
+                "OPENFOLD_GPU_PARTITION",
+                "OPENFOLD_ACCOUNT",
+                "OPENFOLD_GPU_ACCOUNT",
+            ]);
         for key in checked {
             assert!(
                 config::CONFIG_KEYS.contains(&key),
