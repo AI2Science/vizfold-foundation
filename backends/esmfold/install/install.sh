@@ -52,6 +52,7 @@ PY
 esmfold::config_save() {
     log config
     export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX ESMFOLD_ENV_PREFIX=$ENV
+    export VIZFOLD_ENV_BASE=$(vizfold::env_base)
     export VIZFOLD_DB=${VIZFOLD_DB:-$PREFIX/vizfold.db}
     config::save
 }

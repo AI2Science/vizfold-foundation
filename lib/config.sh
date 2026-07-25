@@ -10,7 +10,7 @@ CONFIG_SH=1
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 # The OpenFold backend subtree, for OpenFold's own scripts (esmfold never reads OF). Backend-local
 # files (setup.py, environment.yml, install/) live here; shared demo assets (examples/) at the root.
-OF=${OPENFOLD_DIR:-$REPO/backends/openfold}
+OF=$REPO/backends/openfold
 die() { echo "FATAL: $*" >&2; exit 1; }
 
 # Every environment the install creates lives in one base directory under a fixed vizfold-<backend>
@@ -66,8 +66,9 @@ config::site_defaults() { config::fill "${1%.sh}.json" "site defaults"; }
 # one fixed set, whatever the cluster settled and whichever backend was installed last.
 VIZFOLD_CONFIG_KEYS="OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_SITE OPENFOLD_DATA_DIR OPENFOLD_AF2_ROOT
 VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX ESMFOLD_ENV_PREFIX OPENFOLD_MAX_CUDA OPENFOLD_DRIVER_CUDA
-OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES
-OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE OPENFOLD_FOLD_ARGS VIZFOLD_DB"
+OPENFOLD_ACCOUNT OPENFOLD_PARTITION OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION
+OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE
+OPENFOLD_FOLD_ARGS VIZFOLD_DB"
 
 # Every key, every time -- empty for what this install did not settle. config::load has already put
 # the previous install's values in the environment, so a second backend rewrites them rather than

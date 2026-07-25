@@ -10,3 +10,4 @@ jobs:
       - uses: actions/checkout@v7
       - run: bash install/tests/launch_args.sh
       - run: bash install/tests/site_config.sh
+      - run: bash install/tests/vocabulary.sh

@@ -17,7 +17,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 site_env() {
     case $1 in
         anvil)          echo 'export PROJECT=/anvil/projects/x-test' ;;
-        delta|delta-gh) echo 'export ALLOC=bbka' ;;
+        delta|delta-gh) echo 'export OPENFOLD_ALLOCATION=bbka' ;;
         expanse)        echo 'export OPENFOLD_ALLOCATION=abc123' ;;
         ice-slurm)      echo 'SCRATCH=/storage/ice1/x-test' ;;
         phoenix-slurm)  echo 'SCRATCH=/storage/scratch1/x-test' ;;

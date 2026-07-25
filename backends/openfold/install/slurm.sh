@@ -10,7 +10,7 @@ LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
-# ($ALLOC, OPENFOLD_ACCOUNT, OPENFOLD_SCRATCH, ...). No-op by default; runs before <site>.json is filled.
+# (OPENFOLD_ALLOCATION, OPENFOLD_ACCOUNT, OPENFOLD_BASE). No-op by default; runs before <site>.json is filled.
 slurm::discover() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
@@ -31,16 +31,16 @@ slurm::allocation() {
     echo "${found[0]}"
 }
 
-# Resolve, prompt for, and memoize (in ALLOC) the /work/nvme allocation whose accounts (suffixes $@)
+# Resolve, prompt for, and memoize (in OPENFOLD_ALLOCATION) the /work/nvme allocation whose accounts (suffixes $@)
 # all exist -- and name those accounts here, off the same suffixes, so they cannot drift from them.
 slurm::nvme_alloc() {
-    if [ -z "${ALLOC:-}" ]; then
-        ALLOC=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
-        [ -n "$ALLOC" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
+    if [ -z "${OPENFOLD_ALLOCATION:-}" ]; then
+        OPENFOLD_ALLOCATION=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
+        [ -n "$OPENFOLD_ALLOCATION" ] || die "no usable allocation: need /work/nvme space and an <alloc> with account suffix(es): $*"
     fi
-    export ALLOC
-    export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$ALLOC$1}
-    [ -n "${2:-}" ] && export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$ALLOC$2}
+    export OPENFOLD_ALLOCATION
+    export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$OPENFOLD_ALLOCATION$1}
+    [ -n "${2:-}" ] && export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$OPENFOLD_ALLOCATION$2}
     return 0
 }
 
@@ -99,7 +99,7 @@ slurm::run() {
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
-    export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO
+    export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO OPENFOLD_ACCOUNT=$ACCOUNT
     SETUP=$OF/install/setup.sh
     mkdir -p "$PREFIX"
 
@@ -107,6 +107,7 @@ slurm::run() {
         [ -n "$ACCOUNT" ] || die "no slurm account; set OPENFOLD_ACCOUNT"
         PARTITION=$(interactive::resolve OPENFOLD_PARTITION "slurm partition" "${OPENFOLD_PARTITION:-}")
         [ -n "$PARTITION" ] || die "no build partition; set OPENFOLD_PARTITION or its <site>.json"
+        export OPENFOLD_PARTITION=$PARTITION
     fi
 
     # -t 1 must be tested here, not inside launch_args: command substitution makes stdout a pipe.

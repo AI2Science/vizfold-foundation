@@ -183,7 +183,15 @@ ended up instead of guessing.
 
 That file has a fixed shape. The same binary reads it on every cluster, so it holds the same keys
 on every cluster: the schema is `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`, and a name the install
-did not settle is written empty rather than left out. Empty means unset everywhere that reads it —
+did not settle is written empty rather than left out.
+
+A name belongs in the schema when the install **settles** it and something **later** needs it —
+those two conditions, and no others. So the build partition is in it (the install chose one) while
+`OPENFOLD_BUILD_MEM` is not (a re-install re-reads the same `<site>.json`); the fold's output
+directory is not (it belongs to one run, not to the install); and `VIZFOLD_CONFIG`, which selects
+*which* config to read, cannot be. Nothing the binary resolves may sit outside the schema, and
+nothing a `<site>.json` sets may go unconsumed — `install/tests/vocabulary.sh` enforces both, and
+that every `$VAR` in a site value is provided by something rather than expanding to empty. Empty means unset everywhere that reads it —
 `${VAR:-default}` in bash, `non_empty` in `cli/src/core/config.rs` — so an unsettled key falls
 through to the same default a missing one would, and never masks a `<site>.json` value beneath it.
 Both backends save the whole schema, so installing one after the other rewrites the shared keys
@@ -291,8 +299,8 @@ see [DEMO.md](DEMO.md).
 
 #### Database
 
-The executor uses SQLite. `config::database_url()` resolves the file in order: `DATABASE_URL`,
-then `VIZFOLD_DB` (env or install config), then `<OPENFOLD_PREFIX>/vizfold.db`, then
+The executor uses SQLite. `config::database_url()` resolves the file in order: `VIZFOLD_DB`
+(env or install config, and it takes a full `sqlite:` URL), then `<OPENFOLD_PREFIX>/vizfold.db`, then
 `$XDG_DATA_HOME/vizfold/vizfold.db` (`~/.local/share/vizfold/vizfold.db` by default). Parent
 directories are created automatically. The migration history was collapsed into a single baseline
 on 2026-07-23; an older executor database fails with an actionable error naming the file to

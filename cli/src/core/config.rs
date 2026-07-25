@@ -60,13 +60,8 @@ pub fn openfold_home() -> PathBuf {
 }
 
 /// Repo checkout holding `backends/openfold/install/install.sh` (what `vizfold install` runs, cloning it if absent).
-/// `VIZFOLD_SRC` env > vizfold.json `OPENFOLD_HOME` > the default clone location (`$HOME/vizfold-src`).
+/// `OPENFOLD_HOME` -- the config's own name for it -- else the default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
-    if let Ok(v) = std::env::var("VIZFOLD_SRC")
-        && !v.is_empty()
-    {
-        return PathBuf::from(v);
-    }
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(default_src)
@@ -207,10 +202,11 @@ pub fn gpu_partition() -> Option<String> {
 }
 
 pub fn database_url() -> String {
-    if let Ok(u) = std::env::var("DATABASE_URL")
-        && !u.is_empty()
-    {
-        return u;
+    // DATABASE_URL used to win here. It names nothing the install writes, so it is no longer a
+    // source -- but README shipped it, and silently moving someone's database is the worst way to
+    // say so. VIZFOLD_DB takes a full sqlite: URL, so it covers every use.
+    if std::env::var("DATABASE_URL").is_ok_and(|u| !u.is_empty()) {
+        eprintln!("warning: DATABASE_URL is ignored; set VIZFOLD_DB instead");
     }
     if let Some(db) = resolved("VIZFOLD_DB") {
         return if db.starts_with("sqlite:") {
