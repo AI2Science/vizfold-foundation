@@ -36,6 +36,32 @@ got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part "") | tr 
 want=$(printf "$base" "")
 check "$want" "$got" "no tty means no pty"
 
+# slurm::cluster: each source in turn, because no single one works everywhere. Delta's login nodes
+# cannot reach slurmctld (scontrol exits 1, empty), DeltaAI has no readable slurm.conf.
+conf=${TMPDIR:-/tmp}/vizfold-slurm-conf.$$
+printf 'ControlMachine=x\nClusterName=Delta\nSelectType=cray\n' > "$conf"
+trap 'rm -f "$conf"' EXIT
+scontrol() { return 1; }                                  # controller unreachable, as on dt-login02
+
+got=$(SLURM_CLUSTER_NAME=delta-gh SLURM_CONF=$conf slurm::cluster)
+check "delta-gh" "$got" "a job's own cluster name wins"
+
+got=$(SLURM_CONF=$conf slurm::cluster)
+check "delta" "$got" "slurm.conf answers when the controller does not, lower-cased"
+
+scontrol() { echo "ClusterName             = delta-gh"; }
+got=$(SLURM_CONF=$conf slurm::cluster)
+check "delta-gh" "$got" "the controller outranks slurm.conf"
+
+scontrol() { return 1; }
+got=$(SLURM_CONF=/nonexistent slurm::cluster)
+check "" "$got" "no source means no site, so install.sh falls back to local"
+
+# Every name slurm::cluster can resolve must have a site file, or detection finds nothing to load.
+for c in delta delta-gh; do
+    [ -f "sites/$c.sh" ] && echo "ok   sites/$c.sh exists" || { echo "FAIL no sites/$c.sh"; fail=1; }
+done
+
 # sbatch must be gone entirely.
 grep -q sbatch ./slurm.sh && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
 

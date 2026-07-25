@@ -18,8 +18,8 @@ init::libs() {
 
 init::pick_site() {
     local cluster
-    cluster=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }') || true
-    [ -n "${cluster:-}" ] && [ -f "$SITES/$cluster.sh" ] || cluster=local
+    cluster=$(slurm::cluster)
+    [ -n "$cluster" ] && [ -f "$SITES/$cluster.sh" ] || cluster=local
     SITE=$(interactive::resolve OPENFOLD_SITE "site" "$cluster")
     test -f "$SITES/$SITE.sh" ||
         die "no site script for $SITE; have: $(cd "$SITES" && echo *.sh | sed 's/\.sh//g')"

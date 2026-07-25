@@ -47,6 +47,18 @@ slurm::nvme_alloc() {
 # The user's Slurm default account, overridable inline.
 slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
 
+# The cluster this node belongs to, by whichever source answers: a job carries the name, the
+# controller knows it, and slurm.conf has it with no daemon at all -- Delta's login nodes cannot
+# always reach slurmctld, and scontrol then exits 1 with nothing on stdout. Slurm lower-cases the
+# name for accounting and the sites/ files follow it, so slurm.conf's raw spelling is normalised.
+slurm::cluster() {
+    local name=${SLURM_CLUSTER_NAME:-}
+    [ -n "$name" ] || name=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }')
+    [ -n "$name" ] || name=$(awk -F= '/^[ \t]*ClusterName[ \t]*=/ { gsub(/[ \t]/, "", $2); print $2 }' \
+        "${SLURM_CONF:-/etc/slurm/slurm.conf}" 2>/dev/null)
+    echo "$name" | tr '[:upper:]' '[:lower:]'
+}
+
 # Only delta-gh overrides this: it shares /work/nvme with x86 Delta and must not share the env.
 slurm::default_prefix() { echo "${OPENFOLD_BASE:+$OPENFOLD_BASE/vizfold}"; }
 
