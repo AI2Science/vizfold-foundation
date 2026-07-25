@@ -127,41 +127,41 @@ Move them all with `VIZFOLD_ENV_BASE`. An install predating the env base keeps w
 it recorded absolute `OPENFOLD_ENV_PREFIX`/`ESMFOLD_ENV_PREFIX` values, and those still outrank the
 derived paths.
 
-A `<site>.json` carries every variable and templates paths off `$VAR` references, resolved
-recursively (`$VAR` against the environment first, then other keys in the same file). The site's
-`<site>.sh` discovers only the one login-specific atom the templates need — the allocation, the
-SLURM account, or `OPENFOLD_BASE` (the install directory). `backends/openfold/install/sites/delta.json`:
+A `<site>.json` carries only what the site does differently, and templates paths off `$VAR`
+references resolved recursively (`$VAR` against the environment first, then other keys in the same
+file). Anything a default already covers is left out, so what remains is the site's actual facts.
+The site's `<site>.sh` discovers the one login-specific atom the templates need — the allocation,
+the SLURM account, or `OPENFOLD_BASE` (the install directory).
+`backends/openfold/install/sites/delta.json`:
 
 ```json
 {
-  "OPENFOLD_ACCOUNT": "$ALLOC-delta-cpu",
   "OPENFOLD_AF2_ROOT": "/work/hdd/data/alphafold2/database",
   "OPENFOLD_BASE": "/work/nvme/$ALLOC/$USER",
-  "OPENFOLD_EXAMPLE": "6KWC_1",
-  "OPENFOLD_GPU_ACCOUNT": "$ALLOC-delta-gpu",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
-  "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=32G",
   "OPENFOLD_GPU_TIME": "01:00:00",
-  "OPENFOLD_MAX_CUDA": "12.8",
-  "OPENFOLD_PARTITION": "cpu",
-  "OPENFOLD_PREFIX": "$OPENFOLD_BASE/vizfold"
+  "OPENFOLD_PARTITION": "cpu"
 }
 ```
 
-Here `delta.sh` discovers just `$ALLOC` (the `/work/nvme` allocation, via `sacctmgr`); the
-account, base, and prefix all template off it.
+Five keys, all of them things only Delta knows. `delta.sh` discovers `$ALLOC` with
+`slurm::nvme_alloc -delta-cpu -delta-gpu`, which both picks the `/work/nvme` allocation and names
+the two accounts from those suffixes — so a suffix is written once, not restated as a
+`$ALLOC-delta-cpu` template here. The install prefix defaults to `$OPENFOLD_BASE/vizfold`
+(`slurm::default_prefix`); only `delta-gh.json` overrides it, because Grace-Hopper shares
+`/work/nvme` with x86 Delta and the two must not share an env.
 
 `backends/openfold/install/sites/nexus-dev.json` — its GPU is a 10 GB vGPU, hence the smaller
-example and memory. Setting `OPENFOLD_AF2_ROOT` is what makes the install link the staged databases
-instead of downloading the parameters itself:
+example and memory, the only two places it departs from the defaults. Setting `OPENFOLD_AF2_ROOT`
+is what makes the install link the staged databases instead of downloading the parameters itself:
 
 ```json
 {
   "OPENFOLD_AF2_ROOT": "/media/volume/nexus-staging-slurm-data/database",
+  "OPENFOLD_BUILD_TIME": "01:00:00",
   "OPENFOLD_EXAMPLE": "1UBQ_1",
   "OPENFOLD_GPU_PARTITION": "gpu",
   "OPENFOLD_GPU_RESOURCES": "--cpus-per-task=8 --mem=24G",
-  "OPENFOLD_MAX_CUDA": "12.8",
   "OPENFOLD_PARTITION": "gpu"
 }
 ```
@@ -181,12 +181,25 @@ base); the templates in the `.json` derive the rest. Every value it settles on �
 expanded — is written to `~/.config/vizfold/vizfold.json`, so other tools can read where things
 ended up instead of guessing.
 
+That file has a fixed shape. The same binary reads it on every cluster, so it holds the same keys
+on every cluster: the schema is `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`, and a name the install
+did not settle is written empty rather than left out. Empty means unset everywhere that reads it —
+`${VAR:-default}` in bash, `non_empty` in `cli/src/core/config.rs` — so an unsettled key falls
+through to the same default a missing one would, and never masks a `<site>.json` value beneath it.
+Both backends save the whole schema, so installing one after the other rewrites the shared keys
+instead of dropping the ones it doesn't know about.
+
 ### Adding a cluster
 
 Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
 single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
-declares everything else and templates paths/accounts off that atom (and `$USER`). `vizfold
+declares what differs from the defaults and templates paths off that atom (and `$USER`). `vizfold
 init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, so nothing else needs to change.
+
+Write only what the cluster actually determines. `install/tests/site_config.sh` resolves every site
+end to end and snapshots the result, so a key that changes nothing shows up as removable — and a
+key that changes something shows up in the diff. Run it after editing any site file, and
+`-u` to accept an intended change.
 
 ---
 

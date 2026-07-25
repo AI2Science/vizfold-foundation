@@ -36,6 +36,13 @@ fn vizfold_config() -> &'static Map<String, Value> {
     })
 }
 
+/// Empty is unset. The config carries a fixed key set, so every name the install did not settle is
+/// present with an empty value, and those must fall through to the caller's default like a missing
+/// key -- exactly as an empty env var already does.
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value.filter(|v| !v.is_empty()).map(str::to_owned)
+}
+
 /// inline env var of the same name > vizfold.json entry > None.
 fn resolved(key: &str) -> Option<String> {
     if let Ok(v) = std::env::var(key)
@@ -43,10 +50,7 @@ fn resolved(key: &str) -> Option<String> {
     {
         return Some(v);
     }
-    vizfold_config()
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+    non_empty(vizfold_config().get(key).and_then(Value::as_str))
 }
 
 pub fn openfold_home() -> PathBuf {
@@ -149,7 +153,7 @@ fn or_default<'a>(value: Option<&'a str>, default: &'a str) -> &'a str {
     value.filter(|v| !v.is_empty()).unwrap_or(default)
 }
 
-/// SLURM launch prefix for a fold, mirroring `install/setup.sh:212`. Empty means run bare --
+/// SLURM launch prefix for a fold, mirroring `setup::fold_vars`. Empty means run bare --
 /// either we are already on the node, or no GPU partition is configured (the workstation case).
 pub fn gpu_launch(
     context: SlurmContext,
@@ -175,7 +179,7 @@ pub fn gpu_launch(
     args.push("-p".to_owned());
     args.push(partition.to_owned());
     args.push(format!("--gres={}", or_default(gres, "gpu:1")));
-    // Holds several space-separated flags and must split, as setup.sh:212 relies on word splitting.
+    // Several space-separated flags in one value: setup::fold_vars relies on word splitting too.
     args.extend(
         or_default(resources, "--cpus-per-task=8 --mem=32G")
             .split_whitespace()
@@ -245,7 +249,16 @@ fn repository_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{SlurmContext, env_base, env_dir, gpu_launch};
+    use super::{SlurmContext, env_base, env_dir, gpu_launch, non_empty};
+
+    /// The fixed key set writes "" for every name the install did not settle, so a consumer must
+    /// not tell those apart from a missing key.
+    #[test]
+    fn an_empty_config_value_reads_as_unset() {
+        assert_eq!(non_empty(Some("")), None);
+        assert_eq!(non_empty(None), None);
+        assert_eq!(non_empty(Some("gpu:a100:1")), Some("gpu:a100:1".to_owned()));
+    }
 
     /// Every environment is `<base>/vizfold-<backend>` — one directory, a fixed name each. Keeps
     /// the Rust side in step with `vizfold::env` in lib/config.sh.
