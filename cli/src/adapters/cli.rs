@@ -12,7 +12,8 @@ use crate::core::{
     },
     examples,
     output_locations::resolve_output_location,
-    preflight::{PreflightCheck, PreflightReport, PreflightStatus},
+    preflight::PreflightStatus,
+    release,
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
@@ -22,7 +23,12 @@ use crate::core::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "vizfold", about = "VizFold executor administration CLI")]
+#[command(
+    name = "vizfold",
+    version,
+    about = "VizFold executor administration CLI",
+    arg_required_else_help = true
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -38,6 +44,10 @@ enum Command {
     Status,
     /// Remove one backend, or everything the install generated.
     Uninstall(UninstallArgs),
+    /// Update the vizfold checkout the installers and dashboard come from.
+    Update(UpdateArgs),
+    /// Replace this binary with the latest release, then update the checkout to match.
+    SelfUpdate(SelfUpdateArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
     /// Seed the default executor records.
@@ -176,6 +186,24 @@ struct UninstallArgs {
     /// Remove without the confirmation prompt.
     #[arg(long, short = 'y')]
     yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct UpdateArgs {
+    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag, which is
+    /// what the installers it runs are expected to be.
+    #[arg(long, value_name = "REF")]
+    r#ref: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct SelfUpdateArgs {
+    /// Release to install (e.g. v0.5.1). Defaults to the latest published release.
+    #[arg(long, value_name = "TAG")]
+    version: Option<String>,
+    /// Re-download even when this binary already is that release.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Args)]
@@ -395,7 +423,11 @@ pub async fn run() -> Result<(), DbErr> {
     // where things stand before either has run; everything else requires an initialized config.
     if !matches!(
         cli.command,
-        Command::Install(_) | Command::Uninstall(_) | Command::Status
+        Command::Install(_)
+            | Command::Uninstall(_)
+            | Command::Status
+            | Command::Update(_)
+            | Command::SelfUpdate(_)
     ) && !config::is_initialized()
     {
         eprintln!("run `vizfold install openfold` first");
@@ -408,6 +440,8 @@ pub async fn run() -> Result<(), DbErr> {
         Command::Download(args) => return run_download(args.backend, args.dataset),
         Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
+        Command::Update(args) => return run_update(args.r#ref.as_deref()),
+        Command::SelfUpdate(args) => return run_self_update(args),
         Command::Serve(args) => return run_serve(args),
         Command::List(ListArgs {
             resource: ListResource::Examples { json },
@@ -441,6 +475,8 @@ pub async fn run() -> Result<(), DbErr> {
         | Command::Download(_)
         | Command::Status
         | Command::Uninstall(_)
+        | Command::Update(_)
+        | Command::SelfUpdate(_)
         | Command::Serve(_) => {
             unreachable!("handled before DB connect")
         }
@@ -537,11 +573,15 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     )
 }
 
-/// Report resolved config plus which backends are installed. Runs before any install (so it can
-/// say "nothing initialized yet") and needs no database.
+/// Report the resolved config, then the health of every part of the install that can be broken on
+/// its own. Runs before any install (so it can say "nothing initialized yet") and needs no database.
 fn run_status() -> Result<(), DbErr> {
     let config_file = config::config_file();
     println!("VizFold status\n");
+    println!(
+        "Version: {}",
+        release::version_line(release::current(), latest_tag().as_deref())
+    );
     if config::is_initialized() {
         println!("Config: {}", config_file.display());
         for (key, value) in config::config_entries() {
@@ -559,39 +599,178 @@ fn run_status() -> Result<(), DbErr> {
         println!("  database = {} ({state})", database.display());
     }
 
-    println!("\nBackends:");
+    let components = health();
+    println!("\nHealth:");
     print_table(
-        &["BACKEND", "STATUS", "ENV PREFIX"],
-        [Backend::Openfold, Backend::Esmfold]
-            .into_iter()
-            .map(|backend| {
-                let status = if backend.is_installed() {
-                    "installed"
-                } else {
-                    "not installed"
-                };
-                vec![
-                    backend.slug().to_owned(),
-                    status.to_owned(),
-                    backend.env_prefix().display().to_string(),
-                ]
-            }),
+        &["COMPONENT", "STATUS", "DETAIL"],
+        components.iter().map(|component| {
+            vec![
+                component.name.to_owned(),
+                component.state.label().to_owned(),
+                component.detail.clone(),
+            ]
+        }),
     );
 
-    if config::is_initialized() {
-        let report = config_checks();
-        println!("\nChecks:");
-        for check in &report.checks {
-            println!(
-                "[{}] {}: {}",
-                preflight_status_label(check.status),
-                check.name,
-                check.message.as_deref().unwrap_or("no details")
-            );
+    let broken: Vec<&Component> = components
+        .iter()
+        .filter(|component| !component.problems.is_empty())
+        .collect();
+    if !broken.is_empty() {
+        println!("\nProblems:");
+        for component in &broken {
+            for problem in &component.problems {
+                println!("  {}: {problem}", component.name);
+            }
+            if !component.remedy.is_empty() {
+                println!("  -> {}", component.remedy);
+            }
         }
-        println!("\n{}", verdict(&report));
     }
+    println!("\n{}", summary(&components));
     Ok(())
+}
+
+/// The state of one component, worst last: `status` sorts nothing, so these read in the order the
+/// install settles them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum State {
+    Ok,
+    /// Nothing installed it. Not a problem -- most installs run one backend.
+    Absent,
+    /// Could not be checked from here (no scheduler, no network). Never counted as broken.
+    Unverified,
+    Broken,
+}
+
+impl State {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Absent => "absent",
+            Self::Unverified => "unverified",
+            Self::Broken => "BROKEN",
+        }
+    }
+}
+
+/// One part of the install that can be broken on its own, with what to run when it is.
+struct Component {
+    name: &'static str,
+    state: State,
+    detail: String,
+    /// One line per thing actually wrong. Empty unless `state` is `Broken`.
+    problems: Vec<String>,
+    remedy: &'static str,
+}
+
+impl Component {
+    fn ok(name: &'static str, detail: impl Into<String>) -> Self {
+        Self::new(name, State::Ok, detail, Vec::new(), "")
+    }
+
+    fn absent(name: &'static str, detail: impl Into<String>) -> Self {
+        Self::new(name, State::Absent, detail, Vec::new(), "")
+    }
+
+    fn unverified(name: &'static str, detail: impl Into<String>) -> Self {
+        Self::new(name, State::Unverified, detail, Vec::new(), "")
+    }
+
+    fn broken(
+        name: &'static str,
+        detail: impl Into<String>,
+        problems: Vec<String>,
+        remedy: &'static str,
+    ) -> Self {
+        Self::new(name, State::Broken, detail, problems, remedy)
+    }
+
+    /// Broken if anything is wrong, and whatever `state` says otherwise -- so each builder below
+    /// describes its healthy case once and lets the problems it found decide.
+    fn from_problems(
+        name: &'static str,
+        healthy: impl Into<String>,
+        problems: Vec<String>,
+        remedy: &'static str,
+    ) -> Self {
+        if problems.is_empty() {
+            return Self::ok(name, healthy);
+        }
+        let detail = format!("{} problem(s)", problems.len());
+        Self::broken(name, detail, problems, remedy)
+    }
+
+    fn new(
+        name: &'static str,
+        state: State,
+        detail: impl Into<String>,
+        problems: Vec<String>,
+        remedy: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            state,
+            detail: detail.into(),
+            problems,
+            remedy,
+        }
+    }
+}
+
+/// Everything `vizfold status` can settle about an install without folding anything. A part that
+/// cannot be checked here is `unverified`, never broken -- a login node that cannot reach slurmctld
+/// is not a broken config -- and a backend nobody installed is `absent`.
+fn health() -> Vec<Component> {
+    vec![
+        binary_health(),
+        repo_health(),
+        config_health(),
+        backend_health(Backend::Openfold),
+        backend_health(Backend::Esmfold),
+        scheduler_health(),
+    ]
+}
+
+fn binary_health() -> Component {
+    let current = release::current();
+    let line = release::version_line(current, latest_tag().as_deref());
+    match latest_tag() {
+        Some(tag) if release::version_of(&tag) != current => Component::unverified("binary", line),
+        _ => Component::ok("binary", line),
+    }
+}
+
+/// The checkout every installer, script and dashboard file comes from. `clone_checkout` pins a
+/// fresh one to this binary's tag, so a mismatch means the scripts are not the ones this binary
+/// expects -- reported only for the clone vizfold made itself, since a checkout the user pointed at
+/// is theirs to keep on whatever ref they like.
+fn repo_health() -> Component {
+    let src = config::vizfold_src();
+    let shown = src.display().to_string();
+    if !src.join("backends/openfold/install/install.sh").is_file() {
+        return Component::broken(
+            "repo",
+            shown.clone(),
+            vec![format!("{shown} is not a vizfold checkout")],
+            "vizfold update",
+        );
+    }
+    let expected = checkout_tag();
+    match checkout_ref(&src) {
+        None => Component::ok("repo", format!("{shown} (not a git checkout)")),
+        Some(at) if at == expected || src != config::default_src() => {
+            Component::ok("repo", format!("{shown} at {at}"))
+        }
+        Some(at) => Component::broken(
+            "repo",
+            format!("{shown} at {at}"),
+            vec![format!(
+                "the scripts are {at}, but this binary is {expected}"
+            )],
+            "vizfold update",
+        ),
+    }
 }
 
 /// Path-valued config keys, each with the file that proves the path is what the name claims
@@ -604,104 +783,40 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
 ];
 
 /// The same, but only while OpenFold is installed: a database directory its own uninstall took
-/// away is not a broken config, it is an uninstalled backend -- which the table above already says.
+/// away is not a broken config, it is an uninstalled backend -- which its own row already says.
 const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", ""), ("OPENFOLD_AF2_ROOT", "")];
 
 /// Config keys only the scheduler can settle, grouped by the one question that answers them.
 const CHECKED_PARTITIONS: &[&str] = &["OPENFOLD_PARTITION", "OPENFOLD_GPU_PARTITION"];
 const CHECKED_ACCOUNTS: &[&str] = &["OPENFOLD_ACCOUNT", "OPENFOLD_GPU_ACCOUNT"];
 
-/// What `vizfold status` can settle about a config without folding anything: it holds the keys this
-/// binary expects, every path it names is there, each installed backend's environment has an
-/// interpreter and its inputs, and the scheduler knows the accounts and partitions. A check that
-/// cannot be run is a warning, never a failure -- a login node that cannot reach slurmctld is not
-/// a broken config, and neither is a backend nobody installed.
-fn config_checks() -> PreflightReport {
-    let mut checks = vec![schema_check()];
-
+fn config_health() -> Component {
+    if !config::is_initialized() {
+        return Component::absent("config", "not initialized; run `vizfold install <backend>`");
+    }
     let openfold_paths: &[(&str, &str)] = if Backend::Openfold.is_installed() {
         OPENFOLD_PATHS
     } else {
         &[]
     };
-    checks.extend(
+    let mut problems: Vec<String> = schema_problem().into_iter().collect();
+    problems.extend(
         CHECKED_PATHS
             .iter()
             .chain(openfold_paths)
-            .filter_map(|(key, marker)| {
-                let value = config::value(key)?;
-                let path = PathBuf::from(&value);
-                let proof = if marker.is_empty() {
-                    path.clone()
-                } else {
-                    path.join(marker)
-                };
-                Some(if proof.exists() {
-                    PreflightCheck::passed(*key, value)
-                } else if marker.is_empty() {
-                    PreflightCheck::failed(*key, format!("{value} does not exist"))
-                } else {
-                    PreflightCheck::failed(*key, format!("{value} holds no {marker}"))
-                })
-            }),
+            .filter_map(|(key, marker)| path_problem(key, marker)),
     );
-
-    for backend in [Backend::Openfold, Backend::Esmfold] {
-        if !backend.is_installed() {
-            continue;
-        }
-        let python = backend.env_prefix().join("bin/python");
-        checks.push(if python.is_file() {
-            PreflightCheck::passed(
-                backend.slug(),
-                format!("environment runs {}", python.display()),
-            )
-        } else {
-            PreflightCheck::failed(
-                backend.slug(),
-                format!(
-                    "no interpreter at {}; re-run `vizfold install {}`",
-                    python.display(),
-                    backend.slug()
-                ),
-            )
-        });
-    }
-
-    if Backend::Openfold.is_installed() {
-        checks.push(params_check());
-    }
-    if let Some(example) = config::value("OPENFOLD_EXAMPLE") {
-        checks.push(example_check(&example));
-    }
-
-    // One call per scheduler question, asked once and answered for every key it settles.
-    // %100P, not %P: a bare field takes its default width and silently truncates, which would make
-    // a name as long as gpuA100x4-interactive look like a partition the cluster does not have.
-    let partitions = scheduler_values("sinfo", &["-h", "-o", "%100P"]);
-    let user = format!("user={}", std::env::var("USER").unwrap_or_default());
-    let accounts = scheduler_values(
-        "sacctmgr",
-        &["-nP", "show", "assoc", &user, "format=Account"],
-    );
-    checks.extend(
-        [
-            (CHECKED_PARTITIONS, &partitions, "partition"),
-            (CHECKED_ACCOUNTS, &accounts, "account"),
-        ]
-        .into_iter()
-        .flat_map(|(keys, known, noun)| {
-            keys.iter().filter_map(move |key| {
-                known_to_scheduler(key, &config::value(key)?, known.as_deref(), noun)
-            })
-        }),
-    );
-    PreflightReport::new(checks)
+    Component::from_problems(
+        "config",
+        format!("{} keys, every path present", config::config_keys().len()),
+        problems,
+        "vizfold install <backend>",
+    )
 }
 
 /// A config carrying other keys than this binary's schema was written by another version of the
-/// installer, so every value below it is suspect -- that is the answer, not the individual paths.
-fn schema_check() -> PreflightCheck {
+/// installer, so every value under it is suspect -- that is the answer, not the individual paths.
+fn schema_problem() -> Option<String> {
     let present = config::config_keys();
     let missing: Vec<&str> = config::CONFIG_KEYS
         .iter()
@@ -714,58 +829,130 @@ fn schema_check() -> PreflightCheck {
         .map(String::as_str)
         .collect();
     if missing.is_empty() && unknown.is_empty() {
-        return PreflightCheck::passed(
-            "config schema",
-            "holds exactly the keys this vizfold reads",
-        );
+        return None;
     }
-    PreflightCheck::failed(
-        "config schema",
-        format!(
-            "written by a different vizfold ({}); re-run `vizfold install`",
-            [
-                (!missing.is_empty()).then(|| format!("missing {}", missing.join(", "))),
-                (!unknown.is_empty()).then(|| format!("unknown {}", unknown.join(", "))),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("; ")
-        ),
-    )
+    Some(format!(
+        "written by a different vizfold ({})",
+        [
+            (!missing.is_empty()).then(|| format!("missing {}", missing.join(", "))),
+            (!unknown.is_empty()).then(|| format!("unknown {}", unknown.join(", "))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("; ")
+    ))
+}
+
+fn path_problem(key: &str, marker: &str) -> Option<String> {
+    let value = config::value(key)?;
+    let path = PathBuf::from(&value);
+    let proof = if marker.is_empty() {
+        path
+    } else {
+        path.join(marker)
+    };
+    if proof.exists() {
+        return None;
+    }
+    Some(if marker.is_empty() {
+        format!("{key} = {value}, which does not exist")
+    } else {
+        format!("{key} = {value}, which holds no {marker}")
+    })
+}
+
+/// A backend's own installation: the environment runs, and for OpenFold the inputs a fold needs are
+/// where the config says. `absent` -- nobody installed it -- is not a problem.
+fn backend_health(backend: Backend) -> Component {
+    let env = backend.env_prefix();
+    if !backend.is_installed() {
+        return Component::absent(backend.slug(), format!("not installed ({})", env.display()));
+    }
+    let remedy: &'static str = match backend {
+        Backend::Openfold => "vizfold install openfold",
+        Backend::Esmfold => "vizfold install esmfold",
+    };
+    let mut problems = Vec::new();
+    let python = env.join("bin/python");
+    if !python.is_file() {
+        problems.push(format!("no interpreter at {}", python.display()));
+    }
+    if backend == Backend::Openfold {
+        problems.extend(params_problem());
+        problems.extend(example_problem());
+    }
+    Component::from_problems(backend.slug(), env.display().to_string(), problems, remedy)
 }
 
 /// The AlphaFold2 weights, reached through the symlink the install plants in the checkout. An
 /// incomplete database mirror leaves that link dangling, which surfaces only mid-fold otherwise.
-fn params_check() -> PreflightCheck {
+fn params_problem() -> Option<String> {
     let params = config::openfold_home()
         .join("backends/openfold/openfold/resources/params/params_model_1_ptm.npz");
-    if params.exists() {
-        PreflightCheck::passed("openfold params", params.display().to_string())
-    } else {
-        PreflightCheck::failed(
-            "openfold params",
-            format!("{} is missing or a dangling link", params.display()),
+    (!params.exists()).then(|| {
+        format!(
+            "AlphaFold2 parameters missing or a dangling link: {}",
+            params.display()
         )
-    }
+    })
 }
 
 /// The example every `queue-run` defaults to needs both a FASTA and precomputed alignments; with
 /// only one of them the fold silently falls back to a full MSA search.
-fn example_check(id: &str) -> PreflightCheck {
-    match examples::find(id) {
-        Some(example) => PreflightCheck::passed(
-            "OPENFOLD_EXAMPLE",
-            format!("{id} ({} residues, with alignments)", example.residues),
-        ),
-        None => PreflightCheck::failed(
-            "OPENFOLD_EXAMPLE",
-            format!(
-                "no FASTA and alignments for {id} under {}",
-                examples::monomer_dir().display()
-            ),
-        ),
+fn example_problem() -> Option<String> {
+    let id = config::value("OPENFOLD_EXAMPLE")?;
+    examples::find(&id).is_none().then(|| {
+        format!(
+            "no FASTA and alignments for OPENFOLD_EXAMPLE {id} under {}",
+            examples::monomer_dir().display()
+        )
+    })
+}
+
+/// Whether the scheduler recognises the accounts and partitions the config would submit with --
+/// the difference between a fold that queues and one rejected at submission.
+fn scheduler_health() -> Component {
+    let wanted: Vec<String> = CHECKED_PARTITIONS
+        .iter()
+        .chain(CHECKED_ACCOUNTS)
+        .filter_map(|key| config::value(key))
+        .collect();
+    if wanted.is_empty() {
+        return Component::absent("scheduler", "no accounts or partitions configured");
     }
+    // One call per question, asked once and answered for every key it settles.
+    // %100P, not %P: a bare field takes its default width and silently truncates, which would make
+    // a name as long as gpuA100x4-interactive look like a partition the cluster does not have.
+    let partitions = scheduler_values("sinfo", &["-h", "-o", "%100P"]);
+    let user = format!("user={}", std::env::var("USER").unwrap_or_default());
+    let accounts = scheduler_values(
+        "sacctmgr",
+        &["-nP", "show", "assoc", &user, "format=Account"],
+    );
+    if partitions.is_none() && accounts.is_none() {
+        return Component::unverified(
+            "scheduler",
+            format!("{} unchecked: no scheduler here", wanted.join(", ")),
+        );
+    }
+    let problems: Vec<String> = [
+        (CHECKED_PARTITIONS, &partitions, "partition"),
+        (CHECKED_ACCOUNTS, &accounts, "account"),
+    ]
+    .into_iter()
+    .flat_map(|(keys, known, noun)| {
+        keys.iter().filter_map(move |key| {
+            unknown_to_scheduler(key, &config::value(key)?, known.as_deref(), noun)
+        })
+    })
+    .collect();
+    Component::from_problems(
+        "scheduler",
+        wanted.join(", "),
+        problems,
+        "correct them in ~/.config/vizfold/vizfold.json",
+    )
 }
 
 /// What the scheduler says it has. `None` means it could not be asked -- the command is missing, or
@@ -793,41 +980,42 @@ fn scheduler_names(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-fn known_to_scheduler(
+/// A configured name the scheduler does not have. `None` for the known set means that question went
+/// unanswered, which is not evidence against the value.
+fn unknown_to_scheduler(
     key: &str,
     value: &str,
     known: Option<&[String]>,
     noun: &str,
-) -> Option<PreflightCheck> {
-    Some(match known {
-        None => PreflightCheck::warning(
-            key,
-            format!("{noun} {value}, unverified: no scheduler here"),
-        ),
-        Some(known) if known.iter().any(|k| k == value) => {
-            PreflightCheck::passed(key, format!("{noun} {value} exists"))
-        }
-        Some(_) => PreflightCheck::failed(key, format!("no {noun} {value} on this cluster")),
-    })
+) -> Option<String> {
+    let known = known?;
+    (!known.iter().any(|name| name == value))
+        .then(|| format!("{key} names {noun} {value}, which this cluster does not have"))
 }
 
-fn verdict(report: &PreflightReport) -> String {
-    let total = report.checks.len();
-    let failed = report.failures().len();
-    let unverified = report
-        .checks
+/// The last line of `status`: what to do, in one sentence.
+fn summary(components: &[Component]) -> String {
+    let broken: Vec<&str> = components
         .iter()
-        .filter(|check| check.status == PreflightStatus::Warning)
-        .count();
-    if failed > 0 {
-        return format!(
-            "{failed} of {total} checks failed: this config will not run as it stands."
-        );
+        .filter(|component| component.state == State::Broken)
+        .map(|component| component.name)
+        .collect();
+    if broken.is_empty() {
+        return "Everything checks out.".to_owned();
     }
-    match unverified {
-        0 => format!("All {total} checks passed."),
-        n => format!("All {total} checks passed ({n} could not be verified here)."),
-    }
+    format!(
+        "{} of {} components need attention: {}.",
+        broken.len(),
+        components.len(),
+        broken.join(", ")
+    )
+}
+
+/// The newest published release, asked at most once per run -- `status` reports it and the binary
+/// component judges against it, and neither should pay for its own network call.
+fn latest_tag() -> Option<String> {
+    static LATEST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    LATEST.get_or_init(release::latest_tag).clone()
 }
 
 /// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
@@ -856,6 +1044,163 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
             "failed to clone {url} into {dest}; set OPENFOLD_HOME to an existing checkout"
         ))),
     }
+}
+
+/// Move the checkout the installers, scripts and dashboard all come from to a ref -- by default
+/// this binary's own release tag, since `clone_checkout` pins a fresh clone to exactly that and the
+/// two are meant to match. Clones it first if there is none. The install's own droppings in the
+/// checkout are gitignored, so a checkout that only ever had installs run in it is clean here.
+fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
+    let src = config::vizfold_src();
+    let target = wanted.unwrap_or(&checkout_tag()).to_owned();
+    if !src.join("backends/openfold/install/install.sh").is_file() {
+        return clone_checkout(&src);
+    }
+    if !src.join(".git").exists() {
+        return Err(DbErr::Custom(format!(
+            "{} is not a git checkout; nothing to update",
+            src.display()
+        )));
+    }
+    if !git(&src, &["status", "--porcelain"]).is_some_and(|out| out.trim().is_empty()) {
+        return Err(DbErr::Custom(format!(
+            "{} has uncommitted changes; commit or discard them first",
+            src.display()
+        )));
+    }
+    println!("Updating {} to {target} ...", src.display());
+    // Shallow single-branch clone: the tag has to be fetched by name before it can be checked out.
+    run_to_completion(
+        "fetch",
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&src)
+            .args(["fetch", "--depth", "1", "--tags", "origin", &target]),
+    )
+    .or_else(|_| {
+        run_to_completion(
+            "fetch",
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&src)
+                .args(["fetch", "--depth", "1", "origin", "tag", &target]),
+        )
+    })?;
+    run_to_completion(
+        "checkout",
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&src)
+            .args(["checkout", "--force", &target]),
+    )?;
+    println!(
+        "{} is now at {}",
+        src.display(),
+        checkout_ref(&src).unwrap_or(target)
+    );
+    Ok(())
+}
+
+/// The release tag whose scripts this binary expects: its own.
+fn checkout_tag() -> String {
+    format!("v{}", release::current())
+}
+
+/// One read-only git question, answered as trimmed stdout. `None` when git cannot answer at all --
+/// not a checkout, no git on this machine.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// What the checkout is actually on: its tag if it sits exactly on one, else a short commit.
+fn checkout_ref(src: &Path) -> Option<String> {
+    git(src, &["describe", "--tags", "--exact-match"])
+        .or_else(|| git(src, &["rev-parse", "--short", "HEAD"]))
+        .filter(|value| !value.is_empty())
+}
+
+/// Replace the running binary with a release build of it, then hand the new one its own checkout to
+/// update -- the scripts are pinned per version, so a new binary on an old checkout runs old
+/// scripts. Staged beside the binary and run once before the swap: a rename is atomic within a
+/// filesystem, and a download that cannot execute must never replace one that can.
+fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
+    let exe = std::env::current_exe()
+        .map_err(|error| DbErr::Custom(format!("cannot locate this binary: {error}")))?;
+    let current = release::current();
+    let tag = match args.version {
+        Some(version) => version,
+        None => release::latest_tag().ok_or_else(|| {
+            DbErr::Custom(
+                "could not reach github.com for the latest release; pass --version to pin one"
+                    .to_owned(),
+            )
+        })?,
+    };
+    let wanted = release::version_of(&tag).to_owned();
+    if wanted == current && !args.force {
+        println!("vizfold {current} is already the latest release.");
+        return Ok(());
+    }
+    let asset = release::asset_here();
+    let url = release::asset_url(&tag, &asset);
+    let staged = exe.with_file_name(format!(".{asset}.incoming"));
+    println!("Updating vizfold {current} -> {wanted}\n  {url}");
+    let fetched = fetch_release(&url, &staged, &wanted);
+    if fetched.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    fetched?;
+    std::fs::rename(&staged, &exe).map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        DbErr::Custom(format!(
+            "cannot replace {}: {error}; re-run where you can write it",
+            exe.display()
+        ))
+    })?;
+    println!("vizfold {wanted} is installed at {}", exe.display());
+
+    // The new binary, not this one, knows which checkout its own scripts came from.
+    println!();
+    match std::process::Command::new(&exe).arg("update").status() {
+        Ok(status) if status.success() => Ok(()),
+        _ => {
+            println!("The checkout could not be updated; run `vizfold update` yourself.");
+            Ok(())
+        }
+    }
+}
+
+/// Download a release asset and prove it is a working binary of the version it claims, so a
+/// truncated or foreign-architecture download is caught before it replaces anything.
+fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
+    run_to_completion(
+        "download",
+        std::process::Command::new("curl")
+            .args(["-fSL", url, "-o"])
+            .arg(staged),
+    )?;
+    std::fs::set_permissions(staged, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .map_err(|error| DbErr::Custom(format!("cannot make the download executable: {error}")))?;
+    let reported = std::process::Command::new(staged)
+        .arg("--version")
+        .output()
+        .map_err(|error| DbErr::Custom(format!("the download will not run here: {error}")))?;
+    let reported = String::from_utf8_lossy(&reported.stdout).trim().to_owned();
+    if !reported.contains(wanted) {
+        return Err(DbErr::Custom(format!(
+            "the download reports itself as {reported:?}, not {wanted}; leaving this binary alone"
+        )));
+    }
+    Ok(())
 }
 
 /// Undo `vizfold install`, for one backend or for all of it. Resolved here rather than in an
@@ -2175,40 +2520,67 @@ mod tests {
         assert!(super::scheduler_names("\n \n").is_empty());
     }
 
+    /// An unreachable scheduler must not turn a valid partition into a problem: no answer is not
+    /// a negative answer.
     #[test]
-    fn the_scheduler_is_unverified_rather_than_wrong_when_it_cannot_be_asked() {
+    fn an_unanswered_scheduler_question_is_not_a_problem() {
         let known = ["cpu".to_owned(), "gpuA100x4-interactive".to_owned()];
-        let status = |known: Option<&[String]>, value| {
-            super::known_to_scheduler("OPENFOLD_PARTITION", value, known, "partition")
-                .unwrap()
-                .status
+        let problem = |known: Option<&[String]>, value| {
+            super::unknown_to_scheduler("OPENFOLD_PARTITION", value, known, "partition")
         };
-        assert_eq!(status(None, "cpu"), PreflightStatus::Warning);
-        assert_eq!(status(Some(&known), "cpu"), PreflightStatus::Passed);
-        assert_eq!(status(Some(&known), "gpu-nope"), PreflightStatus::Failed);
+        assert_eq!(problem(None, "cpu"), None, "unasked is not answered");
+        assert_eq!(problem(Some(&known), "cpu"), None, "a name it has");
+        assert!(
+            problem(Some(&known), "gpu-nope")
+                .is_some_and(|p| p.contains("gpu-nope") && p.contains("OPENFOLD_PARTITION")),
+            "a name it does not have, said with the key that set it"
+        );
     }
 
+    /// Only `Broken` counts: an uninstalled backend and an unreachable scheduler must not make an
+    /// otherwise healthy install report a problem.
     #[test]
-    fn the_verdict_counts_failures_and_unverified_checks_apart() {
-        let report = |checks| super::verdict(&PreflightReport::new(checks));
+    fn the_summary_counts_only_what_is_broken() {
+        let ok = super::Component::ok("binary", "0.5.0");
+        let absent = super::Component::absent("esmfold", "not installed");
+        let unverified = super::Component::unverified("scheduler", "no scheduler here");
+        let broken = |name| {
+            super::Component::broken(
+                name,
+                "1 problem(s)",
+                vec!["gone".to_owned()],
+                "vizfold update",
+            )
+        };
         assert_eq!(
-            report(vec![PreflightCheck::passed("a", "ok")]),
-            "All 1 checks passed."
+            super::summary(&[ok, absent, unverified]),
+            "Everything checks out."
         );
         assert_eq!(
-            report(vec![
-                PreflightCheck::passed("a", "ok"),
-                PreflightCheck::warning("b", "no scheduler")
+            super::summary(&[
+                super::Component::ok("binary", "0.5.0"),
+                broken("repo"),
+                broken("config"),
             ]),
-            "All 2 checks passed (1 could not be verified here)."
+            "2 of 3 components need attention: repo, config."
         );
-        assert!(
-            report(vec![
-                PreflightCheck::failed("a", "gone"),
-                PreflightCheck::passed("b", "ok")
-            ])
-            .starts_with("1 of 2 checks failed")
+    }
+
+    /// A component is broken exactly when something is wrong with it, so no builder has to keep a
+    /// state and a problem list in step by hand.
+    #[test]
+    fn a_component_is_broken_by_its_problems() {
+        let healthy = super::Component::from_problems("config", "20 keys", Vec::new(), "fix it");
+        assert_eq!(healthy.state, super::State::Ok);
+        assert_eq!(healthy.detail, "20 keys");
+        let sick = super::Component::from_problems(
+            "config",
+            "20 keys",
+            vec!["a".to_owned(), "b".to_owned()],
+            "fix it",
         );
+        assert_eq!(sick.state, super::State::Broken);
+        assert_eq!(sick.detail, "2 problem(s)");
     }
 
     #[test]
