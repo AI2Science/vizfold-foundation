@@ -239,7 +239,8 @@ grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/outputs/6KWC_1/predictions/
 ```
 
 The account, partition, and resources here are Delta's; `vizfold install openfold` prints the
-command already filled in for whatever cluster it ran on.
+command already filled in for whatever cluster it ran on — and prints it without the `srun` when
+you install from inside a GPU allocation, where the fold runs as-is.
 
 A few thousand atoms means it worked. The executor lifecycle above is the fuller path — it
 persists the run, its provenance, and its artifacts, and feeds the dashboard.

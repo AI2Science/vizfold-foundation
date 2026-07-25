@@ -36,6 +36,19 @@ got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part "") | tr 
 want=$(printf "$base" "")
 check "$want" "$got" "no tty means no pty"
 
+# slurm::fold_context: what the invoking shell needs to reach a GPU, not what the build node is.
+nvidia-smi() { return 1; }
+got=$( (unset SLURM_JOB_ID; slurm::fold_context) )
+check "none" "$got" "no GPU and no allocation means the hint must ask for one"
+
+got=$(SLURM_JOB_ID=1 slurm::fold_context)
+check "allocation" "$got" "an allocation the shell may be off needs only a step"
+
+nvidia-smi() { echo "NVIDIA A100-SXM4-40GB"; }
+got=$(SLURM_JOB_ID=1 slurm::fold_context)
+check "node" "$got" "a GPU in hand needs no srun at all"
+unset -f nvidia-smi
+
 # slurm::cluster: each source in turn, because no single one works everywhere. Delta's login nodes
 # cannot reach slurmctld (scontrol exits 1, empty), DeltaAI has no readable slurm.conf.
 conf=${TMPDIR:-/tmp}/vizfold-slurm-conf.$$
