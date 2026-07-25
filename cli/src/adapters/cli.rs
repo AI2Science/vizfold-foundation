@@ -129,17 +129,11 @@ impl Backend {
             Self::Esmfold => paths.push(prefix.join("esmfold-venv")),
             Self::Openfold => {
                 paths.extend(
-                    [
-                        "bin/micromamba",
-                        "mamba",
-                        "cutlass",
-                        "tmp",
-                        "data",
-                        ".done",
-                        "params",
-                    ]
-                    .map(|entry| prefix.join(entry)),
+                    ["cutlass", "tmp", "data", ".done", "params"].map(|entry| prefix.join(entry)),
                 );
+                // Where `vizfold download` actually writes: <prefix>/data is only the default, and
+                // an OPENFOLD_DATA_DIR pointing elsewhere leaves databases nothing else names.
+                paths.push(config::data_dir());
                 // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
                 paths.extend(
                     std::fs::read_dir(prefix)
@@ -916,8 +910,17 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             what = backend.slug()
         ),
         None => {
-            if let Some(dir) = config::config_file().parent() {
-                let _ = std::fs::remove_dir(dir); // ours, but only if the uninstall emptied it
+            // Ours, but only once the uninstall has emptied them: remove_dir refuses otherwise, so
+            // an env base holding the user's own environments survives without having to be told.
+            for dir in [
+                config::config_file().parent().map(Path::to_path_buf),
+                Some(config::env_base()),
+                Some(prefix.join("envs")),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let _ = std::fs::remove_dir(dir);
             }
             println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
         }
@@ -925,19 +928,23 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// What no one backend owns, so only a full uninstall removes it: the environment base they share,
+/// What no one backend owns, so only a full uninstall removes it: the workbench environment,
 /// the staged workbench, the run database, the install config, and the checkout -- but only the
 /// clone the install made itself. A checkout the user pointed at is theirs, and one holding the
 /// prefix holds the fold outputs too.
 fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
-    // Both the resolved locations and the defaults they were moved off: an install that later set
-    // VIZFOLD_ENV_BASE or VIZFOLD_DB left the originals behind, and this is the only pass that
-    // would ever collect them. The existence filter drops whichever pair member is not there.
+    // Named entries under the env base, never the base itself: VIZFOLD_ENV_BASE may point at a
+    // directory of the user's own envs, of which only the `vizfold-` ones are ours. The backends
+    // bring theirs; `serve` provisions Node into this one, so no backend uninstall would.
+    // Emptied bases are dropped after the removals, where "empty" can be tested rather than assumed.
     let mut paths = vec![
-        config::env_base(),
-        prefix.join("envs"),
+        config::env_dir("workbench"),
         prefix.join("vizfold.db"),
         config::config_file(),
+        // micromamba and its root serve every environment, the Node one `vizfold serve` provisions
+        // included, so they outlive any single backend.
+        prefix.join("bin/micromamba"),
+        prefix.join("mamba"),
     ];
     // The staged workbench only. `serve_dir` stages a copy at <prefix>/workbench when the prefix is
     // somewhere else; with no prefix settled the two are one path, and that one is the checked-in
@@ -2066,7 +2073,7 @@ mod tests {
         let paths = Backend::Openfold.install_paths(&prefix, &home);
 
         for expected in [
-            prefix.join("mamba"),
+            prefix.join("cutlass"),
             prefix.join("data"),
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
@@ -2078,6 +2085,10 @@ mod tests {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
         assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
+        // micromamba serves the workbench env too; one backend's uninstall must not take it.
+        for shared in [prefix.join("mamba"), prefix.join("bin/micromamba")] {
+            assert!(!paths.contains(&shared), "{} is shared", shared.display());
+        }
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -2104,6 +2115,16 @@ mod tests {
             );
         }
         assert!(shared.contains(&config::config_file()), "config is shared");
+        // VIZFOLD_ENV_BASE can point at a directory of the user's own environments; only the
+        // `vizfold-` entries in it are ours to delete.
+        assert!(
+            !shared.contains(&config::env_base()),
+            "the env base is the user's, only its vizfold- entries are ours"
+        );
+        assert!(
+            shared.contains(&config::env_dir("workbench")),
+            "no backend uninstall takes the workbench env"
+        );
         assert!(
             shared.contains(&prefix.join("workbench")),
             "a staged workbench is shared"
