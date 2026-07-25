@@ -410,7 +410,7 @@ fn run_install(backend: Backend) -> Result<(), DbErr> {
     }
     if !installer.is_file() {
         return Err(DbErr::Custom(format!(
-            "no {} installer at {}; set VIZFOLD_SRC to a checkout",
+            "no {} installer at {}; set OPENFOLD_HOME to a checkout",
             backend.slug(),
             installer.display()
         )));
@@ -531,13 +531,13 @@ fn run_status() -> Result<(), DbErr> {
 
 /// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
 /// from -- the release binary ships only itself. Pins the binary's own version tag
-/// (`VIZFOLD_REF` overrides), falling back to the repo default branch.
+/// (`VIZFOLD_VERSION` overrides, same name install.sh uses), falling back to the repo default branch.
 fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     let repo =
         std::env::var("VIZFOLD_REPO").unwrap_or_else(|_| "AI2Science/vizfold-foundation".into());
     let url = format!("https://github.com/{repo}.git");
     let dest = src.to_string_lossy().into_owned();
-    let pinned = match std::env::var("VIZFOLD_REF") {
+    let pinned = match std::env::var("VIZFOLD_VERSION") {
         Ok(r) if !r.is_empty() => Some(r),
         _ => Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
     };
@@ -552,7 +552,7 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     match clone(&["clone", "--depth", "1", &url, &dest]) {
         Ok(s) if s.success() => Ok(()),
         _ => Err(DbErr::Custom(format!(
-            "failed to clone {url} into {dest}; set VIZFOLD_SRC to an existing checkout"
+            "failed to clone {url} into {dest}; set OPENFOLD_HOME to an existing checkout"
         ))),
     }
 }

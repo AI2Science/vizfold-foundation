@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Path to the install-time config written by `lib/config.sh` (`config::save`).
@@ -60,13 +60,8 @@ pub fn openfold_home() -> PathBuf {
 }
 
 /// Repo checkout holding `backends/openfold/install/install.sh` (what `vizfold install` runs, cloning it if absent).
-/// `VIZFOLD_SRC` env > vizfold.json `OPENFOLD_HOME` > the default clone location (`$HOME/vizfold-src`).
+/// `OPENFOLD_HOME` -- the config's own name for it -- else the default clone location (`$HOME/vizfold-src`).
 pub fn vizfold_src() -> PathBuf {
-    if let Ok(v) = std::env::var("VIZFOLD_SRC")
-        && !v.is_empty()
-    {
-        return PathBuf::from(v);
-    }
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(default_src)
@@ -207,10 +202,11 @@ pub fn gpu_partition() -> Option<String> {
 }
 
 pub fn database_url() -> String {
-    if let Ok(u) = std::env::var("DATABASE_URL")
-        && !u.is_empty()
-    {
-        return u;
+    // DATABASE_URL used to win here. It names nothing the install writes, so it is no longer a
+    // source -- but README shipped it, and silently moving someone's database is the worst way to
+    // say so. VIZFOLD_DB takes a full sqlite: URL, so it covers every use.
+    if std::env::var("DATABASE_URL").is_ok_and(|u| !u.is_empty()) {
+        eprintln!("warning: DATABASE_URL is ignored; set VIZFOLD_DB instead");
     }
     if let Some(db) = resolved("VIZFOLD_DB") {
         return if db.starts_with("sqlite:") {
@@ -236,20 +232,31 @@ pub fn database_path() -> Option<PathBuf> {
     (!path.is_empty() && path != ":memory:").then(|| PathBuf::from(path))
 }
 
-/// Repository root for the local development layout. DEV FALLBACK ONLY: relies on
-/// the executor crate being nested under the repository root, not suitable for an
-/// installed binary (where `openfold_home()` resolves from config instead).
+/// Repository root for the local development layout: this crate is `<root>/cli`, so the root is one
+/// level up. Baked in at build time, so for a released binary it names the machine that built it --
+/// use it only when it is actually present, else the checkout `vizfold install` clones.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("executor manifest should be nested under the repository root")
-        .to_path_buf()
+        .parent()
+        .filter(|root| root.join("backends/openfold/install/install.sh").is_file())
+        .map_or_else(default_src, Path::to_path_buf)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{SlurmContext, env_base, env_dir, gpu_launch, non_empty};
+
+    /// Compiled in from the build machine, so it has to name a checkout that is actually here --
+    /// a released binary otherwise reports its CI workspace as the install root.
+    #[test]
+    fn repository_root_names_a_real_checkout() {
+        let root = super::repository_root();
+        assert!(
+            root.join("backends/openfold/install/install.sh").is_file(),
+            "repository_root() must be a checkout, got {}",
+            root.display()
+        );
+    }
 
     /// The fixed key set writes "" for every name the install did not settle, so a consumer must
     /// not tell those apart from a missing key.

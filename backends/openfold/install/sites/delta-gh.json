@@ -1,6 +1,6 @@
 {
   "OPENFOLD_AF2_ROOT": "/work/hdd/data/alphafold2/database",
-  "OPENFOLD_BASE": "/work/nvme/$ALLOC/$USER",
+  "OPENFOLD_BASE": "/work/nvme/$OPENFOLD_ALLOCATION/$USER",
   "OPENFOLD_BUILD_GRES": "gpu:1",
   "OPENFOLD_GPU_PARTITION": "ghx4-interactive",
   "OPENFOLD_GPU_TIME": "01:00:00",

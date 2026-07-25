@@ -36,7 +36,7 @@ mkdir -p "$OUTDIR"
 # eval "$(conda shell.bash hook)"
 # conda activate vizfold
 
-cd "${VIZFOLD_REPO:-.}"
+cd "${OPENFOLD_HOME:-.}"
 
 # Sanity check: fail fast if the environment is not set up
 python -c "import torch; import transformers" 2>/dev/null || {

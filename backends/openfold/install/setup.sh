@@ -32,7 +32,7 @@ setup::config() {
     STEREO=$OF/openfold/resources/stereo_chemical_props.txt
     sentinel=$PREFIX/.done
 
-    export CONDA_PKGS_DIRS=${OPENFOLD_PKGS_DIR:-$PREFIX/../.openfold-pkgs}
+    export CONDA_PKGS_DIRS=$PREFIX/../.openfold-pkgs
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
     export PIP_CACHE_DIR=$PREFIX/../.openfold-pip
     export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
@@ -90,7 +90,7 @@ v = ctypes.c_int()
 ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
 print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
     # CPU build node can't probe the GPU driver; assume old (12.2 PTX loads on any >=12.2).
-    : "${DRIVER_CUDA:=${OPENFOLD_FALLBACK_CUDA:-12.2}}"
+    : "${DRIVER_CUDA:=12.2}"
     ENV_CUDA=$(ls "$CONDA_PREFIX"/lib/libnvrtc.so.*.*.* 2>/dev/null |
         sed 's/.*so\.//; s/\.[0-9]*$//' | head -1) || true
     export OPENFOLD_DRIVER_CUDA=$DRIVER_CUDA

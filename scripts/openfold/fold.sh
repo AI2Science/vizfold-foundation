@@ -21,7 +21,7 @@ fold::reexec() {
     clean=(HOME="$HOME" PATH="$env_prefix/bin:/usr/bin:/bin" OPENFOLD_CLEAN_ENV=1)
     [ -n "${TMPDIR:-}" ] && clean+=("TMPDIR=$TMPDIR")
     # JIT autotune cache: node-local, not NFS $HOME (79 s vs 8 s inference).
-    clean+=("TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/openfold-triton-$(id -u)}")
+    clean+=("TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}")
     while IFS= read -r kv; do clean+=("$kv"); done < <(
         env | grep -E '^(OPENFOLD_[A-Z0-9_]*|SLURM_[A-Z0-9_]*|CUDA_VISIBLE_DEVICES|GPU_DEVICE_ORDINAL|NVIDIA_VISIBLE_DEVICES)=')
     exec env -i "${clean[@]}" bash "$0" "$@"
