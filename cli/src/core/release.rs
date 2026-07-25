@@ -1,6 +1,5 @@
-//! The published releases this binary comes from: which one is newest, and what a release asset is
-//! called on a given platform. `install.sh` bootstraps from the same URLs and derives the same
-//! names, so the two must agree -- `asset_names_match_the_bootstrap_installer` holds them together.
+//! The published releases this binary comes from. `install.sh` bootstraps from the same URLs and
+//! derives the same asset names, so the two must agree.
 
 /// This build's version. The checkout is pinned to the matching tag, so the two move together and
 /// `self-update` has to move both.
@@ -90,13 +89,11 @@ pub fn version_line(latest: Option<&str>) -> String {
 mod tests {
     use super::{asset, tag_from_release_url, version_line, version_of};
 
-    /// install.sh maps `uname -s`/`uname -m` to the same names; a mismatch would download nothing
-    /// on the platform the other one bootstrapped.
+    /// A mismatch would download nothing on the platform install.sh bootstrapped.
     #[test]
     fn asset_names_match_the_bootstrap_installer() {
         assert_eq!(asset("linux", "x86_64"), "vizfold-linux-x86_64");
         assert_eq!(asset("linux", "aarch64"), "vizfold-linux-aarch64");
-        // Rust's OS name for what `uname -s` calls Darwin.
         assert_eq!(asset("macos", "aarch64"), "vizfold-darwin-aarch64");
     }
 
@@ -108,7 +105,6 @@ mod tests {
             ),
             Some("v0.5.0".to_owned())
         );
-        // No releases yet: the redirect stops at the index, which names no tag.
         assert_eq!(
             tag_from_release_url("https://github.com/AI2Science/vizfold-foundation/releases"),
             None

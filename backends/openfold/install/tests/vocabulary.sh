@@ -47,8 +47,7 @@ report "every site template atom is provided by a discover hook or the schema" \
     "$(comm -23 <(printf '%s\n' $templated) <(printf '%s\n' $provided))" \
     "export it from the site's slurm::discover, or it silently expands to empty"
 
-# The binary carries its own copy of the schema (it validates a config against it), so the two
-# spellings of one list must stay one list -- either side alone would judge the other's config stale.
+# Either side alone would judge the other's config stale, so the two spellings stay one list.
 cli_schema=$(sed -n '/pub const CONFIG_KEYS/,/^];/p' "$REPO/cli/src/core/config.rs" |
     grep -oE '"[A-Z0-9_]+"' | tr -d '"' | sort)
 report "the CLI's copy of the schema is the schema" \

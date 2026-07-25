@@ -100,7 +100,7 @@ impl Backend {
 
     /// Installer script, relative to the vizfold checkout. Each backend owns its installer under
     /// `backends/<name>/install/`: OpenFold's picks a site and dispatches the cluster install;
-    /// ESMFold's is a self-contained venv install.
+    /// ESMFold's is a self-contained environment install.
     fn installer(self) -> &'static str {
         match self {
             Self::Openfold => config::INSTALLER,
@@ -656,9 +656,7 @@ impl State {
     }
 }
 
-/// Everything `vizfold status` can settle about an install without folding anything. A part that
-/// cannot be checked here is `unverified`, never broken -- a login node that cannot reach slurmctld
-/// is not a broken config -- and a backend nobody installed is `absent`.
+/// Everything `vizfold status` can settle about an install without folding anything.
 fn health() -> Vec<Component> {
     [
         binary_health(),
@@ -1038,10 +1036,9 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     }
 }
 
-/// Move the checkout the installers, scripts and dashboard all come from to a ref -- by default
-/// this binary's own release tag, since `clone_checkout` pins a fresh clone to exactly that and the
-/// two are meant to match. Clones it first if there is none. The install's own droppings in the
-/// checkout are gitignored, so a checkout that only ever had installs run in it is clean here.
+/// Move the checkout the installers, scripts and dashboard come from to a ref -- by default this
+/// binary's own release tag, which a fresh clone is pinned to and is meant to match. The install's
+/// droppings are gitignored, so a checkout that only ever had installs run in it is clean here.
 fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let target = wanted.unwrap_or(&release::tag()).to_owned();
@@ -1105,10 +1102,9 @@ fn checkout_ref(src: &Path) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Replace the running binary with a release build of it, then hand the new one its own checkout to
-/// update -- the scripts are pinned per version, so a new binary on an old checkout runs old
-/// scripts. Staged beside the binary and run once before the swap: a rename is atomic within a
-/// filesystem, and a download that cannot execute must never replace one that can.
+/// Replace the running binary with a release build of it, then hand the new one its own checkout
+/// to update -- the scripts are pinned per version. Staged beside the binary, because a rename is
+/// atomic only within one filesystem.
 fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
     let exe = std::env::current_exe()
         .map_err(|error| DbErr::Custom(format!("cannot locate this binary: {error}")))?;
@@ -1249,10 +1245,9 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// What no one backend owns, so only a full uninstall removes it: the workbench environment,
-/// the staged workbench, the run database, the install config, and the checkout -- but only the
-/// clone the install made itself. A checkout the user pointed at is theirs, and one holding the
-/// prefix holds the fold outputs too.
+/// What no one backend owns, so only a full uninstall removes it. The checkout only when the
+/// install cloned it itself: one the user pointed at is theirs, and one holding the prefix holds
+/// the fold outputs too.
 fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
     // Named entries, never the env base itself: VIZFOLD_ENV_BASE may point at a directory of the
     // user's own environments, of which only the `vizfold-` ones are ours. The backends bring

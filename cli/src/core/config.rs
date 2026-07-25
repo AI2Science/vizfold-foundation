@@ -22,8 +22,7 @@ pub fn is_initialized() -> bool {
 }
 
 /// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
-/// `install/tests/vocabulary.sh` fails if the two ever differ. A config whose keys are not exactly
-/// these was written by a different version of the installer.
+/// `install/tests/vocabulary.sh` fails if the two ever differ.
 pub const CONFIG_KEYS: &[&str] = &[
     "ESMFOLD_ENV_PREFIX",
     "OPENFOLD_ACCOUNT",
@@ -47,7 +46,6 @@ pub const CONFIG_KEYS: &[&str] = &[
     "VIZFOLD_ENV_BASE",
 ];
 
-/// The config's own key set, for comparing against `CONFIG_KEYS`.
 pub fn config_keys() -> Vec<String> {
     vizfold_config().keys().cloned().collect()
 }

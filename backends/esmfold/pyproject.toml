@@ -8,9 +8,8 @@ version = "0.1.0"
 description = "ESMFold backend for vizfold: HuggingFace EsmForProteinFolding with attention/activation tracing."
 requires-python = ">=3.10"
 license = { text = "Apache License, Version 2.0" }
-# Everything the backend imports, so the installed package alone can fold. torch is declared but
-# install.sh installs it first from its own wheel index when a CUDA build is wanted: pip then finds
-# the requirement already satisfied and leaves that build in place.
+# torch is declared but install.sh installs it first from its own wheel index when a CUDA build is
+# wanted: pip then finds the requirement satisfied and leaves that build in place.
 dependencies = [
     "torch>=2.1",
     "transformers>=4.36.0,<5.0.0",
@@ -18,7 +17,6 @@ dependencies = [
 ]
 
 # The environment's own entrypoint, so a fold needs nothing outside it.
-# scripts/esmfold/run_pretrained_esmf.py runs the same function, for calling it by path.
 [project.scripts]
 vizfold-esmfold = "esmfold.cli:main"
 

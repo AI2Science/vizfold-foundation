@@ -1,10 +1,8 @@
 #!/bin/bash
 
-# Install the ESMFold backend into an environment that can fold on its own: its own Python, PyTorch,
-# Transformers, and the `esmfold` package with its `vizfold-esmfold` entrypoint. No SLURM/site
-# machinery and no AF2 databases -- ESMFold needs no CUDA build and pulls its weights from
-# HuggingFace at run time. Invoked by `vizfold install esmfold`. Idempotent: skips the pip work if
-# the environment already imports what it needs.
+# Install the ESMFold backend into an environment that can fold on its own. No SLURM/site machinery
+# and no AF2 databases -- ESMFold needs no CUDA build and pulls its weights from HuggingFace at run
+# time. Invoked by `vizfold install esmfold`. Idempotent.
 set -euo pipefail
 
 # config.sh is the backend-neutral shared install lib (repo-root lib/), owned by no backend. It
@@ -17,8 +15,7 @@ REPO=${OPENFOLD_HOME:-$REPO}
 ESM=$REPO/backends/esmfold
 PREFIX=$(vizfold::prefix)
 ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
-# The package needs >=3.10, which a cluster login node's python3 routinely is not -- so the
-# environment brings its own rather than inheriting whichever one happens to be on PATH.
+# A cluster login node's python3 is routinely older than the package needs, so we bring our own.
 PYTHON_VERSION=3.11
 test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
 
@@ -29,7 +26,7 @@ esmfold::env() {
     local mm; mm=$(mamba::ensure "$PREFIX")
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
     mkdir -p "$(dirname "$ENV")"
-    # --no-rc so a user ~/.condarc envs_dirs/channels cannot redirect it, as the OpenFold install does.
+    # --no-rc so a user ~/.condarc envs_dirs/channels cannot redirect it.
     "$mm" create -y --no-rc -p "$ENV" -c conda-forge "python=$PYTHON_VERSION" pip
 }
 
@@ -45,8 +42,7 @@ esmfold::install() {
     "$ENV/bin/pip" install "$ESM"
 }
 
-# Prove the environment can fold on its own: its own interpreter, every import the backend makes,
-# and the entrypoint on its PATH -- not merely that the pip commands exited zero.
+# Not merely that pip exited zero: every import the backend makes, and the entrypoint it runs.
 esmfold::verify() {
     log verify
     "$ENV/bin/python" - <<'PY'

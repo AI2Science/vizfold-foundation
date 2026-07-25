@@ -61,8 +61,8 @@ for k, v in scope.items():
 # Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
 
-# micromamba at <prefix>/bin/micromamba, downloaded once and shared: it provisions every backend's
-# environment and the Node one `vizfold serve` builds, so no backend owns it. Echoes its path.
+# micromamba at <prefix>/bin/micromamba, downloaded once: every backend's environment and the Node
+# one `vizfold serve` builds come from this one copy.
 mamba::ensure() {
     local prefix=$1 mm=$1/bin/micromamba build
     if [ ! -x "$mm" ]; then
