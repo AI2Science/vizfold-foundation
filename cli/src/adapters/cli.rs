@@ -613,6 +613,10 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
 /// away is not a broken config, it is an uninstalled backend -- which the table above already says.
 const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", ""), ("OPENFOLD_AF2_ROOT", "")];
 
+/// Config keys only the scheduler can settle, grouped by the one question that answers them.
+const CHECKED_PARTITIONS: &[&str] = &["OPENFOLD_PARTITION", "OPENFOLD_GPU_PARTITION"];
+const CHECKED_ACCOUNTS: &[&str] = &["OPENFOLD_ACCOUNT", "OPENFOLD_GPU_ACCOUNT"];
+
 /// What `vizfold status` can settle about a config without folding anything: it holds the keys this
 /// binary expects, every path it names is there, each installed backend's environment has an
 /// interpreter and its inputs, and the scheduler knows the accounts and partitions. A check that
@@ -688,14 +692,14 @@ fn config_checks() -> PreflightReport {
     );
     checks.extend(
         [
-            ("OPENFOLD_PARTITION", &partitions, "partition"),
-            ("OPENFOLD_GPU_PARTITION", &partitions, "partition"),
-            ("OPENFOLD_ACCOUNT", &accounts, "account"),
-            ("OPENFOLD_GPU_ACCOUNT", &accounts, "account"),
+            (CHECKED_PARTITIONS, &partitions, "partition"),
+            (CHECKED_ACCOUNTS, &accounts, "account"),
         ]
         .into_iter()
-        .filter_map(|(key, known, noun)| {
-            known_to_scheduler(key, &config::value(key)?, known.as_deref(), noun)
+        .flat_map(|(keys, known, noun)| {
+            keys.iter().filter_map(move |key| {
+                known_to_scheduler(key, &config::value(key)?, known.as_deref(), noun)
+            })
         }),
     );
     PreflightReport::new(checks)
@@ -2120,13 +2124,9 @@ mod tests {
             .iter()
             .chain(super::OPENFOLD_PATHS)
             .map(|(key, _)| *key)
-            .chain([
-                "OPENFOLD_EXAMPLE",
-                "OPENFOLD_PARTITION",
-                "OPENFOLD_GPU_PARTITION",
-                "OPENFOLD_ACCOUNT",
-                "OPENFOLD_GPU_ACCOUNT",
-            ]);
+            .chain(super::CHECKED_PARTITIONS.iter().copied())
+            .chain(super::CHECKED_ACCOUNTS.iter().copied())
+            .chain(["OPENFOLD_EXAMPLE"]);
         for key in checked {
             assert!(
                 config::CONFIG_KEYS.contains(&key),
