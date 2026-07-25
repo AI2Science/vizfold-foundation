@@ -237,20 +237,20 @@ ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu
 ## Driving the model directly
 
 Everything above goes through the executor, which fills the model's arguments in from the config
-and records the run. To use the backend on its own instead, activate its environment and call its
-CLI — `vizfold install openfold` prints the activation:
+and records the run. To use the backend on its own instead, run its CLI inside its environment —
+`vizfold install openfold` prints this line:
 
 ```bash
-export MAMBA_ROOT_PREFIX=/work/nvme/bbol/yjayawardana/vizfold/mamba
-eval "$(/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba shell hook --shell bash)"
-micromamba activate /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
-
-openfold --help                 # or: python -m openfold --help
+/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba \
+  run -p /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold openfold --help
 ```
 
-That is the model's own CLI, so every path is yours to pass — the databases, the alignment
-directory, the output directory. ESMFold's environment works the same way, as `esmfold` or
-`python -m esmfold`. Nothing about either needs the `vizfold` binary on your `PATH`.
+`micromamba run -p` applies the environment's activation hooks — `CUTLASS_PATH`, the library
+paths, and the NVRTC `LD_PRELOAD` where the install pinned one — so the model sees exactly what it
+sees under `vizfold fold`. That is the model's own CLI, so every path is yours to pass: the
+databases, the alignment directory, the output directory. ESMFold's environment needs no
+activation hooks, so `$ESMFOLD_ENV_PREFIX/bin/esmfold --help` is enough there. Nothing about either
+needs the `vizfold` binary on your `PATH`.
 
 ## Common failure modes
 

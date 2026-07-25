@@ -239,11 +239,9 @@ Check it works -- queue and fold the bundled example, onto a GPU node if one is 
 
   vizfold fold $EXAMPLE
 
-To drive the model yourself, activate the environment and use its own CLI:
+To drive the model yourself, use its own CLI:
 
-  export MAMBA_ROOT_PREFIX=$PREFIX/mamba
-  eval "\$($MM shell hook --shell bash)" && micromamba activate $ENV_DIR
-  openfold --help                      # or: python -m openfold --help
+  $MM run -p $ENV_DIR openfold --help
 EOF
 }
 
