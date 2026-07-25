@@ -621,10 +621,11 @@ const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", ""), ("OPENFOLD_
 fn config_checks() -> PreflightReport {
     let mut checks = vec![schema_check()];
 
-    let openfold_paths = Backend::Openfold
-        .is_installed()
-        .then_some(OPENFOLD_PATHS)
-        .unwrap_or_default();
+    let openfold_paths: &[(&str, &str)] = if Backend::Openfold.is_installed() {
+        OPENFOLD_PATHS
+    } else {
+        &[]
+    };
     checks.extend(
         CHECKED_PATHS
             .iter()
