@@ -7,9 +7,9 @@ Vizfold is a platform for running protein-structure models and inspecting what t
 
 The `vizfold` CLI is the platform; a model backend plugs in underneath it. Install one with
 `vizfold install <backend>` — **OpenFold** (the full cluster install: micromamba env, CUDA
-extension build, AlphaFold2 databases) or **ESMFold** (a lightweight venv with PyTorch +
-Transformers, weights pulled from HuggingFace at run time). `vizfold status` shows the resolved
-config and which backends are installed. Each backend is a pip/conda-installable package under
+extension build, AlphaFold2 databases) or **ESMFold** (a lightweight environment with its own
+Python, PyTorch and Transformers, weights pulled from HuggingFace at run time). `vizfold status` shows the resolved
+config and the health of every part of the install. Each backend is a pip/conda-installable package under
 `backends/<name>/` with its own environment and installer, so others (openfold3, boltz) slot in
 the same way as they land.
 
@@ -52,13 +52,30 @@ script -q -e -c 'vizfold install openfold' install.log
 Do not pipe to `tee` — that replaces the terminal with a pipe, which suppresses download progress
 meters and makes the output arrive in delayed bursts.
 
+### Keeping it current
+
+An install is two halves: the `vizfold` binary and the checkout it runs the installers, scripts and
+dashboard from, pinned to the binary's own release tag. `vizfold --version` says which release this
+binary is, and `vizfold status` says whether it is the latest.
+
+```bash
+vizfold self-update      # replace the binary with the newest release, then bring its checkout along
+vizfold update           # move the checkout to this binary's tag (clones it if there is none)
+```
+
+`self-update` downloads the release asset for your platform, refuses to install one that will not
+run, and swaps it in place. It then runs `vizfold update`, because a new binary on an old checkout
+runs the old install scripts — which `status` reports as a broken `repo` if the two ever drift.
+`vizfold update --ref <tag-or-branch>` moves the checkout somewhere else; it refuses to touch a
+checkout with uncommitted changes.
+
 ### Uninstall
 
 ```bash
 vizfold uninstall
 ```
 
-Lists everything the install generated — the conda environment (and any ESMFold venv) and the
+Lists everything the install generated — every environment, micromamba itself, and the
 rest of the install prefix, the package caches beside it, the symlinks and build droppings it left in the checkout,
 the run database, the checkout it cloned into `$HOME/vizfold-src`, and
 `~/.config/vizfold/vizfold.json` — then removes it once you confirm (`--yes` skips the prompt).
@@ -71,10 +88,11 @@ Name a backend to remove only that one:
 vizfold uninstall openfold
 ```
 
-This takes that backend's environment and everything its own installer created — for OpenFold the
-micromamba root, CUTLASS, the staged databases, the NVRTC side prefixes, the package caches, and
-the links and build droppings in its subtree — and nothing else. The config, the run database, the
-checkout, and any other backend stay, so `vizfold install openfold` puts it back where it was.
+This takes that backend's environment and everything its own installer created — for OpenFold
+CUTLASS, the staged databases, the NVRTC side prefixes, the package caches, and the links and
+build droppings in its subtree — and nothing else. The config, the run database, the checkout,
+micromamba (which every environment shares), and any other backend stay, so
+`vizfold install openfold` puts it back where it was.
 
 ### Supported clusters
 
@@ -128,11 +146,33 @@ exactly what you care about and nothing else:
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
-`vizfold status` prints what those layers settled on and then checks it: that the file holds
-exactly the keys this binary reads (a config from an older install says so instead of failing
-later), that every path it names is there, that each installed backend's environment and inputs
-are intact, and that the scheduler recognises the accounts and partitions. A check it cannot run —
-no scheduler on this host, a backend nobody installed — is reported as unverified, not as an error.
+`vizfold status` prints what those layers settled on, then reports the health of every part that
+can break on its own — the binary against the newest release, the checkout, the config, each
+backend, and the scheduler:
+
+```text
+Health:
+COMPONENT  STATUS  DETAIL
+---------  ------  ------
+binary     ok      0.5.0 (latest)
+repo       ok      /u/you/vizfold-src at v0.5.0
+config     ok      20 keys, every path present
+openfold   BROKEN  1 problem(s)
+esmfold    absent  not installed (/work/nvme/bbol/you/vizfold/envs/vizfold-esmfold)
+scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
+
+Problems:
+  openfold: AlphaFold2 parameters missing or a dangling link: …/params_model_1_ptm.npz
+  -> vizfold install openfold
+
+1 of 6 components need attention: openfold.
+```
+
+It checks that the config holds exactly the keys this binary reads (one written by an older install
+says so instead of failing later), that every path it names is there, that each installed backend's
+environment and inputs are intact, and that the scheduler recognises the accounts and partitions.
+What it cannot check here — no scheduler on this host — is `unverified`, and a backend nobody
+installed is `absent`; neither counts against the install.
 
 Every environment the install creates lives in one base directory under a fixed name:
 `$VIZFOLD_ENV_BASE/vizfold-<backend>`, defaulting to `<prefix>/envs`. That is
@@ -240,6 +280,8 @@ install                  Install a model backend (openfold or esmfold) on this m
 download                 Download a backend's data (OpenFold AlphaFold2 databases/params)
 status                   Show resolved config, installed backends, and whether it all checks out
 uninstall                Remove one backend (uninstall <backend>), or the whole install
+update                   Move the checkout to this binary's release tag
+self-update              Replace this binary with the latest release, checkout included
 seed                     Seed the default executor records (the submit path does this for you)
 queue-run                Queue a run for a backend (queue-run openfold|esmfold ...)
 execute-run <target>     Fold a bundled example, or execute a queued run by id
