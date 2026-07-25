@@ -241,7 +241,7 @@ setup::ready() {
 
 Check it works -- fold the bundled example and count the atoms:
 
-  ${LAUNCH}env OPENFOLD_PREFIX=$PREFIX $REPO/scripts/openfold/fold.sh $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
+  ${LAUNCH}$ENV_DIR/bin/vizfold-openfold $EXAMPLE${FOLD_ARGS:+ $FOLD_ARGS}
   grep -c '^ATOM' $PREFIX/outputs/$EXAMPLE/predictions/${EXAMPLE}_model_1_ptm_$STRUCTURE.pdb
 
 A few thousand atoms means it worked. To use the environment directly:

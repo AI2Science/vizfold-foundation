@@ -825,13 +825,14 @@ fn backend_health(backend: Backend) -> Component {
     let mut problems: Vec<String> = missing("interpreter", env.join("bin/python"))
         .into_iter()
         .collect();
-    match backend {
-        Backend::Openfold => {
-            problems.extend(params_problem());
-            problems.extend(example_problem());
-        }
-        // What makes the environment self-contained: the entrypoint a fold runs, inside it.
-        Backend::Esmfold => problems.extend(missing("entrypoint", env.join("bin/vizfold-esmfold"))),
+    // The entrypoint a fold runs, in the environment that runs it.
+    problems.extend(missing(
+        "entrypoint",
+        env.join(format!("bin/vizfold-{}", backend.slug())),
+    ));
+    if backend == Backend::Openfold {
+        problems.extend(params_problem());
+        problems.extend(example_problem());
     }
     Component {
         name: backend.slug(),

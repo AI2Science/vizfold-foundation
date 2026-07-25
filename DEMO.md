@@ -238,15 +238,18 @@ ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu
 
 ## A quicker smoke test
 
-To confirm the install without the executor at all, `vizfold install openfold` prints a one-liner
-that folds the bundled example straight through `fold.sh` and counts the atoms:
+To confirm the install without the executor at all, the environment has its own entrypoint:
+`vizfold-openfold <input-id>` folds with every path, database and device already filled in from the
+config. `vizfold install openfold` prints it for the cluster it ran on:
 
 ```bash
 srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00 \
-  env OPENFOLD_PREFIX=/work/nvme/bbol/yjayawardana/vizfold \
-  /u/yjayawardana/vizfold-src/scripts/openfold/fold.sh 6KWC_1
+  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold/bin/vizfold-openfold 6KWC_1
 grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/outputs/6KWC_1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
 ```
+
+Anything after the input id passes through to the model, so `vizfold-openfold 6KWC_1
+--skip_relaxation` works too.
 
 The account, partition, and resources here are Delta's; `vizfold install openfold` prints the
 command already filled in for whatever cluster it ran on — and prints it without the `srun` when

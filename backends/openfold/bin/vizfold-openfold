@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# The environment's own entrypoint: `vizfold-openfold <input-id> [extra args]` folds with every
+# path, database and device already filled in from the config. The work is fold.sh in the checkout
+# -- which this environment is an editable install of, so there is no second copy to drift.
+set -euo pipefail
+
+# config::file()'s one line, needed before we can source the lib that defines it.
+CONFIG=${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}
+# `|| true`: no config yet is a case for the message below, not a silent `set -e` exit.
+REPO=${OPENFOLD_HOME:-$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("OPENFOLD_HOME", ""))' "$CONFIG" 2>/dev/null || true)}
+
+FOLD=$REPO/scripts/openfold/fold.sh
+test -x "$FOLD" ||
+    { echo "FATAL: no vizfold checkout at '${REPO:-unset}'; run \`vizfold install openfold\`" >&2; exit 1; }
+exec env OPENFOLD_HOME="$REPO" "$FOLD" "$@"
