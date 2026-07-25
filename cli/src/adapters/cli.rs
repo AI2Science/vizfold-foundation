@@ -12,7 +12,7 @@ use crate::core::{
     },
     examples,
     output_locations::resolve_output_location,
-    preflight::PreflightStatus,
+    preflight::{PreflightCheck, PreflightReport, PreflightStatus},
     seed::seed_defaults,
     services::{
         artifacts, execution_targets, model_backends, model_invocation_profiles,
@@ -34,9 +34,9 @@ enum Command {
     Install(InstallArgs),
     /// Download a backend's data (OpenFold AlphaFold2 databases/params).
     Download(DownloadArgs),
-    /// Show resolved config and which backends are installed.
+    /// Show resolved config, which backends are installed, and whether it all checks out.
     Status,
-    /// Remove everything the install generated.
+    /// Remove one backend, or everything the install generated.
     Uninstall(UninstallArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
@@ -118,10 +118,67 @@ impl Backend {
     fn is_installed(self) -> bool {
         self.env_prefix().is_dir()
     }
+
+    /// Everything this backend's installer creates and no one else uses, so that
+    /// `vizfold uninstall <backend>` removes exactly what `vizfold install <backend>` puts back.
+    /// Fold outputs are run results, not install state, and never appear here.
+    fn install_paths(self, prefix: &Path, home: &Path) -> Vec<PathBuf> {
+        let mut paths = vec![self.env_prefix()];
+        match self {
+            // ESMFold is a plain venv. `esmfold-venv` is the pre-env-base layout, still out there.
+            Self::Esmfold => paths.push(prefix.join("esmfold-venv")),
+            Self::Openfold => {
+                paths.extend(
+                    [
+                        "bin/micromamba",
+                        "mamba",
+                        "cutlass",
+                        "tmp",
+                        "data",
+                        ".done",
+                        "params",
+                    ]
+                    .map(|entry| prefix.join(entry)),
+                );
+                // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
+                paths.extend(
+                    std::fs::read_dir(prefix)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|entry| entry.path())
+                        .filter(|path| file_name(path).starts_with("nvrtc-")),
+                );
+                // Package caches, deliberately parked beside the prefix rather than in it.
+                paths.extend(
+                    prefix
+                        .parent()
+                        .into_iter()
+                        .flat_map(|dir| [dir.join(".openfold-pkgs"), dir.join(".openfold-pip")]),
+                );
+                // Planted in the backend's own subtree by setup.sh and its editable install.
+                let backend = home.join("backends/openfold");
+                paths.extend(
+                    [
+                        "openfold/resources/params",
+                        "openfold/resources/stereo_chemical_props.txt",
+                        "tests/test_data/alphafold/common/stereo_chemical_props.txt",
+                        "openfold.egg-info",
+                        "build",
+                    ]
+                    .map(|entry| backend.join(entry)),
+                );
+            }
+        }
+        paths
+    }
 }
 
 #[derive(Debug, Args)]
 struct UninstallArgs {
+    /// Model backend to remove. Omit to remove every backend, the config, and the run database too.
+    #[arg(value_enum)]
+    backend: Option<Backend>,
     /// Remove without the confirmation prompt.
     #[arg(long, short = 'y')]
     yes: bool,
@@ -526,7 +583,233 @@ fn run_status() -> Result<(), DbErr> {
                 ]
             }),
     );
+
+    if config::is_initialized() {
+        let report = config_checks();
+        println!("\nChecks:");
+        for check in &report.checks {
+            println!(
+                "[{}] {}: {}",
+                preflight_status_label(check.status),
+                check.name,
+                check.message.as_deref().unwrap_or("no details")
+            );
+        }
+        println!("\n{}", verdict(&report));
+    }
     Ok(())
+}
+
+/// Path-valued config keys, each with the file that proves the path is what the name claims
+/// (empty: the path itself is the whole claim). Every name here must be in `config::CONFIG_KEYS`
+/// -- `checked_keys_are_all_in_the_schema` fails otherwise.
+const CHECKED_PATHS: &[(&str, &str)] = &[
+    ("OPENFOLD_HOME", "backends/openfold/install/install.sh"),
+    ("OPENFOLD_PREFIX", ""),
+    ("VIZFOLD_ENV_BASE", ""),
+    ("OPENFOLD_DATA_DIR", ""),
+    ("OPENFOLD_AF2_ROOT", ""),
+];
+
+/// What `vizfold status` can settle about a config without folding anything: it holds the keys this
+/// binary expects, every path it names is there, each installed backend's environment has an
+/// interpreter and its inputs, and the scheduler knows the accounts and partitions. A check that
+/// cannot be run is a warning, never a failure -- a login node that cannot reach slurmctld is not
+/// a broken config, and neither is a backend nobody installed.
+fn config_checks() -> PreflightReport {
+    let mut checks = vec![schema_check()];
+
+    checks.extend(CHECKED_PATHS.iter().filter_map(|(key, marker)| {
+        let value = config::value(key)?;
+        let path = PathBuf::from(&value);
+        let proof = if marker.is_empty() {
+            path.clone()
+        } else {
+            path.join(marker)
+        };
+        Some(if proof.exists() {
+            PreflightCheck::passed(*key, value)
+        } else if marker.is_empty() {
+            PreflightCheck::failed(*key, format!("{value} does not exist"))
+        } else {
+            PreflightCheck::failed(*key, format!("{value} holds no {marker}"))
+        })
+    }));
+
+    for backend in [Backend::Openfold, Backend::Esmfold] {
+        if !backend.is_installed() {
+            continue;
+        }
+        let python = backend.env_prefix().join("bin/python");
+        checks.push(if python.is_file() {
+            PreflightCheck::passed(
+                backend.slug(),
+                format!("environment runs {}", python.display()),
+            )
+        } else {
+            PreflightCheck::failed(
+                backend.slug(),
+                format!(
+                    "no interpreter at {}; re-run `vizfold install {}`",
+                    python.display(),
+                    backend.slug()
+                ),
+            )
+        });
+    }
+
+    if Backend::Openfold.is_installed() {
+        checks.push(params_check());
+    }
+    if let Some(example) = config::value("OPENFOLD_EXAMPLE") {
+        checks.push(example_check(&example));
+    }
+
+    // One call per scheduler question, asked once and answered for every key it settles.
+    let partitions = scheduler_values("sinfo", &["-h", "-o", "%P"]);
+    let user = format!("user={}", std::env::var("USER").unwrap_or_default());
+    let accounts = scheduler_values(
+        "sacctmgr",
+        &["-nP", "show", "assoc", &user, "format=Account"],
+    );
+    checks.extend(
+        [
+            ("OPENFOLD_PARTITION", &partitions, "partition"),
+            ("OPENFOLD_GPU_PARTITION", &partitions, "partition"),
+            ("OPENFOLD_ACCOUNT", &accounts, "account"),
+            ("OPENFOLD_GPU_ACCOUNT", &accounts, "account"),
+        ]
+        .into_iter()
+        .filter_map(|(key, known, noun)| {
+            known_to_scheduler(key, &config::value(key)?, known.as_deref(), noun)
+        }),
+    );
+    PreflightReport::new(checks)
+}
+
+/// A config carrying other keys than this binary's schema was written by another version of the
+/// installer, so every value below it is suspect -- that is the answer, not the individual paths.
+fn schema_check() -> PreflightCheck {
+    let present = config::config_keys();
+    let missing: Vec<&str> = config::CONFIG_KEYS
+        .iter()
+        .filter(|key| !present.iter().any(|had| had == *key))
+        .copied()
+        .collect();
+    let unknown: Vec<&str> = present
+        .iter()
+        .filter(|key| !config::CONFIG_KEYS.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect();
+    if missing.is_empty() && unknown.is_empty() {
+        return PreflightCheck::passed(
+            "config schema",
+            "holds exactly the keys this vizfold reads",
+        );
+    }
+    PreflightCheck::failed(
+        "config schema",
+        format!(
+            "written by a different vizfold ({}); re-run `vizfold install`",
+            [
+                (!missing.is_empty()).then(|| format!("missing {}", missing.join(", "))),
+                (!unknown.is_empty()).then(|| format!("unknown {}", unknown.join(", "))),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("; ")
+        ),
+    )
+}
+
+/// The AlphaFold2 weights, reached through the symlink the install plants in the checkout. An
+/// incomplete database mirror leaves that link dangling, which surfaces only mid-fold otherwise.
+fn params_check() -> PreflightCheck {
+    let params = config::openfold_home()
+        .join("backends/openfold/openfold/resources/params/params_model_1_ptm.npz");
+    if params.exists() {
+        PreflightCheck::passed("openfold params", params.display().to_string())
+    } else {
+        PreflightCheck::failed(
+            "openfold params",
+            format!("{} is missing or a dangling link", params.display()),
+        )
+    }
+}
+
+/// The example every `queue-run` defaults to needs both a FASTA and precomputed alignments; with
+/// only one of them the fold silently falls back to a full MSA search.
+fn example_check(id: &str) -> PreflightCheck {
+    match examples::find(id) {
+        Some(example) => PreflightCheck::passed(
+            "OPENFOLD_EXAMPLE",
+            format!("{id} ({} residues, with alignments)", example.residues),
+        ),
+        None => PreflightCheck::failed(
+            "OPENFOLD_EXAMPLE",
+            format!(
+                "no FASTA and alignments for {id} under {}",
+                examples::monomer_dir().display()
+            ),
+        ),
+    }
+}
+
+/// What the scheduler says it has. `None` means it could not be asked -- the command is missing, or
+/// slurmctld is unreachable, as on Delta's login nodes.
+fn scheduler_values(program: &str, args: &[&str]) -> Option<Vec<String>> {
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let values: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        // sinfo marks the default partition with a trailing '*'.
+        .map(|line| line.trim().trim_end_matches('*').to_owned())
+        .filter(|line| !line.is_empty())
+        .collect();
+    (!values.is_empty()).then_some(values)
+}
+
+fn known_to_scheduler(
+    key: &str,
+    value: &str,
+    known: Option<&[String]>,
+    noun: &str,
+) -> Option<PreflightCheck> {
+    Some(match known {
+        None => PreflightCheck::warning(
+            key,
+            format!("{noun} {value}, unverified: no scheduler here"),
+        ),
+        Some(known) if known.iter().any(|k| k == value) => {
+            PreflightCheck::passed(key, format!("{noun} {value} exists"))
+        }
+        Some(_) => PreflightCheck::failed(key, format!("no {noun} {value} on this cluster")),
+    })
+}
+
+fn verdict(report: &PreflightReport) -> String {
+    let total = report.checks.len();
+    let failed = report.failures().len();
+    let unverified = report
+        .checks
+        .iter()
+        .filter(|check| check.status == PreflightStatus::Warning)
+        .count();
+    if failed > 0 {
+        return format!(
+            "{failed} of {total} checks failed: this config will not run as it stands."
+        );
+    }
+    match unverified {
+        0 => format!("All {total} checks passed."),
+        n => format!("All {total} checks passed ({n} could not be verified here)."),
+    }
 }
 
 /// Clone the vizfold checkout `vizfold install` runs its scripts (and serves the dashboard)
@@ -557,24 +840,19 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     }
 }
 
-/// Undo `vizfold install`: the install prefix's generated trees, the caches beside it, what it
-/// planted in the checkout, the run database and the install config. Resolved here rather than
-/// in an `install/uninstall.sh` because the checkout holding that script is itself one of the
-/// things being removed. Kept: fold outputs, a checkout the user pointed at, and this binary.
+/// Undo `vizfold install`, for one backend or for all of it. Resolved here rather than in an
+/// `install/uninstall.sh` because the checkout holding that script is itself one of the things
+/// being removed. Kept either way: fold outputs, a checkout the user pointed at, and this binary.
 fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
-    let prefix = config::prefix();
-    let mut targets = install_paths(&prefix, &config::openfold_home());
-    // Only the clone the install made itself: a checkout the user pointed at is theirs, and one
-    // holding the prefix holds the fold outputs too.
-    let src = config::vizfold_src();
-    if src == config::default_src() && !prefix.starts_with(&src) {
-        targets.push(src);
-    }
-    if let Some(database) = config::database_path() {
-        let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
-        targets.extend([sidecar("-wal"), sidecar("-shm"), database]);
-    }
-    targets.push(config::config_file());
+    let (prefix, home) = (config::prefix(), config::openfold_home());
+    let mut targets = match args.backend {
+        Some(backend) => backend.install_paths(&prefix, &home),
+        None => [Backend::Openfold, Backend::Esmfold]
+            .into_iter()
+            .flat_map(|backend| backend.install_paths(&prefix, &home))
+            .chain(shared_paths(&prefix))
+            .collect(),
+    };
 
     // Relative paths mean an empty config value resolved into one; never delete off the cwd.
     targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
@@ -588,12 +866,13 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             .iter()
             .any(|other| other != path && path.starts_with(other))
     });
+    let what = args.backend.map_or("vizfold", Backend::slug);
     if targets.is_empty() {
-        println!("Nothing to remove.");
+        println!("Nothing to remove for {what}.");
         return Ok(());
     }
 
-    println!("This removes:");
+    println!("This removes everything {what} installed:");
     for target in &targets {
         println!("  {}", target.display());
     }
@@ -607,59 +886,44 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             Err(error) => eprintln!("warning: could not remove {}: {error}", target.display()),
         }
     }
-    if let Some(dir) = config::config_file().parent() {
-        let _ = std::fs::remove_dir(dir); // ours, but only if the uninstall emptied it
+    match args.backend {
+        Some(backend) => println!(
+            "\nKept: the config, the run database, and every other backend.\nReinstall with: vizfold install {what}",
+            what = backend.slug()
+        ),
+        None => {
+            if let Some(dir) = config::config_file().parent() {
+                let _ = std::fs::remove_dir(dir); // ours, but only if the uninstall emptied it
+            }
+            println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
+        }
     }
-    println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
     Ok(())
 }
 
-/// What an install writes under the prefix and into the checkout (`install/setup.sh`), minus
-/// `<prefix>/outputs` -- those are run results, not install state.
-fn install_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = [
-        "bin/micromamba",
-        "mamba",
-        "cutlass",
-        "tmp",
-        "data",
-        ".done",
-        "params",
-        "workbench",
-        "envs",
-        // The pre-env-base ESMFold layout; uninstall must still find that environment.
-        "esmfold-venv",
-        "vizfold.db",
-    ]
-    .iter()
-    .map(|entry| prefix.join(entry))
-    .collect();
-    // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
-    paths.extend(
-        std::fs::read_dir(prefix)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| file_name(path).starts_with("nvrtc-")),
-    );
-    // Package caches, deliberately parked beside the prefix rather than in it.
-    paths.extend(
-        prefix
-            .parent()
-            .into_iter()
-            .flat_map(|dir| [dir.join(".openfold-pkgs"), dir.join(".openfold-pip")]),
-    );
-    paths.extend(
-        [
-            "openfold/resources/params",
-            "openfold/resources/stereo_chemical_props.txt",
-            "tests/test_data/alphafold/common/stereo_chemical_props.txt",
-            "openfold.egg-info", // both left by the editable install of the checkout
-            "build",
-        ]
-        .map(|entry| home.join(entry)),
-    );
+/// What no one backend owns, so only a full uninstall removes it: the environment base they share,
+/// the staged workbench, the run database, the install config, and the checkout -- but only the
+/// clone the install made itself. A checkout the user pointed at is theirs, and one holding the
+/// prefix holds the fold outputs too.
+fn shared_paths(prefix: &Path) -> Vec<PathBuf> {
+    // Both the resolved locations and the defaults they were moved off: an install that later set
+    // VIZFOLD_ENV_BASE or VIZFOLD_DB left the originals behind, and this is the only pass that
+    // would ever collect them. The existence filter drops whichever pair member is not there.
+    let mut paths = vec![
+        config::env_base(),
+        prefix.join("envs"),
+        prefix.join("vizfold.db"),
+        prefix.join("workbench"),
+        config::config_file(),
+    ];
+    let src = config::vizfold_src();
+    if src == config::default_src() && !prefix.starts_with(&src) {
+        paths.push(src);
+    }
+    if let Some(database) = config::database_path() {
+        let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
+        paths.extend([sidecar("-wal"), sidecar("-shm"), database]);
+    }
     paths
 }
 
@@ -1737,40 +2001,139 @@ mod tests {
             Cli::try_parse_from(["vizfold", "uninstall"])
                 .expect("uninstall command should parse")
                 .command,
-            Command::Uninstall(UninstallArgs { yes: false })
+            Command::Uninstall(UninstallArgs {
+                backend: None,
+                yes: false
+            })
         ));
         assert!(matches!(
             Cli::try_parse_from(["vizfold", "uninstall", "--yes"])
                 .expect("uninstall --yes should parse")
                 .command,
-            Command::Uninstall(UninstallArgs { yes: true })
+            Command::Uninstall(UninstallArgs {
+                backend: None,
+                yes: true
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "uninstall", "esmfold"])
+                .expect("uninstall <backend> should parse")
+                .command,
+            Command::Uninstall(UninstallArgs {
+                backend: Some(Backend::Esmfold),
+                yes: false
+            })
         ));
     }
 
     #[test]
-    fn install_paths_cover_generated_trees_but_not_run_outputs() {
+    fn openfold_install_paths_cover_generated_trees_but_not_run_outputs() {
         let base = std::env::temp_dir().join(format!("vizfold-uninstall-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(prefix.join("nvrtc-12.2")).unwrap();
         std::fs::create_dir_all(prefix.join("outputs")).unwrap();
 
-        let paths = super::install_paths(&prefix, &home);
+        let paths = Backend::Openfold.install_paths(&prefix, &home);
 
         for expected in [
             prefix.join("mamba"),
             prefix.join("data"),
             prefix.join(".done"),
             prefix.join("nvrtc-12.2"),
-            prefix.join("envs"),
-            prefix.join("esmfold-venv"),
             base.join(".openfold-pkgs"),
-            home.join("openfold/resources/params"),
+            // Under the backend subtree, where setup.sh actually plants them.
+            home.join("backends/openfold/openfold/resources/params"),
+            home.join("backends/openfold/openfold.egg-info"),
         ] {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
         assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// One backend's uninstall must not take the other's environment, the shared config, or the
+    /// run database with it -- `vizfold install <backend>` has to be able to put back exactly this.
+    #[test]
+    fn one_backend_leaves_the_other_and_everything_shared_alone() {
+        let base = std::env::temp_dir().join(format!("vizfold-scoped-{}", std::process::id()));
+        let (prefix, home) = (base.join("prefix"), base.join("checkout"));
+
+        let openfold = Backend::Openfold.install_paths(&prefix, &home);
+        let esmfold = Backend::Esmfold.install_paths(&prefix, &home);
+        let shared = super::shared_paths(&prefix);
+
+        assert!(
+            openfold.iter().all(|path| !esmfold.contains(path)),
+            "the two backends share a path"
+        );
+        for owned in openfold.iter().chain(&esmfold) {
+            assert!(
+                !shared.contains(owned),
+                "{} is a backend's, not shared",
+                owned.display()
+            );
+        }
+        assert!(shared.contains(&config::config_file()), "config is shared");
+        assert!(
+            shared.contains(&prefix.join("workbench")),
+            "workbench is shared"
+        );
+    }
+
+    /// The checks name config keys as strings; a name outside the schema would report on a value
+    /// no install ever writes.
+    #[test]
+    fn checked_keys_are_all_in_the_schema() {
+        let checked = super::CHECKED_PATHS.iter().map(|(key, _)| *key).chain([
+            "OPENFOLD_EXAMPLE",
+            "OPENFOLD_PARTITION",
+            "OPENFOLD_GPU_PARTITION",
+            "OPENFOLD_ACCOUNT",
+            "OPENFOLD_GPU_ACCOUNT",
+        ]);
+        for key in checked {
+            assert!(
+                config::CONFIG_KEYS.contains(&key),
+                "{key} is checked but is not a config key"
+            );
+        }
+    }
+
+    #[test]
+    fn the_scheduler_is_unverified_rather_than_wrong_when_it_cannot_be_asked() {
+        let known = ["cpu".to_owned(), "gpuA100x4-interactive".to_owned()];
+        let status = |known: Option<&[String]>, value| {
+            super::known_to_scheduler("OPENFOLD_PARTITION", value, known, "partition")
+                .unwrap()
+                .status
+        };
+        assert_eq!(status(None, "cpu"), PreflightStatus::Warning);
+        assert_eq!(status(Some(&known), "cpu"), PreflightStatus::Passed);
+        assert_eq!(status(Some(&known), "gpu-nope"), PreflightStatus::Failed);
+    }
+
+    #[test]
+    fn the_verdict_counts_failures_and_unverified_checks_apart() {
+        let report = |checks| super::verdict(&PreflightReport::new(checks));
+        assert_eq!(
+            report(vec![PreflightCheck::passed("a", "ok")]),
+            "All 1 checks passed."
+        );
+        assert_eq!(
+            report(vec![
+                PreflightCheck::passed("a", "ok"),
+                PreflightCheck::warning("b", "no scheduler")
+            ]),
+            "All 2 checks passed (1 could not be verified here)."
+        );
+        assert!(
+            report(vec![
+                PreflightCheck::failed("a", "gone"),
+                PreflightCheck::passed("b", "ok")
+            ])
+            .starts_with("1 of 2 checks failed")
+        );
     }
 
     #[test]

@@ -21,6 +21,37 @@ pub fn is_initialized() -> bool {
     config_file().is_file()
 }
 
+/// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
+/// `install/tests/vocabulary.sh` fails if the two ever differ. A config whose keys are not exactly
+/// these was written by a different version of the installer.
+pub const CONFIG_KEYS: &[&str] = &[
+    "ESMFOLD_ENV_PREFIX",
+    "OPENFOLD_ACCOUNT",
+    "OPENFOLD_AF2_ROOT",
+    "OPENFOLD_DATA_DIR",
+    "OPENFOLD_DRIVER_CUDA",
+    "OPENFOLD_ENV_PREFIX",
+    "OPENFOLD_EXAMPLE",
+    "OPENFOLD_FOLD_ARGS",
+    "OPENFOLD_GPU_ACCOUNT",
+    "OPENFOLD_GPU_GRES",
+    "OPENFOLD_GPU_PARTITION",
+    "OPENFOLD_GPU_RESOURCES",
+    "OPENFOLD_GPU_TIME",
+    "OPENFOLD_HOME",
+    "OPENFOLD_MAX_CUDA",
+    "OPENFOLD_PARTITION",
+    "OPENFOLD_PREFIX",
+    "OPENFOLD_SITE",
+    "VIZFOLD_DB",
+    "VIZFOLD_ENV_BASE",
+];
+
+/// The config's own key set, for comparing against `CONFIG_KEYS`.
+pub fn config_keys() -> Vec<String> {
+    vizfold_config().keys().cloned().collect()
+}
+
 fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| ".".to_owned())
 }
@@ -41,6 +72,12 @@ fn vizfold_config() -> &'static Map<String, Value> {
 /// key -- exactly as an empty env var already does.
 fn non_empty(value: Option<&str>) -> Option<String> {
     value.filter(|v| !v.is_empty()).map(str::to_owned)
+}
+
+/// One config value, by name, resolved the same way every accessor here resolves its own.
+/// For code that checks the config rather than consuming one known key.
+pub fn value(key: &str) -> Option<String> {
+    resolved(key)
 }
 
 /// inline env var of the same name > vizfold.json entry > None.

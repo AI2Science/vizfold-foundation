@@ -65,6 +65,17 @@ the run database, the checkout it cloned into `$HOME/vizfold-src`, and
 Fold outputs under the prefix, a checkout you pointed it at yourself with `OPENFOLD_HOME`, and the `vizfold` binary
 are left alone; drop the binary with `rm ~/.local/bin/vizfold`.
 
+Name a backend to remove only that one:
+
+```bash
+vizfold uninstall openfold
+```
+
+This takes that backend's environment and everything its own installer created — for OpenFold the
+micromamba root, CUTLASS, the staged databases, the NVRTC side prefixes, the package caches, and
+the links and build droppings in its subtree — and nothing else. The config, the run database, the
+checkout, and any other backend stay, so `vizfold install openfold` puts it back where it was.
+
 ### Supported clusters
 
 Dispatch is on the SLURM `ClusterName`, so on these machines `vizfold install openfold` needs no
@@ -116,6 +127,12 @@ exactly what you care about and nothing else:
 | 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold install openfold` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
 | 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
+
+`vizfold status` prints what those layers settled on and then checks it: that the file holds
+exactly the keys this binary reads (a config from an older install says so instead of failing
+later), that every path it names is there, that each installed backend's environment and inputs
+are intact, and that the scheduler recognises the accounts and partitions. A check it cannot run —
+no scheduler on this host, a backend nobody installed — is reported as unverified, not as an error.
 
 Every environment the install creates lives in one base directory under a fixed name:
 `$VIZFOLD_ENV_BASE/vizfold-<backend>`, defaulting to `<prefix>/envs`. That is
@@ -221,8 +238,8 @@ over the results. `vizfold <command> --help` details any one.
 ```text
 install                  Install a model backend (openfold or esmfold) on this machine
 download                 Download a backend's data (OpenFold AlphaFold2 databases/params)
-status                   Show resolved config and which backends are installed
-uninstall                Remove everything the install generated
+status                   Show resolved config, installed backends, and whether it all checks out
+uninstall                Remove one backend (uninstall <backend>), or the whole install
 seed                     Seed the default executor records (the submit path does this for you)
 queue-run                Queue a run for a backend (queue-run openfold|esmfold ...)
 execute-run <target>     Fold a bundled example, or execute a queued run by id

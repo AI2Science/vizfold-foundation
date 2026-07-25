@@ -58,6 +58,12 @@ every reader treats as unset. The values are resolved live during install — on
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
 
+Below the table, `status` prints a `Checks:` section that verifies those values rather than just
+reporting them — the key set matches this binary's, every path exists, the environment and the
+AlphaFold2 parameters are in place, and the scheduler knows the accounts and partitions. It closes
+with a verdict line; anything it could not check here (no scheduler on this host, a backend nobody
+installed) is marked unverified rather than failed.
+
 ## 1. Seed the executor records
 
 Once per install, create the catalog the runs reference — the OpenFold backend, the local
