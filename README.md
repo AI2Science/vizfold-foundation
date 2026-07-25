@@ -62,7 +62,7 @@ Lists everything the install generated — the conda environment (and any ESMFol
 rest of the install prefix, the package caches beside it, the symlinks and build droppings it left in the checkout,
 the run database, the checkout it cloned into `$HOME/vizfold-src`, and
 `~/.config/vizfold/vizfold.json` — then removes it once you confirm (`--yes` skips the prompt).
-Fold outputs under the prefix, a checkout you pointed it at yourself, and the `vizfold` binary
+Fold outputs under the prefix, a checkout you pointed it at yourself with `OPENFOLD_HOME`, and the `vizfold` binary
 are left alone; drop the binary with `rm ~/.local/bin/vizfold`.
 
 ### Supported clusters
