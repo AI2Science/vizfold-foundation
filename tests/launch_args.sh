@@ -1,10 +1,10 @@
 #!/bin/bash
-# Assertions for slurm::launch_args and slurm::cluster. Run: bash install/tests/launch_args.sh
+# Assertions for slurm::launch_args and slurm::cluster. Run: bash tests/launch_args.sh
 set -u
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-REPO=$(cd .. && pwd); export REPO
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd); export REPO
+cd "$REPO"
 VIZFOLD_CONFIG=/nonexistent/vizfold-test.json; export VIZFOLD_CONFIG  # hermetic: no dev's real config, no config: line
-. ./slurm.sh
+. "$REPO/lib/slurm.sh"
 
 fail=0
 check() {
@@ -59,11 +59,11 @@ check "" "$got" "no source means no site, so install.sh falls back to local"
 
 # Every name slurm::cluster can resolve must have a site file, or detection finds nothing to load.
 for c in delta delta-gh; do
-    [ -f "sites/$c.sh" ] && echo "ok   sites/$c.sh exists" || { echo "FAIL no sites/$c.sh"; fail=1; }
+    [ -f "$SITES/$c.sh" ] && echo "ok   sites/$c.sh exists" || { echo "FAIL no sites/$c.sh"; fail=1; }
 done
 
 # sbatch must be gone entirely.
-grep -q sbatch ./slurm.sh && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
+grep -q sbatch "$REPO/lib/slurm.sh" && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
 
 # A saved config must not pin the site. Sourcing the libs no longer loads it, so what an earlier
 # install settled arrives under the site's own defaults instead of ahead of live detection --

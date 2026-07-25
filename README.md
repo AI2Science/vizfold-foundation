@@ -144,7 +144,7 @@ exactly what you care about and nothing else:
 | --- | --- | --- |
 | 1 | inline environment | `OPENFOLD_PREFIX=/scratch/me/vizfold vizfold install openfold` |
 | 2 | `~/.config/vizfold/vizfold.json` | written by the install; edit to make a choice stick |
-| 3 | `backends/openfold/install/sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
+| 3 | `sites/<site>.json` | the site's defaults, in the repo — edit to change them for everyone |
 
 `vizfold status` leads with the health of every part that can break on its own — the binary against
 the newest release, the checkout, the config, each backend, and the scheduler — and prints what
@@ -188,7 +188,7 @@ references resolved recursively (`$VAR` against the environment first, then othe
 file). Anything a default already covers is left out, so what remains is the site's actual facts.
 The site's `<site>.sh` discovers the one login-specific atom the templates need — the allocation,
 the SLURM account, or `OPENFOLD_BASE` (the install directory).
-`backends/openfold/install/sites/delta.json`:
+`sites/delta.json`:
 
 ```json
 {
@@ -207,7 +207,7 @@ the two accounts from those suffixes — so a suffix is written once, not restat
 (`slurm::default_prefix`); only `delta-gh.json` overrides it, because Grace-Hopper shares
 `/work/nvme` with x86 Delta and the two must not share an env.
 
-`backends/openfold/install/sites/nexus-dev.json` — its GPU is a 10 GB vGPU, hence the smaller
+`sites/nexus-dev.json` — its GPU is a 10 GB vGPU, hence the smaller
 example and memory. Setting `OPENFOLD_AF2_ROOT`
 is what makes the install link the staged databases instead of downloading the parameters itself:
 
@@ -246,7 +246,7 @@ those two conditions, and no others. So the build partition is in it (the instal
 `OPENFOLD_BUILD_MEM` is not (a re-install re-reads the same `<site>.json`); the fold's output
 directory is not (it belongs to one run, not to the install); and `VIZFOLD_CONFIG`, which selects
 *which* config to read, cannot be. Nothing the binary resolves may sit outside the schema, and
-nothing a `<site>.json` sets may go unconsumed — `install/tests/vocabulary.sh` enforces both, and
+nothing a `<site>.json` sets may go unconsumed — `tests/vocabulary.sh` enforces both, and
 that every `$VAR` in a site value is provided by something rather than expanding to empty. Empty means unset everywhere that reads it —
 `${VAR:-default}` in bash, `non_empty` in `cli/src/core/config.rs` — so an unsettled key falls
 through to the same default a missing one would, and never masks a `<site>.json` value beneath it.
@@ -255,12 +255,12 @@ instead of dropping the ones it doesn't know about.
 
 ### Adding a cluster
 
-Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
+Two files in `sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
 single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
 declares what differs from the defaults and templates paths off that atom (and `$USER`). `vizfold
 install openfold` (via `backends/openfold/install/install.sh`) dispatches on the name `slurm::cluster` returns — `SLURM_CLUSTER_NAME`, else `scontrol`, else `ClusterName` in `slurm.conf`, lower-cased — so nothing else needs to change.
 
-Write only what the cluster actually determines. `install/tests/site_config.sh` resolves every site
+Write only what the cluster actually determines. `tests/site_config.sh` resolves every site
 end to end and snapshots the result, so a key that changes nothing shows up as removable — and a
 key that changes something shows up in the diff. Run it after editing any site file, and
 `-u` to accept an intended change.

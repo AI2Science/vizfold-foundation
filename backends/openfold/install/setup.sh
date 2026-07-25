@@ -273,5 +273,5 @@ main() {
 }
 
 # A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
-[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$OF/install/sites/$OPENFOLD_SITE.sh" ] && . "$OF/install/sites/$OPENFOLD_SITE.sh"
+[ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/sites/$OPENFOLD_SITE.sh"
 main "$@"

@@ -22,7 +22,7 @@ pub fn is_initialized() -> bool {
 }
 
 /// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
-/// `install/tests/vocabulary.sh` fails if the two ever differ.
+/// `tests/vocabulary.sh` fails if the two ever differ.
 pub const CONFIG_KEYS: &[&str] = &[
     "ESMFOLD_ENV_PREFIX",
     "OPENFOLD_ACCOUNT",

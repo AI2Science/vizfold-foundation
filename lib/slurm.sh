@@ -5,9 +5,11 @@
 [ -n "${SLURM_SH:-}" ] && return 0
 SLURM_SH=1
 
-LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
-. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"   # REPO, OF, die
+. "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, OF, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
+
+# The site profiles, beside the libs that read them: nothing here is about any one backend.
+SITES=$REPO/sites
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
 # (OPENFOLD_ALLOCATION, OPENFOLD_ACCOUNT, OPENFOLD_BASE). No-op by default; runs before <site>.json is filled.
@@ -88,15 +90,41 @@ slurm::launch_args() {
     return 0
 }
 
+# Pick the site, run its discover hook, and settle the layers under it. Every backend's installer
+# starts here: choosing a cluster and an install prefix is the platform's job, not any one model's.
+# Leaves OPENFOLD_SITE and (where anything settled one) OPENFOLD_PREFIX exported.
+vizfold::settle_site() {
+    local cluster site prefix
+    cluster=$(slurm::cluster)
+    [ -n "$cluster" ] && [ -f "$SITES/$cluster.sh" ] || cluster=local
+    site=$(interactive::resolve OPENFOLD_SITE "site" "$cluster")
+    test -f "$SITES/$site.sh" ||
+        die "no site script for $site; have: $(cd "$SITES" && echo *.sh | sed 's/\.sh//g')"
+    export OPENFOLD_SITE=$site
+
+    . "$SITES/$site.sh"                                 # register slurm::discover
+    [ -n "${OPENFOLD_PREFIX:-}" ] || slurm::discover    # the atoms the <site>.json templates need
+    config::site_defaults "$SITES/$site.sh"             # fill + expand <site>.json off those atoms
+    config::load                                        # then the previous install's answers
+
+    prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" \
+        "${OPENFOLD_PREFIX:-$(slurm::default_prefix)}")
+    # Empty is allowed here: a workstation settles no prefix and vizfold::prefix has the default.
+    # Only the OpenFold build, which needs somewhere big to put an env, insists (slurm::run).
+    [ -n "$prefix" ] && export OPENFOLD_PREFIX=$prefix
+    return 0
+}
+
 # Run the assembled hooks, then run setup.sh on the scheduler (or here when there is none).
 slurm::run() {
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v srun >/dev/null 2>&1; then
         exec bash "$OF/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX ACCOUNT PARTITION SETUP PTY
-    # Both may already be set: inline env, slurm::discover, or a <site>.json template off its vars.
-    PREFIX=$(interactive::resolve OPENFOLD_PREFIX "install prefix" "${OPENFOLD_PREFIX:-$(slurm::default_prefix)}")
+    # vizfold::settle_site resolved this; the build needs somewhere big for an env, so it insists.
+    PREFIX=${OPENFOLD_PREFIX:-}
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
+    # May already be set: inline env, slurm::discover, or a <site>.json template off its vars.
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
     export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO OPENFOLD_ACCOUNT=$ACCOUNT

@@ -276,7 +276,7 @@ full databases).
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`
 
 The GPU partition and time cap come from the site profile
-(`backends/openfold/install/sites/<ClusterName>.json`); the account is not in that file — it is
+(`sites/<ClusterName>.json`); the account is not in that file — it is
 worked out during the install (on Delta, `slurm::nvme_alloc` names it from the allocation plus a
 `-delta-gpu` suffix). All three are written to `vizfold.json`. If you override any
 `OPENFOLD_GPU_*` value, keep it within the partition's limits (on Delta,
