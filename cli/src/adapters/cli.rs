@@ -585,7 +585,14 @@ fn run_status() -> Result<(), DbErr> {
     if config::is_initialized() {
         println!("Config: {}", config_file.display());
         for (key, value) in config::config_entries() {
-            println!("  {key} = {value}");
+            // What the checks below read, which an inline env var can differ from -- better than
+            // printing a file value nothing in this run is using.
+            match std::env::var(&key) {
+                Ok(inline) if !inline.is_empty() && inline != value => {
+                    println!("  {key} = {inline}  (env, overriding {value:?})");
+                }
+                _ => println!("  {key} = {value}"),
+            }
         }
     } else {
         println!("Config: {} (not initialized)", config_file.display());
@@ -784,7 +791,9 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
 
 /// The same, but only while OpenFold is installed: a database directory its own uninstall took
 /// away is not a broken config, it is an uninstalled backend -- which its own row already says.
-const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", ""), ("OPENFOLD_AF2_ROOT", "")];
+/// OPENFOLD_AF2_ROOT is deliberately absent: a mirror that is not there is how `setup::config`
+/// decides to download the parameters instead, and `params_problem` checks what that produces.
+const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", "")];
 
 /// Config keys only the scheduler can settle, grouped by the one question that answers them.
 const CHECKED_PARTITIONS: &[&str] = &["OPENFOLD_PARTITION", "OPENFOLD_GPU_PARTITION"];
@@ -958,15 +967,45 @@ fn scheduler_health() -> Component {
 /// What the scheduler says it has. `None` means it could not be asked -- the command is missing, or
 /// slurmctld is unreachable, as on Delta's login nodes.
 fn scheduler_values(program: &str, args: &[&str]) -> Option<Vec<String>> {
-    let output = std::process::Command::new(program)
-        .args(args)
-        .output()
-        .ok()?;
+    let output = output_within(
+        std::process::Command::new(program).args(args),
+        SCHEDULER_TIMEOUT,
+    )?;
     if !output.status.success() {
         return None;
     }
     let values = scheduler_names(&String::from_utf8_lossy(&output.stdout));
     (!values.is_empty()).then_some(values)
+}
+
+/// How long one scheduler question gets. Where slurmctld is unreachable -- Delta's login nodes --
+/// sinfo and sacctmgr each block for Slurm's own MessageTimeout, and `status` must not cost that.
+const SCHEDULER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// A command's output, or `None` if it cannot be run or does not finish in time (killed). Only for
+/// commands whose output is small enough not to fill a pipe buffer while we wait on them.
+fn output_within(
+    command: &mut std::process::Command,
+    limit: std::time::Duration,
+) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Err(_) => return None,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    }
 }
 
 /// One name per line: `sinfo` pads its field to the requested width and marks the default partition
@@ -2460,6 +2499,16 @@ mod tests {
             );
         }
         assert!(shared.contains(&config::config_file()), "config is shared");
+        // The env base can be a directory of the user's own environments -- only its `vizfold-`
+        // entries are ours. Removing the base itself once took a whole home directory with it.
+        assert!(
+            !shared.contains(&config::env_base()),
+            "the env base is the user's; only its vizfold- entries are ours"
+        );
+        assert!(
+            shared.contains(&config::env_dir("workbench")),
+            "no backend owns the workbench env, so only a full uninstall takes it"
+        );
         // VIZFOLD_ENV_BASE can point at a directory of the user's own environments; only the
         // `vizfold-` entries in it are ours to delete.
         assert!(
