@@ -153,10 +153,13 @@ pub fn config_entries() -> Vec<(String, String)> {
     entries
 }
 
+/// Mirrors `vizfold::prefix` in `lib/config.sh`, down to the fallback: the installer's default is
+/// `$HOME/openfold`, and answering with the checkout instead made `status` and `uninstall` describe
+/// a different directory than the one an install would use.
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(openfold_home)
+        .unwrap_or_else(|| PathBuf::from(format!("{}/openfold", home_dir())))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

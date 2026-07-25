@@ -104,8 +104,11 @@ import json, os, sys
 path, names = sys.argv[1], sys.argv[2:]
 with open(path, "w") as f:
     json.dump({n: os.environ.get(n, "") for n in names}, f, indent=2, sort_keys=True)
-    f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS &&
-        echo "wrote $file" || echo "warning: could not write $file" >&2
+    f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS ||
+        die "could not write $file"
+    # Not a warning: everything downstream reads this file, so an install that could not write it
+    # has not installed anything usable, and saying so at the end beats failing later somewhere else.
+    echo "wrote $file"
 }
 
 config::load

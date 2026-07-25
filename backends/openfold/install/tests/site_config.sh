@@ -92,6 +92,23 @@ if lost or set(after) != set(before):
 print("ok   a second backend's install preserves every settled value")
 PY
 
+# An inline choice must survive the install. Every key setup::config_save writes is a resolution,
+# not an assignment, so a database or data directory the user picked is recorded as picked --
+# overwriting either would move their run history or their staged datasets out from under them.
+(export VIZFOLD_DB=$SANDBOX/chosen.db OPENFOLD_DATA_DIR=$SANDBOX/chosen-data
+ resolve delta >/dev/null 2>&1
+ python3 - "$SANDBOX/delta.json" "$SANDBOX" <<'PY' || exit 1
+import json, sys
+cfg, sandbox = json.load(open(sys.argv[1])), sys.argv[2]
+want = {"VIZFOLD_DB": f"{sandbox}/chosen.db", "OPENFOLD_DATA_DIR": f"{sandbox}/chosen-data"}
+kept = {k: cfg.get(k) for k in want}
+if kept != want:
+    print("FAIL the install overwrote a value set inline:", kept, "wanted", want)
+    sys.exit(1)
+print("ok   an inline database and data directory survive the install")
+PY
+) || exit 1
+
 if [ "${1:-}" = -u ]; then
     printf '%s\n' "$actual" > "$EXPECTED"
     echo "updated $EXPECTED ($(grep -c '^## ' <<<"$actual") sites)"

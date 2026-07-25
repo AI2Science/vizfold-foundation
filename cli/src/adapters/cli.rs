@@ -138,10 +138,13 @@ impl Backend {
             // The pre-env-base layout, still out there on installs that predate it.
             Self::Esmfold => paths.push(prefix.join("esmfold-venv")),
             Self::Openfold => {
+                // `params` is where installs before the data-dir move put the weights; a target
+                // that does not exist is filtered out below, so it costs nothing and still
+                // cleans up those installs.
                 paths.extend(
                     ["cutlass", "tmp", "data", ".done", "params"].map(|entry| prefix.join(entry)),
                 );
-                // Where `vizfold download` actually writes; <prefix>/data is only its default.
+                // Where both the install and `vizfold download` write; <prefix>/data is the default.
                 paths.push(config::data_dir());
                 // One nvrtc-<driver-cuda> side prefix per driver version the install has pinned for.
                 paths.extend(
@@ -562,12 +565,18 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
         script.display(),
         dest.display()
     );
+    // 14 of the downloaders require aria2c and 3 require aws, and both ship only inside the
+    // OpenFold environment (environment.yml). Run bare, they tell an unprivileged user on a login
+    // node to `sudo apt install aria2`; with the env's bin ahead of PATH they just work.
+    let path = std::env::var("PATH").unwrap_or_default();
+    let env_bin = config::openfold_env_prefix().join("bin");
     run_to_completion(
         "downloader",
         std::process::Command::new("bash")
             .arg(&script)
             .arg(&dest)
-            .env("OPENFOLD_HOME", &src),
+            .env("OPENFOLD_HOME", &src)
+            .env("PATH", format!("{}:{path}", env_bin.display())),
     )
 }
 
