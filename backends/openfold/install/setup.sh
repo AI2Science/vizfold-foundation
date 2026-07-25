@@ -3,8 +3,8 @@
 # Install OpenFold into a micromamba env on the node that runs this. Idempotent per step.
 set -euo pipefail
 
-# sbatch spools this, breaking BASH_SOURCE; OPENFOLD_HOME (site-exported) finds the libs under
-# the backend subtree. The BASH_SOURCE fallback covers a direct local run (libs are siblings here).
+# slurm::run execs this by path; OPENFOLD_HOME (exported by install.sh) finds the libs without
+# walking up. The BASH_SOURCE fallback covers a direct local run (lib/ is three levels up).
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
 

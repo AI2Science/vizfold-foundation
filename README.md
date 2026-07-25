@@ -137,22 +137,22 @@ the SLURM account, or `OPENFOLD_BASE` (the install directory).
 ```json
 {
   "OPENFOLD_AF2_ROOT": "/work/hdd/data/alphafold2/database",
-  "OPENFOLD_BASE": "/work/nvme/$ALLOC/$USER",
+  "OPENFOLD_BASE": "/work/nvme/$OPENFOLD_ALLOCATION/$USER",
   "OPENFOLD_GPU_PARTITION": "gpuA100x4-interactive",
   "OPENFOLD_GPU_TIME": "01:00:00",
   "OPENFOLD_PARTITION": "cpu"
 }
 ```
 
-Five keys, all of them things only Delta knows. `delta.sh` discovers `$ALLOC` with
+Five keys, all of them things only Delta knows. `delta.sh` discovers `$OPENFOLD_ALLOCATION` with
 `slurm::nvme_alloc -delta-cpu -delta-gpu`, which both picks the `/work/nvme` allocation and names
 the two accounts from those suffixes — so a suffix is written once, not restated as a
-`$ALLOC-delta-cpu` template here. The install prefix defaults to `$OPENFOLD_BASE/vizfold`
+`$OPENFOLD_ALLOCATION-delta-cpu` template here. The install prefix defaults to `$OPENFOLD_BASE/vizfold`
 (`slurm::default_prefix`); only `delta-gh.json` overrides it, because Grace-Hopper shares
 `/work/nvme` with x86 Delta and the two must not share an env.
 
 `backends/openfold/install/sites/nexus-dev.json` — its GPU is a 10 GB vGPU, hence the smaller
-example and memory, the only two places it departs from the defaults. Setting `OPENFOLD_AF2_ROOT`
+example and memory. Setting `OPENFOLD_AF2_ROOT`
 is what makes the install link the staged databases instead of downloading the parameters itself:
 
 ```json
@@ -173,7 +173,7 @@ databases, or the install fails its verify step.
 To override for one run, put the variable inline — it wins over both files:
 
 ```bash
-OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_PARTITION=cpuA100x4 vizfold install openfold
+OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_GPU_PARTITION=gpuA100x4 vizfold install openfold
 ```
 
 Only the login-specific atom is discovered at run time (the allocation, account, or install
@@ -202,7 +202,7 @@ instead of dropping the ones it doesn't know about.
 Two files in `backends/openfold/install/sites/`, named after the cluster's SLURM `ClusterName`: `<name>.sh` — a
 single `slurm::discover` that exports the one login-specific atom — and `<name>.json`, which
 declares what differs from the defaults and templates paths off that atom (and `$USER`). `vizfold
-init` (via `backends/openfold/install/install.sh`) dispatches on `ClusterName`, so nothing else needs to change.
+install openfold` (via `backends/openfold/install/install.sh`) dispatches on the name `slurm::cluster` returns — `SLURM_CLUSTER_NAME`, else `scontrol`, else `ClusterName` in `slurm.conf`, lower-cased — so nothing else needs to change.
 
 Write only what the cluster actually determines. `install/tests/site_config.sh` resolves every site
 end to end and snapshots the result, so a key that changes nothing shows up as removable — and a
@@ -337,7 +337,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for branching and contribution guidance.
 A lightweight extension of [OpenFold](https://github.com/aqlaboratory/openfold) for interactive
 visualization of attention in protein structure prediction. It renders MSA-row and triangle
 attention scores as **arc diagrams** (sequence space) and **3D PyMOL overlays** (structure space).
-The code lives with the OpenFold backend under `backends/openfold/viz/`.
+The code lives under `examples/`.
 
 ### Key features
 
@@ -354,18 +354,16 @@ AttentionViz layers three lightweight components on top of upstream OpenFold:
 - **Instrumented CLIs** wrap OpenFold inference/training so attention tensors are siphoned off without modifying the scientific core.
 - **Visualization helpers** read the exported metadata and generate PyMOL overlays plus sequence-space plots.
 
-![AttentionViz architecture](./backends/openfold/docs/imgs/AttentionViz_Architecture.png)
+![AttentionViz architecture](./docs/openfold/imgs/AttentionViz_Architecture.png)
 
-- [High-res PDF](./backends/openfold/docs/imgs/AttentionViz_Architecture.pdf) for zooming/printing
-- [Editable SVG](./backends/openfold/docs/imgs/AttentionViz_Architecture.svg) when updating the diagram source
+- [High-res PDF](./docs/openfold/imgs/AttentionViz_Architecture.pdf) for zooming/printing
+- [Editable SVG](./docs/openfold/imgs/AttentionViz_Architecture.svg) when updating the diagram source
 
 ### Installation
 
 Assumes OpenFold is installed (`vizfold install openfold`, or see
-[OpenFold's install docs](https://openfold.readthedocs.io/en/latest/Installation.html)), or that
-you are using CyberShuttle (see `cybershuttle.yml`). The visualization helpers also need `PyMOL`
-(open-source is fine), `matplotlib`, `numpy`, `scipy`, `pandas`, and `biopython`. You can install
-the full dependency set (OpenFold included) directly from `cybershuttle.yml`. Verify the
+[OpenFold's install docs](https://openfold.readthedocs.io/en/latest/Installation.html)). The visualization helpers also need `PyMOL`
+(open-source is fine), `matplotlib`, `numpy`, `scipy`, `pandas`, and `biopython`. Verify the
 repo-specific dependencies with:
 
 ```python
@@ -379,11 +377,11 @@ from pymol.cgo import CYLINDER, SPHERE
 
 ### Interactive demo
 
-`backends/openfold/viz/viz_attention_demo_base.ipynb` demonstrates the full pipeline: it runs
+`examples/viz_attention_demo_base.ipynb` demonstrates the full pipeline: it runs
 OpenFold inference with precomputed alignments, extracts top-k residue-residue attention scores per
 layer and head, saves them to text files, and visualizes **MSA row attention** and **triangle
 start attention** as arc diagrams and 3D PyMOL overlays. Line thickness encodes attention strength.
-(On CyberShuttle, use `backends/openfold/viz/viz_attention_demo.ipynb` instead.)
+(On CyberShuttle, use `examples/viz_attention_demo.ipynb` instead.)
 
 **MSA row attention (layer 47, protein 6KWC)** — pairwise attention inferred from the MSA, across
 all heads at a selected layer:

@@ -66,8 +66,6 @@ pub fn plan_openfold_command(
     }
 
     if optional_bool(&execution_parameters, "use_precomputed_alignments").unwrap_or(false) {
-        // TODO: move OpenFold precomputed-alignment handling into a later
-        // preflight/flow step that can validate layout before execution.
         let alignment_dir = required_string(&execution_parameters, "alignment_dir")?;
         args.extend(["--use_precomputed_alignments".into(), alignment_dir]);
     }

@@ -1,4 +1,4 @@
-![header ](imgs/of_banner.png)
+![header ](../../docs/openfold/imgs/of_banner.png)
 _Figure: Comparison of OpenFold and AlphaFold2 predictions to the experimental structure of PDB 7KDX, chain B._
 
 # OpenFold

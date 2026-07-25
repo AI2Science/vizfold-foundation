@@ -93,8 +93,10 @@ pub fn env_dir(name: &str) -> PathBuf {
     env_base().join(format!("vizfold-{name}"))
 }
 
-/// micromamba env prefix for local OpenFold execution. `OPENFOLD_ENV_PREFIX` is honoured because
-/// installs predating the env base recorded one; fresh installs derive it.
+/// micromamba env prefix for local OpenFold execution. Every OpenFold install records it
+/// (`setup::config_save` writes `OPENFOLD_ENV_PREFIX=$CONDA_PREFIX`), so the config normally
+/// answers; the `<env base>/vizfold-openfold` fallback covers a config that left the key empty --
+/// only the ESMFold backend was installed.
 pub fn openfold_env_prefix() -> PathBuf {
     resolved("OPENFOLD_ENV_PREFIX")
         .map(PathBuf::from)

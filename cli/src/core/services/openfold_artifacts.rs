@@ -7,8 +7,9 @@ use crate::core::{
 
 use super::artifacts::{self as artifact_service, RecordArtifactByTypeSlugInput};
 
-/// Registers existing OpenFold demo output directories and returns the full current
-/// artifact list for the run. Repeated calls do not add duplicate type/URI entries.
+/// Registers a run's existing output directories -- the workspace and its `attention/` subdir --
+/// and returns the full current artifact list for the run. Both backends route here. Repeated
+/// calls do not add duplicate type/URI entries.
 pub async fn register_known_openfold_artifacts(
     db: &DatabaseConnection,
     run_id: i32,

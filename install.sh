@@ -54,6 +54,6 @@ main() {
     bootstrap::asset
     bootstrap::download
     bootstrap::path
-    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install\` to install a model backend (OpenFold)."
+    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install openfold\` (or \`esmfold\`) to install a model backend."
 }
 main

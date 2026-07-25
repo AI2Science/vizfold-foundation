@@ -59,7 +59,7 @@ slurm::cluster() {
     echo "$name" | tr '[:upper:]' '[:lower:]'
 }
 
-# Only delta-gh overrides this: it shares /work/nvme with x86 Delta and must not share the env.
+# The prefix when nothing else settles one. No site overrides this hook; delta-gh.json sets OPENFOLD_PREFIX instead (it shares /work/nvme with x86 Delta and must not share the env).
 slurm::default_prefix() { echo "${OPENFOLD_BASE:+$OPENFOLD_BASE/vizfold}"; }
 
 # Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
