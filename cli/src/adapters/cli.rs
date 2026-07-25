@@ -2405,8 +2405,8 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
-    /// One backend's uninstall must not take the other's environment, the shared config, or the
-    /// run database with it -- `vizfold install <backend>` has to be able to put back exactly this.
+    /// The reinstall invariant: `vizfold install <backend>` has to put back exactly what its own
+    /// uninstall took, and nothing else may go with it.
     #[test]
     fn one_backend_leaves_the_other_and_everything_shared_alone() {
         let base = std::env::temp_dir().join(format!("vizfold-scoped-{}", std::process::id()));
@@ -2486,8 +2486,6 @@ mod tests {
         assert!(super::scheduler_names("\n \n").is_empty());
     }
 
-    /// An unreachable scheduler must not turn a valid partition into a problem: no answer is not
-    /// a negative answer.
     #[test]
     fn an_unanswered_scheduler_question_is_not_a_problem() {
         let known = ["cpu".to_owned(), "gpuA100x4-interactive".to_owned()];
