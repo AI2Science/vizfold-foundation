@@ -57,6 +57,24 @@ for k, v in scope.items():
 # Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
 
+# micromamba at <prefix>/bin/micromamba, downloaded once and shared: it provisions every backend's
+# environment and the Node one `vizfold serve` builds, so no backend owns it. Echoes its path.
+mamba::ensure() {
+    local prefix=$1 mm=$1/bin/micromamba build
+    if [ ! -x "$mm" ]; then
+        case "$(uname -s)-$(uname -m)" in
+            Linux-aarch64|Linux-arm64)   build=linux-aarch64 ;;
+            Linux-*)                     build=linux-64 ;;
+            Darwin-arm64|Darwin-aarch64) build=osx-arm64 ;;
+            Darwin-*)                    build=osx-64 ;;
+            *) die "no micromamba build for $(uname -s)-$(uname -m)" ;;
+        esac
+        mkdir -p "$prefix"
+        curl -Ls "https://micro.mamba.pm/api/micromamba/$build/latest" | tar -xj -C "$prefix" bin/micromamba
+    fi
+    echo "$mm"
+}
+
 config::load() { config::fill "$(config::file)" "config"; }
 
 # <site>.sh loads its own <site>.json: same basename, beside it.

@@ -280,10 +280,10 @@ fn compose_exec_command(
     }
 }
 
-/// Wrap a planned ESMFold command for execution. ESMFold installs into a plain venv (no
-/// micromamba, no activate.d hook), so running its interpreter directly -- `<env>/bin/python` --
-/// is the whole activation. srun still wraps it so the fold lands on a GPU node when a partition
-/// is configured. `use_venv` is false in tests/dev (no venv installed): the command runs bare.
+/// Wrap a planned ESMFold command for execution. Its environment carries its own Python and needs
+/// no activate.d hook, so running that interpreter directly -- `<env>/bin/python` -- is the whole
+/// activation. srun still wraps it so the fold lands on a GPU node when a partition is configured.
+/// `use_venv` is false in tests/dev (nothing installed): the command runs bare.
 fn compose_esmfold_command(
     command: &CommandSpec,
     env_prefix: &Path,

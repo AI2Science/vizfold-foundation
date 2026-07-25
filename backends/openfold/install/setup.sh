@@ -52,10 +52,7 @@ setup::preflight() {
     test -f "$OF/setup.py" || die "$REPO is not an OpenFold checkout"
 }
 
-setup::micromamba() {
-    local mm_arch; case $(uname -m) in aarch64|arm64) mm_arch=linux-aarch64 ;; *) mm_arch=linux-64 ;; esac
-    curl -Ls "https://micro.mamba.pm/api/micromamba/$mm_arch/latest" | tar -xj -C "$PREFIX" bin/micromamba
-}
+setup::micromamba() { mamba::ensure "$PREFIX" >/dev/null; }
 
 # By path + --no-rc so a ~/.condarc envs_dirs/channels can't hijack a reproducible env.
 setup::env() {

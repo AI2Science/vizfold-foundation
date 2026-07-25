@@ -887,9 +887,18 @@ fn backend_health(backend: Backend) -> Component {
     if !python.is_file() {
         problems.push(format!("no interpreter at {}", python.display()));
     }
-    if backend == Backend::Openfold {
-        problems.extend(params_problem());
-        problems.extend(example_problem());
+    match backend {
+        Backend::Openfold => {
+            problems.extend(params_problem());
+            problems.extend(example_problem());
+        }
+        // What makes the environment self-contained: the entrypoint a fold runs, inside it.
+        Backend::Esmfold => {
+            let entrypoint = env.join("bin/vizfold-esmfold");
+            if !entrypoint.is_file() {
+                problems.push(format!("no entrypoint at {}", entrypoint.display()));
+            }
+        }
     }
     Component::from_problems(backend.slug(), env.display().to_string(), problems, remedy)
 }
