@@ -51,8 +51,8 @@ from esmfold.cli import main
 print("python", sys.version.split()[0])
 print("torch", torch.__version__, "cuda", torch.cuda.is_available())
 print("transformers", transformers.__version__)
-entrypoint = shutil.which("vizfold-esmfold", path=f"{sys.prefix}/bin")
-assert entrypoint, "vizfold-esmfold is not in the environment"
+entrypoint = shutil.which("esmfold", path=f"{sys.prefix}/bin")
+assert entrypoint, "the esmfold entrypoint is not in the environment"
 print("entrypoint", entrypoint)
 PY
 }
@@ -82,7 +82,7 @@ ESMFold env: $ENV
 
 Fold the bundled example (downloads facebook/esmfold_v1 on first run):
 
-  $ENV/bin/vizfold-esmfold \\
+  $ENV/bin/esmfold \\
     --fasta $REPO/examples/monomer/fasta_dir_6KWC/6KWC.fasta \\
     --out $PREFIX/outputs/esmf_6KWC --trace_mode none
 EOF

@@ -6,7 +6,7 @@ The ESMFold backend runs [ESMFold](https://github.com/facebookresearch/esm) via 
 
 **Option A – `vizfold install` (recommended)**  
 The executor CLI provisions a self-contained environment — its own Python 3.11, PyTorch,
-Transformers, and the `esmfold` package with its `vizfold-esmfold` entrypoint — and records it in
+Transformers, and the `esmfold` package with its `esmfold` entrypoint — and records it in
 `~/.config/vizfold/vizfold.json`. It brings its own interpreter rather than building on the host's,
 which on a cluster login node is routinely older than the package needs:
 
@@ -39,14 +39,14 @@ pip install ./backends/esmfold          # torch, transformers, numpy, and the es
 The executor runs the same entrypoint and records the run and its outputs:
 `vizfold queue-run esmfold --input-id 6KWC_1 --input-sequence <SEQ> --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta`,
 then `vizfold execute-run <id>`. The commands below call it directly, through the environment's own
-`vizfold-esmfold` (`$ESMFOLD_ENV_PREFIX/bin/vizfold-esmfold`, from `vizfold status`) — it needs
+`esmfold` (`$ESMFOLD_ENV_PREFIX/bin/esmfold`, from `vizfold status`; `python -m esmfold` is the same) — it needs
 nothing from the checkout. `scripts/esmfold/run_pretrained_esmf.py` runs the same function by path,
 under the same interpreter.
 
 **Structure only (fast):**
 
 ```bash
-vizfold-esmfold \
+esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode none
@@ -55,7 +55,7 @@ vizfold-esmfold \
 **Structure + attention + activations:**
 
 ```bash
-vizfold-esmfold \
+esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --model facebook/esmfold_v1 \
@@ -68,7 +68,7 @@ vizfold-esmfold \
 **Limit layers/heads (saves memory and disk):**
 
 ```bash
-vizfold-esmfold \
+esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention \
@@ -79,7 +79,7 @@ vizfold-esmfold \
 **Structure + IPA attention + per-recycle backbone (structure module traces):**
 
 ```bash
-vizfold-esmfold \
+esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention+activations \

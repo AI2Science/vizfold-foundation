@@ -11,6 +11,7 @@ import sys
 
 def main() -> int:
     parser = argparse.ArgumentParser(
+        prog="esmfold",                       # `python -m esmfold` would say __main__.py otherwise
         description="Run ESMFold and export VizFold-compatible traces.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

@@ -236,27 +236,23 @@ viewer and shows the attention maps. From a laptop, forward the port over SSH:
 ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu
 ```
 
-## A quicker smoke test
+## Driving the model directly
 
-To confirm the install without the executor at all, the environment has its own entrypoint:
-`vizfold-openfold <input-id>` folds with every path, database and device already filled in from the
-config. `vizfold install openfold` prints it for the cluster it ran on:
+Everything above goes through the executor, which fills the model's arguments in from the config
+and records the run. To use the backend on its own instead, activate its environment and call its
+CLI — `vizfold install openfold` prints the activation:
 
 ```bash
-srun -A bbol-delta-gpu -p gpuA100x4-interactive --gres=gpu:1 --cpus-per-task=8 --mem=32G -t 01:00:00 \
-  /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold/bin/vizfold-openfold 6KWC_1
-grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/outputs/6KWC_1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
+export MAMBA_ROOT_PREFIX=/work/nvme/bbol/yjayawardana/vizfold/mamba
+eval "$(/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba shell hook --shell bash)"
+micromamba activate /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
+
+openfold --help                 # or: python -m openfold --help
 ```
 
-Anything after the input id passes through to the model, so `vizfold-openfold 6KWC_1
---skip_relaxation` works too.
-
-The account, partition, and resources here are Delta's; `vizfold install openfold` prints the
-command already filled in for whatever cluster it ran on — and prints it without the `srun` when
-you install from inside a GPU allocation, where the fold runs as-is.
-
-A few thousand atoms means it worked. The executor lifecycle above is the fuller path — it
-persists the run, its provenance, and its artifacts, and feeds the dashboard.
+That is the model's own CLI, so every path is yours to pass — the databases, the alignment
+directory, the output directory. ESMFold's environment works the same way, as `esmfold` or
+`python -m esmfold`. Nothing about either needs the `vizfold` binary on your `PATH`.
 
 ## Common failure modes
 

@@ -251,7 +251,7 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
     let mut args = vec![
         "-c".to_owned(),
         script,
-        "vizfold-openfold".to_owned(),
+        "openfold".to_owned(),
         command.program.clone(),
     ];
     args.extend(command.args.iter().cloned());
@@ -407,13 +407,7 @@ mod tests {
         // Original program+args are passed positionally for `exec "$@"` (no re-quoting).
         assert_eq!(
             &wrapped.args[2..],
-            &[
-                "vizfold-openfold",
-                "python3",
-                "-u",
-                "run_openfold.py",
-                "6KWC_1"
-            ]
+            &["openfold", "python3", "-u", "run_openfold.py", "6KWC_1"]
         );
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
     }
@@ -442,7 +436,7 @@ mod tests {
         assert_eq!(composed.args[3], "-c");
         assert_eq!(
             &composed.args[5..],
-            &["vizfold-openfold", "python3", "-u", "run_openfold.py"]
+            &["openfold", "python3", "-u", "run_openfold.py"]
         );
         assert!(composed.stream);
     }

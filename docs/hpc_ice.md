@@ -14,7 +14,7 @@ vizfold install esmfold
 vizfold status          # prints OPENFOLD_HOME and ESMFOLD_ENV_PREFIX
 ```
 
-The install creates the venv (PyTorch + Transformers) at `<VIZFOLD_ENV_BASE>/vizfold-esmfold` and
+The install creates the environment (its own Python, PyTorch, Transformers) at `<VIZFOLD_ENV_BASE>/vizfold-esmfold` and
 records `ESMFOLD_ENV_PREFIX` in `~/.config/vizfold/vizfold.json`. See [esmfold.md](esmfold.md) for
 the manual pip path and the CUDA wheel overrides (`ESMFOLD_TORCH_SPEC`, `ESMFOLD_PIP_INDEX_URL`).
 

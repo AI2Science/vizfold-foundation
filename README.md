@@ -320,7 +320,7 @@ The repository is laid out as:
 - `backends/<name>/` — one pip/conda-installable package per model backend: its Python package, packaging metadata, environment spec, and env-provisioning installer (`install/`). `backends/openfold/` installs as `import openfold` (conda env, CUDA extension; its dataprep/training tooling is the installed `openfold.scripts` subpackage); `backends/esmfold/` as `import esmfold` (plain venv).
 - `downloaders/<name>/` — data-download scripts. `downloaders/openfold/` holds the AlphaFold2 database/params fetchers (`vizfold download openfold`); ESMFold has none — it pulls weights from HuggingFace at run time.
 - `scripts/<name>/` — the model entrypoints the executor runs (`run_pretrained_*.py`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
-- Each backend installs `vizfold-<name>` into its own environment: one command that folds with every path, database and device already filled in from the config.
+- Each backend's package installs its own CLI into its environment as `<name>` (also `python -m <name>`), usable without the `vizfold` binary. Through vizfold, `queue-run`/`execute-run` are the way in — they fill the model's arguments from the config and record the run.
 - `lib/` — the backend-neutral shared install library (`config.sh`), owned by no backend.
 - `docs/` — architecture notes and backlog. `examples/` — demo inputs, attention-viz utilities, and notebooks.
 

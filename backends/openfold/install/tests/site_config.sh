@@ -58,7 +58,6 @@ resolve() {
     echo "account=$OPENFOLD_ACCOUNT partition=${OPENFOLD_PARTITION:-}"
     echo "build=${OPENFOLD_BUILD_CPUS:-8}/${OPENFOLD_BUILD_MEM:-24G}/${OPENFOLD_BUILD_TIME:-02:00:00}/${OPENFOLD_BUILD_GRES:-}"
     echo "env=$ENV_DIR arch=$arch max_cuda=$MAX_CUDA override_cuda=$CONDA_OVERRIDE_CUDA"
-    echo "launch=$LAUNCH"
     cat "$VIZFOLD_CONFIG"
 }
 
