@@ -858,7 +858,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
         None => [Backend::Openfold, Backend::Esmfold]
             .into_iter()
             .flat_map(|backend| backend.install_paths(&prefix, &home))
-            .chain(shared_paths(&prefix))
+            .chain(shared_paths(&prefix, &home))
             .collect(),
     };
 
@@ -913,7 +913,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
 /// the staged workbench, the run database, the install config, and the checkout -- but only the
 /// clone the install made itself. A checkout the user pointed at is theirs, and one holding the
 /// prefix holds the fold outputs too.
-fn shared_paths(prefix: &Path) -> Vec<PathBuf> {
+fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
     // Both the resolved locations and the defaults they were moved off: an install that later set
     // VIZFOLD_ENV_BASE or VIZFOLD_DB left the originals behind, and this is the only pass that
     // would ever collect them. The existence filter drops whichever pair member is not there.
@@ -921,9 +921,14 @@ fn shared_paths(prefix: &Path) -> Vec<PathBuf> {
         config::env_base(),
         prefix.join("envs"),
         prefix.join("vizfold.db"),
-        prefix.join("workbench"),
         config::config_file(),
     ];
+    // The staged workbench only. `serve_dir` stages a copy at <prefix>/workbench when the prefix is
+    // somewhere else; with no prefix settled the two are one path, and that one is the checked-in
+    // source tree.
+    if prefix != home {
+        paths.push(prefix.join("workbench"));
+    }
     let src = config::vizfold_src();
     if src == config::default_src() && !prefix.starts_with(&src) {
         paths.push(src);
@@ -2069,7 +2074,7 @@ mod tests {
 
         let openfold = Backend::Openfold.install_paths(&prefix, &home);
         let esmfold = Backend::Esmfold.install_paths(&prefix, &home);
-        let shared = super::shared_paths(&prefix);
+        let shared = super::shared_paths(&prefix, &home);
 
         assert!(
             openfold.iter().all(|path| !esmfold.contains(path)),
@@ -2085,7 +2090,13 @@ mod tests {
         assert!(shared.contains(&config::config_file()), "config is shared");
         assert!(
             shared.contains(&prefix.join("workbench")),
-            "workbench is shared"
+            "a staged workbench is shared"
+        );
+        // With no prefix settled, prefix == the checkout, and <prefix>/workbench is the source tree
+        // `vizfold serve` runs from -- never a staged copy, so never ours to delete.
+        assert!(
+            !super::shared_paths(&home, &home).contains(&home.join("workbench")),
+            "the checkout's own workbench must survive"
         );
     }
 
