@@ -12,9 +12,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # The one login-specific atom each discover reads off the cluster; nexus-dev probes paths and skips it.
 site_env() {
     case $1 in
-        anvil)          echo 'export PROJECT=/anvil/projects/x-test' ;;
         delta|delta-gh) echo 'export OPENFOLD_ALLOCATION=bbka' ;;
-        expanse)        echo 'export OPENFOLD_ALLOCATION=abc123' ;;
         ice-slurm)      echo 'SCRATCH=/storage/ice1/x-test' ;;
         phoenix-slurm)  echo 'SCRATCH=/storage/scratch1/x-test' ;;
         nexus-dev)      echo 'export OPENFOLD_BASE=/projects/x-test; skip=1' ;;

@@ -98,9 +98,7 @@ fresh install settles on.
 | `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/vizfold` |
 | `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/vizfold-gh`² |
 | `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | mirror¹ | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/vizfold` |
-| `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/vizfold` |
 | `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/vizfold` |
-| `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/vizfold` |
 | `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `<scratch>/vizfold` (`/storage/ice1/…`) |
 | `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `<scratch>/vizfold` (`/storage/scratch1/…`) |
 
@@ -120,8 +118,8 @@ re-confirmed in this pass; ⚙️ site profile written and its paths probed live
 4. Nexus's 535 driver is older than the env's NVRTC, so the install pins a matching NVRTC via
    `LD_PRELOAD`; the 10 GB vGPU gets the smaller `1UBQ_1` example. CUDA is capped at 12.8 on every
    x86 site and 12.9 on aarch64 (the 13.x build won't compile OpenFold's extension).
-5. `◐` installs each needed a site-specific fix: nexus an NVRTC pin, anvil a conda-libcurl mmCIF
-   workaround, bridges2 memory / gcc / CUDA-arch / NVRTC adjustments.
+5. `◐` installs each needed a site-specific fix: nexus an NVRTC pin, bridges2 memory / gcc /
+   CUDA-arch / NVRTC adjustments.
 
 ### Settings
 
