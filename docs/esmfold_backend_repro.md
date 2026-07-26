@@ -1,34 +1,26 @@
 # ESMFold Backend Reproducibility Guide
 
-This document describes how to run the HuggingFace-based ESMFold backend with
-VizFold-compatible trace export.
+Verifying the ESMFold backend end to end: inference, trace extraction, and the archive it writes.
 
-It provides instructions for verifying structure inference, attention extraction,
-activation extraction, and expected archive outputs locally and on the ICE cluster.
-
-## Environment Setup (Local)
-
-Create a virtual environment:
+## Environment Setup
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+vizfold install esmfold
+vizfold status                          # prints OPENFOLD_PREFIX and ESMFOLD_ENV_PREFIX
+
+# neither is exported into your shell -- set them from what status printed
+export OPENFOLD_PREFIX=... ESMFOLD_ENV_PREFIX=...
+MM="$OPENFOLD_PREFIX/bin/micromamba"    # drive the backend through its own env
+$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold --help
 ```
 
-Install dependencies (torch first from its own wheel index, then the esmfold project, which pulls
-Transformers and installs the `esmfold` package):
-
-```bash
-pip install torch
-pip install -e ./backends/esmfold
-```
+The installer brings its own Python 3.11 — a login node's `python3` is routinely too old. For a
+manual pip install instead, see Option B in [esmfold.md](esmfold.md#install).
 
 ## Structure-Only Inference Test
 
-Run:
-
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -38,110 +30,76 @@ python scripts/esmfold/run_pretrained_esmf.py \
 Expected outputs:
 
 - `outputs/test_run/meta.json`
+- `outputs/test_run/logs.txt` — written for every run, including `--trace_mode none`
 - `outputs/test_run/structure/predicted.pdb`
-
-Successful execution confirms:
-
-- model loads correctly
-- inference pipeline runs end-to-end
-- archive metadata generation works
+- `outputs/test_run/structure/predicted.pt` — when the model returns coordinates
 
 ## Trace Extraction Test (Attention + Activations)
 
-Run:
-
 ```bash
-python scripts/esmfold/run_pretrained_esmf.py \
+$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \
   --device cpu
 ```
 
-Expected outputs:
+Adds `trace/attention/`, `trace/activations/`, `trace/trunk/`, `trace/index.json`,
+`trace/summary.json`, and top-k text exports in `attention/` at the archive root. The complete
+layout is in [esmfold.md](esmfold.md#output-layout) — check the run against that, not a copy here.
 
-- `outputs/test_trace/meta.json`
-- `outputs/test_trace/structure/predicted.pdb`
-- `outputs/test_trace/trace/`
+`attention/msa_row_attn_layer*.txt` uses OpenFold's own `save_attention_topk` when `openfold` is
+importable, and otherwise reproduces the same format.
 
-Trace directory should contain:
+## Through the Executor
 
-- `trace/attention/`
-- `trace/activations/`
+The same run, recorded in the run database. `queue` prints the run id and the `run` line to follow
+it with; note the queue surface spells its flags with dashes (`--trace-mode`, `--structure-traces`)
+where the script uses underscores.
 
-## Verified Tensor Outputs (Local Validation)
-
-Attention tensors follow expected shape:
-
-`[B, H, N, N]`
-
-where:
-
-- B = batch size
-- H = number of attention heads
-- N = sequence length (after special-token slicing)
-
-This confirms compatibility with VizFold's visualization pipeline.
-
-## Archive Structure Validation
-
-Expected archive layout:
-
-```
-outputs/test_trace/
-├── meta.json
-├── structure/
-│   └── predicted.pdb
-└── trace/
-    ├── attention/
-    └── activations/
+```bash
+vizfold queue esmfold --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta --structure-traces
+vizfold run <RUN_ID>
+vizfold show run <RUN_ID>          # the run and its registered artifacts
 ```
 
-This structure matches the OpenFold-compatible VizFold archive schema.
+`vizfold run 6KWC_1 --backend esmfold` queues and folds the bundled example in one step. Preflight
+checks the GPU, the base command, `input_id`, that `--fasta` is a readable file, and the output dir.
 
 ## Running on ICE Cluster (PACE)
 
-Login:
-
 ```bash
 ssh <gt_username>@login-ice.pace.gatech.edu
+vizfold install esmfold
+vizfold run 6KWC_1 --backend esmfold
 ```
 
-Navigate to the repository:
+The site is `ice-slurm`: `ice-cpu` / `ice-gpu` partitions, `gpu:a100:1`. Two gotchas:
 
-```bash
-cd "$OPENFOLD_HOME"   # the vizfold checkout; the bootstrap clones it to $HOME/vizfold-src
-```
+- `OPENFOLD_GPU_*` governs ESMFold folds too — those settings are what an ESMFold run is `srun`'d
+  onto. The names are OpenFold-prefixed for historical reasons only.
+- The installer takes plain `torch` off PyPI unless told otherwise. For a specific CUDA build,
+  re-run it with a wheel index:
+  `ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu126 vizfold install esmfold`. The
+  verify step prints the torch version and whether CUDA is available.
 
-Activate environment:
+## Verification Checklist
 
-```bash
-source .venv/bin/activate
-```
+Counts from a full `attention+activations` trace of the 6KWC example:
 
-Run the same two commands as above with `--device cuda`; the expected outputs are unchanged.
+- 36 attention tensors in `trace/attention/` (one per ESM-2 layer)
+- 36 + 2 per captured recycling iteration in `trace/activations/` — the extras are
+  `recycle_<i>_s_s` and `recycle_<i>_s_z`, which land in `activations/`, not `trunk/`
+- ~98 Evoformer trunk tensors in `trace/trunk/` (48 blocks × seq/pair, plus final `s_s` and `s_z`)
+- 36 text files in `attention/`
 
+Shapes:
 
-## Additional Intermediate Output Validation
+- attention: `[B, H, N, N]` — `<cls>`/`<eos>` sliced off, so `N` is the sequence length
+- activations: `[B, N, D]` — sliced the same way, so residue indices line up with attention
+- pair representations (`s_z`): `[L, L, C_z]`
 
-The backend exports intermediate outputs beyond encoder attention and activation traces.
+With `--structure_traces`, also check:
 
-Verified local outputs include:
-
-- 36 attention tensors in `trace/attention/`
-- 36 activation tensors in `trace/activations/`
-- ~98 Evoformer trunk intermediate tensors in `trace/trunk/`
-- 36 VizFold attention text files in `attention/`
-
-Expected tensor shapes include:
-
-- attention tensors: `[B, H, N, N]`
-- activation tensors: `[B, N, D]`
-- pair representations (`s_z`): `[N, N, D]`
-
-If recycling outputs are enabled, they are expected to appear under `trace/trunk/` with keys such as:
-
-- `recycle_*_s_s`
-- `recycle_*_s_z`
-
-If structure-module / IPA outputs are enabled, they should also be saved as `.pt` tensors in the trace archive and can be validated separately for expected attention dimensions.
+- `trace/structure_module/ipa_attention/recycle_NN_block_NN.pt`
+- `trace/structure_module/backbone/recycle_NN_positions.pt` and `recycle_NN_states.pt`
