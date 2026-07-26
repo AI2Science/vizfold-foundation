@@ -61,7 +61,7 @@ mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba a
 # one `vizfold serve` builds come from this one copy.
 mamba::ensure() {
     local prefix=$1 mm=$1/bin/micromamba build
-    if [ ! -x "$mm" ]; then
+    if ! "$mm" --version >/dev/null 2>&1; then
         case "$(uname -s)-$(uname -m)" in
             Linux-aarch64|Linux-arm64)   build=linux-aarch64 ;;
             Linux-*)                     build=linux-64 ;;

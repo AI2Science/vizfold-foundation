@@ -289,10 +289,20 @@ fn compose_esmfold_command(
     installed: bool,
 ) -> CommandSpec {
     let command = if installed {
-        CommandSpec {
+        let mut command = CommandSpec {
             program: env_prefix.join("bin/python").display().to_string(),
             ..command.clone()
+        };
+        // The weights (~2.6 GB) download on the first fold. HuggingFace's default puts them in
+        // $HOME/.cache, the quota'd home this install exists to stay off, and nothing ever removes
+        // them; under the env prefix, `vizfold uninstall esmfold` takes them with it.
+        if std::env::var_os("HF_HOME").is_none() {
+            let cache = env_prefix.join("hf");
+            command
+                .env
+                .insert("HF_HOME".to_owned(), cache.display().to_string());
         }
+        command
     } else {
         command.clone()
     };
@@ -321,6 +331,28 @@ fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
+    /// The weights are fetched on the first fold, so the env var has to be on the command that
+    /// runs it -- not just recorded somewhere. Without it HuggingFace writes ~2.6 GB to $HOME.
+    #[test]
+    fn an_installed_esmfold_command_caches_its_weights_under_the_env() {
+        let env = PathBuf::from("/scratch/me/vizfold/envs/vizfold-esmfold");
+        let planned = CommandSpec {
+            program: "python3".to_owned(),
+            ..Default::default()
+        };
+
+        let composed = compose_esmfold_command(&planned, &env, &[], true);
+        assert_eq!(
+            composed.env.get("HF_HOME").map(String::as_str),
+            Some("/scratch/me/vizfold/envs/vizfold-esmfold/hf"),
+            "the fold must not cache weights in $HOME"
+        );
+
+        // Nothing installed means nothing to run, so no cache to redirect either.
+        let bare = compose_esmfold_command(&planned, &env, &[], false);
+        assert!(!bare.env.contains_key("HF_HOME"));
+    }
+
     use std::{
         path::PathBuf,
         sync::{
@@ -345,7 +377,7 @@ mod tests {
         test_support::TestLayout,
     };
 
-    use super::{activate_env_command, compose_exec_command, execute_run};
+    use super::{activate_env_command, compose_esmfold_command, compose_exec_command, execute_run};
 
     #[test]
     fn srun_command_wraps_the_whole_activated_command() {

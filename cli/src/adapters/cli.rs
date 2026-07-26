@@ -146,6 +146,12 @@ impl Backend {
                 paths.push(prefix.join("esmfold-venv"));
                 // Its pip cache, parked beside the prefix by its installer.
                 paths.extend(prefix.parent().map(|dir| dir.join(".esmfold-pip")));
+                // `pip install <dir>` builds in-tree, so setuptools plants these in the checkout --
+                // the same droppings OpenFold's arm removes for its own subtree.
+                paths.extend(
+                    ["build", "esmfold.egg-info"]
+                        .map(|entry| home.join("backends/esmfold").join(entry)),
+                );
             }
             Self::Openfold => {
                 // `params` is where installs before the data-dir move put the weights; a target
@@ -1085,13 +1091,20 @@ fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
     }
     // Tracked edits only: the install builds OpenFold's CUDA extension in place, so this checkout
     // is expected to carry untracked build output, and a checkout preserves it anyway.
-    if !git(&src, &["status", "--porcelain", "--untracked-files=no"])
-        .is_some_and(|out| out.trim().is_empty())
-    {
-        return Err(DbErr::Custom(format!(
-            "{} has uncommitted changes; commit or discard them first",
-            src.display()
-        )));
+    match git(&src, &["status", "--porcelain", "--untracked-files=no"]) {
+        None => {
+            return Err(DbErr::Custom(format!(
+                "cannot read `git status` in {}; is git on PATH and the checkout yours to read?",
+                src.display()
+            )));
+        }
+        Some(changes) if !changes.trim().is_empty() => {
+            return Err(DbErr::Custom(format!(
+                "{} has uncommitted changes; commit or discard them first",
+                src.display()
+            )));
+        }
+        _ => {}
     }
     println!("Updating {} to {target} ...", src.display());
     // The clone is shallow and single-branch: the ref has to be fetched by name to exist here at
@@ -1536,6 +1549,13 @@ fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
     if let Ok(binary) = std::env::current_exe() {
         command.env("VIZFOLD_BIN", binary);
     }
+    // npm caches in $HOME/.npm by default: hundreds of MB and tens of thousands of inodes on
+    // the quota'd home that staging the workbench off it exists to avoid. In the dashboard's
+    // own env dir, which uninstall already removes.
+    command.env(
+        "npm_config_cache",
+        config::env_dir("workbench").join(".npm"),
+    );
     command.env("OPENFOLD_PREFIX", config::prefix());
     // The dashboard reads the sqlite file directly; hand it the plain path (database_url() carries
     // a sqlite://...?mode=rwc wrapper that node:sqlite can't open).
@@ -1717,6 +1737,9 @@ async fn run_execute(
                     submit_openfold_run(
                         database,
                         OpenfoldQueueArgs {
+                            // Only the bundled examples ship alignments; a FASTA of the user's own
+                            // has none, and would otherwise preflight against the examples' dir.
+                            use_precomputed_alignments: fasta.is_none(),
                             fasta: fasta.clone(),
                             ..OpenfoldQueueArgs::for_example(&example, args.attn)
                         },

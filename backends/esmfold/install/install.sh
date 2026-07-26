@@ -34,6 +34,7 @@ esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers, esmfold' 
 
 esmfold::env() {
     log "env $ENV (python $PYTHON_VERSION)"
+    rm -rf "$ENV"   # clear a partial env; create fails on a non-empty dir
     local mm; mm=$(mamba::ensure "$PREFIX")
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
     mkdir -p "$(dirname "$ENV")"
