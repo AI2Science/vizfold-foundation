@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const REPO_ROOT = path.join(process.cwd(), "..", "..", "..");
+const REPO_ROOT = path.join(process.cwd(), "..");
 
 export async function GET(request: NextRequest) {
   const filePath = request.nextUrl.searchParams.get("path");
