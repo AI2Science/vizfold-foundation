@@ -25,13 +25,13 @@ setup::config() {
     esac
     DATA=${OPENFOLD_DATA_DIR:-$STATE/data}           # the one root every data path resolves under
     ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
-    MM=$PREFIX/bin/micromamba
     CUTLASS=$STATE/cutlass
     UNICLUST=$DATA/uniclust30/uniclust30_2018_08
     STEREO=$OF/openfold/resources/stereo_chemical_props.txt
     sentinel=$STATE/.done
 
     export CONDA_PKGS_DIRS=$STATE/pkgs
+    # Unset, micromamba caches packages in $HOME/micromamba -- the quota this whole layout avoids.
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$STATE/tmp
     export PIP_CACHE_DIR=$STATE/pip
     # deepspeed's autotune cache defaults to a quota'd NFS $HOME; setup::activate repeats this for runs.
@@ -46,25 +46,23 @@ setup::config() {
 }
 
 setup::preflight() {
-    mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$OF/openfold/resources"
+    mkdir -p "$TMPDIR" "$DATA" "$OF/openfold/resources"
     hostname
     nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
     echo "prefix=$PREFIX repo=$REPO env=$ENV_DIR data=$DATA max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
     test -f "$OF/setup.py" || die "no openfold backend at $OF; is $REPO a vizfold checkout?"
 }
 
-setup::micromamba() { mamba::ensure "$PREFIX" >/dev/null; }
-
 # By path + --no-rc so a ~/.condarc envs_dirs/channels can't hijack a reproducible env.
 setup::env() {
     rm -rf "$ENV_DIR"   # clear a partial env; create fails on a non-empty dir
-    "$MM" create -y --no-rc -p "$ENV_DIR" -f "$ENV_YML" "cuda-version<=$MAX_CUDA"
+    micromamba create -y --no-rc -p "$ENV_DIR" -f "$ENV_YML" "cuda-version<=$MAX_CUDA"
 }
 
 # activate.d is the one place a fold's runtime variables come from; `micromamba run -p` applies it.
 setup::activate() {
     log activate
-    mamba::activate "$MM" "$ENV_DIR"
+    mamba::activate "$ENV_DIR"
     mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
     cat > "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh" <<ACTIVATE
 export CUTLASS_PATH=$CUTLASS
@@ -106,7 +104,7 @@ print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
 setup::nvrtc_create() {
     local nvrtc=$STATE/nvrtc-$DRIVER_CUDA
     rm -rf "$nvrtc"
-    "$MM" create -y --no-rc -p "$nvrtc" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
+    micromamba create -y --no-rc -p "$nvrtc" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
 }
 
 # Append every run: setup::activate rewrites openfold.sh from scratch, so this must not sit behind the create's sentinel.
@@ -237,14 +235,13 @@ Check it works -- fold the bundled example, onto a GPU node if one is configured
 
 To drive the model yourself, use its own CLI:
 
-  $MM run -p $ENV_DIR openfold --help
+  micromamba run -p $ENV_DIR openfold --help
 EOF
 }
 
 main() {
     setup::config
     setup::preflight
-    step micromamba setup::micromamba
     step env        setup::env
     setup::activate
     step cutlass    setup::cutlass

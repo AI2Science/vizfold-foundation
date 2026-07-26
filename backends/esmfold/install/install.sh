@@ -13,7 +13,6 @@ ESM=$REPO/backends/esmfold
 PREFIX=$(vizfold::prefix)
 STATE=$(vizfold::state esmfold)
 ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
-MM=$PREFIX/bin/micromamba
 # A cluster login node's python3 is routinely older than the package needs, so we bring our own.
 PYTHON_VERSION=3.11
 # Its own state dir: else the 2.5-3 GB torch wheel lands in the ~/.cache/pip quota this install avoids.
@@ -25,11 +24,10 @@ esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers, esmfold' 
 esmfold::env() {
     log "env $ENV (python $PYTHON_VERSION)"
     rm -rf "$ENV"   # clear a partial env; create fails on a non-empty dir
-    mamba::ensure "$PREFIX" >/dev/null
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
     mkdir -p "$(dirname "$ENV")"
     # --no-rc so a user ~/.condarc envs_dirs/channels cannot redirect it.
-    "$MM" create -y --no-rc -p "$ENV" -c conda-forge "python=$PYTHON_VERSION" pip
+    micromamba create -y --no-rc -p "$ENV" -c conda-forge "python=$PYTHON_VERSION" pip
 }
 
 esmfold::install() {
@@ -87,7 +85,7 @@ Check it works -- fold the bundled example, onto a GPU node if one is configured
 
 To drive the model yourself, use its own CLI:
 
-  $MM run -p $ENV esmfold --help
+  micromamba run -p $ENV esmfold --help
 EOF
 }
 main "$@"

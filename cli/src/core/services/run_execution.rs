@@ -88,28 +88,19 @@ pub async fn execute_run(
 
         let command = plan_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
-        // Preflight sees the bare command, the runner an env-wrapped one -- bare where nothing is installed.
+        // Preflight sees the bare command, the runner an env-wrapped one. The CLI's prereq gate
+        // refuses an uninstalled backend before this, so there is no unwrapped fallback to pick.
         let exec_command = match kind {
-            BackendKind::Openfold => {
-                let prefix = config::prefix();
-                compose_exec_command(
-                    &command,
-                    &prefix,
-                    &config::openfold_env_prefix(),
-                    &config::gpu_launch_args(),
-                    config::micromamba(&prefix).is_file(),
-                )
-            }
-            BackendKind::Esmfold => {
-                let env_prefix = config::esmfold_env_prefix();
-                let installed = env_prefix.join("bin/python").is_file();
-                compose_esmfold_command(
-                    &command,
-                    &env_prefix,
-                    &config::gpu_launch_args(),
-                    installed,
-                )
-            }
+            BackendKind::Openfold => compose_exec_command(
+                &command,
+                &config::openfold_env_prefix(),
+                &config::gpu_launch_args(),
+            ),
+            BackendKind::Esmfold => compose_esmfold_command(
+                &command,
+                &config::esmfold_env_prefix(),
+                &config::gpu_launch_args(),
+            ),
         };
 
         let report = match kind {
@@ -221,7 +212,7 @@ async fn mark_failed(
 
 /// `micromamba run -p` applies the env's activate.d hook, where every runtime variable a fold needs
 /// is set -- the same one command `setup::ready` hands the user.
-fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path) -> CommandSpec {
+fn activate_env_command(command: &CommandSpec, env_prefix: &Path) -> CommandSpec {
     let mut args = vec![
         "run".to_owned(),
         "-p".to_owned(),
@@ -230,7 +221,8 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
     ];
     args.extend(command.args.iter().cloned());
     CommandSpec {
-        program: config::micromamba(prefix).display().to_string(),
+        // Off PATH: install.sh puts it in ~/.local/bin, which srun's default --export=ALL carries over.
+        program: "micromamba".to_owned(),
         args,
         ..command.clone()
     }
@@ -239,19 +231,12 @@ fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path)
 /// The env inside srun, streaming always on. srun must stay outermost, or the env is entered on the submit host.
 fn compose_exec_command(
     command: &CommandSpec,
-    prefix: &Path,
     env_prefix: &Path,
     launch: &[String],
-    activate: bool,
 ) -> CommandSpec {
-    let command = if activate {
-        activate_env_command(command, prefix, env_prefix)
-    } else {
-        command.clone()
-    };
     CommandSpec {
         stream: true,
-        ..srun_command(command, launch)
+        ..srun_command(activate_env_command(command, env_prefix), launch)
     }
 }
 
@@ -260,24 +245,18 @@ fn compose_esmfold_command(
     command: &CommandSpec,
     env_prefix: &Path,
     launch: &[String],
-    installed: bool,
 ) -> CommandSpec {
-    let command = if installed {
-        let mut command = CommandSpec {
-            program: env_prefix.join("bin/python").display().to_string(),
-            ..command.clone()
-        };
-        // ~2.6 GB on the first fold; HuggingFace's default is the quota'd $HOME nothing ever cleans.
-        if std::env::var_os("HF_HOME").is_none() {
-            let cache = env_prefix.join("hf");
-            command
-                .env
-                .insert("HF_HOME".to_owned(), cache.display().to_string());
-        }
-        command
-    } else {
-        command.clone()
+    let mut command = CommandSpec {
+        program: env_prefix.join("bin/python").display().to_string(),
+        ..command.clone()
     };
+    // ~2.6 GB on the first fold; HuggingFace's default is the quota'd $HOME nothing ever cleans.
+    if std::env::var_os("HF_HOME").is_none() {
+        let cache = env_prefix.join("hf");
+        command
+            .env
+            .insert("HF_HOME".to_owned(), cache.display().to_string());
+    }
     CommandSpec {
         stream: true,
         ..srun_command(command, launch)
@@ -312,16 +291,12 @@ mod tests {
             ..Default::default()
         };
 
-        let composed = compose_esmfold_command(&planned, &env, &[], true);
+        let composed = compose_esmfold_command(&planned, &env, &[]);
         assert_eq!(
             composed.env.get("HF_HOME").map(String::as_str),
             Some("/scratch/me/vizfold/envs/vizfold-esmfold/hf"),
             "the fold must not cache weights in $HOME"
         );
-
-        // Nothing installed means nothing to run, so no cache to redirect either.
-        let bare = compose_esmfold_command(&planned, &env, &[], false);
-        assert!(!bare.env.contains_key("HF_HOME"));
     }
 
     use std::{
@@ -337,7 +312,7 @@ mod tests {
 
     use crate::core::{
         commands::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner},
-        db,
+        config, db,
         entities::runs as run_entity,
         services::{
             execution_targets::{self, RegisterExecutionTargetInput},
@@ -385,14 +360,11 @@ mod tests {
             current_dir: Some(PathBuf::from("/repo")),
             ..Default::default()
         };
-        let wrapped = activate_env_command(
-            &command,
-            &PathBuf::from("/work/of"),
-            &PathBuf::from("/work/of/envs/vizfold-openfold"),
-        );
+        let wrapped =
+            activate_env_command(&command, &PathBuf::from("/work/of/envs/vizfold-openfold"));
 
         // No shell, so nothing is re-quoted; `run -p` applies the env's activate.d hook.
-        assert_eq!(wrapped.program, "/work/of/bin/micromamba");
+        assert_eq!(wrapped.program, "micromamba");
         assert_eq!(
             wrapped.args,
             [
@@ -418,10 +390,8 @@ mod tests {
 
         let composed = compose_exec_command(
             &command,
-            &PathBuf::from("/work/of"),
             &PathBuf::from("/work/of/envs/vizfold-openfold"),
             &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
-            true,
         );
 
         // srun outermost: the reverse enters the env on the submit host, not the compute node.
@@ -431,7 +401,7 @@ mod tests {
             [
                 "-p",
                 "gpu",
-                "/work/of/bin/micromamba",
+                "micromamba",
                 "run",
                 "-p",
                 "/work/of/envs/vizfold-openfold",
@@ -619,8 +589,19 @@ mod tests {
             .expect("command lock")
             .clone()
             .expect("planned command");
-        assert_eq!(command.program, "python3");
-        assert_eq!(command.args, vec!["-u", "run_openfold.py"]);
+        // The plan is always wrapped: the CLI's gate refuses an uninstalled backend before this.
+        assert_eq!(command.program, "micromamba");
+        assert_eq!(
+            command.args,
+            vec![
+                "run",
+                "-p",
+                &config::openfold_env_prefix().display().to_string(),
+                "python3",
+                "-u",
+                "run_openfold.py"
+            ]
+        );
         assert!(command.stream, "long-running folds must stream output");
         let updated = run_entity::Entity::find_by_id(run.id)
             .one(&db)
@@ -652,13 +633,18 @@ mod tests {
 
         assert!(called.load(Ordering::SeqCst));
         assert_eq!(result.output.expect("output").exit_code, 0);
-        // Nothing installed in tests, so the program stays bare python3.
         let command = command
             .lock()
             .expect("command lock")
             .clone()
             .expect("planned command");
-        assert_eq!(command.program, "python3");
+        assert_eq!(
+            command.program,
+            config::esmfold_env_prefix()
+                .join("bin/python")
+                .display()
+                .to_string()
+        );
         assert!(command.args.contains(&"--fasta".into()));
         assert!(command.args.contains(&"--out".into()));
         assert_pair(&command.args, "--device", "cpu");

@@ -105,11 +105,6 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| prefix().join("openfold/data"))
 }
 
-/// The one micromamba every environment is created and run through. Mirrors `mamba::ensure`.
-pub fn micromamba(prefix: &Path) -> PathBuf {
-    prefix.join("bin/micromamba")
-}
-
 /// The one directory holding every environment. Mirrors `vizfold::env_base`.
 pub fn env_base() -> PathBuf {
     resolved("VIZFOLD_ENV_BASE")

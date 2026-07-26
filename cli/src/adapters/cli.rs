@@ -407,21 +407,54 @@ fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
     cpus.min(max_cpus)
 }
 
+/// What each command needs sound before it starts, in `health`'s vocabulary -- the one place a
+/// prerequisite is refused, so no command grows its own check. `Status` names none: it reports.
+fn prereqs(command: &Command) -> Vec<Component> {
+    // `run <id>` replays the run's own backend, which this gate cannot read without the DB; it
+    // checks the default instead, so uninstalling a backend out from under a queued run still
+    // reaches the runner -- which then names the missing interpreter by path.
+    let backend = |explicit: Option<Backend>| {
+        backend_health(
+            explicit
+                .or_else(|| default_backend().ok())
+                .unwrap_or(Backend::Openfold),
+        )
+    };
+    match command {
+        Command::Status | Command::Uninstall(_) | Command::Update(_) | Command::SelfUpdate(_) => {
+            vec![]
+        }
+        Command::Install(_) => vec![core_deps_health()],
+        Command::List(ListArgs {
+            resource: ListResource::Examples { .. },
+        }) => vec![repo_health()],
+        Command::Serve(_) => vec![core_deps_health(), repo_health(), config_health()],
+        Command::Download(args) => vec![config_health(), backend(Some(args.backend))],
+        Command::Queue(args) => vec![
+            config_health(),
+            backend(Some(match args.model {
+                QueueModel::Openfold(_) => Backend::Openfold,
+                QueueModel::Esmfold(_) => Backend::Esmfold,
+            })),
+        ],
+        Command::Run(args) => vec![core_deps_health(), config_health(), backend(args.backend)],
+        _ => vec![config_health()],
+    }
+}
+
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // These have to work before a config exists.
-    if !matches!(
-        cli.command,
-        Command::Install(_)
-            | Command::Uninstall(_)
-            | Command::Status
-            | Command::Update(_)
-            | Command::SelfUpdate(_)
-    ) && !config::is_initialized()
-    {
-        eprintln!("run `vizfold install openfold` first");
-        std::process::exit(1);
+    // Ok and Unverified proceed: an unreachable scheduler must not stop a local fold.
+    for component in prereqs(&cli.command).into_iter().map(settled) {
+        if matches!(component.state, State::Absent | State::Broken) {
+            eprintln!("{}: {}", component.name, component.detail);
+            for problem in &component.problems {
+                eprintln!("  {problem}");
+            }
+            eprintln!("  -> {}", component.remedy);
+            std::process::exit(1);
+        }
     }
 
     // These touch the filesystem only; they need no database connection.
@@ -640,9 +673,21 @@ impl State {
     }
 }
 
+/// `Broken` is derived, never tracked: a component that found problems is broken by definition.
+fn settled(component: Component) -> Component {
+    match component.problems.is_empty() {
+        true => component,
+        false => Component {
+            state: State::Broken,
+            ..component
+        },
+    }
+}
+
 /// Everything `vizfold status` can settle about an install without folding anything.
 fn health() -> Vec<Component> {
     [
+        core_deps_health(),
         binary_health(),
         repo_health(),
         config_health(),
@@ -651,14 +696,44 @@ fn health() -> Vec<Component> {
         scheduler_health(),
     ]
     .into_iter()
-    .map(|component| match component.problems.is_empty() {
-        true => component,
-        false => Component {
-            state: State::Broken,
-            ..component
-        },
-    })
+    .map(settled)
     .collect()
+}
+
+/// Executable, not merely present: a failed fetch leaves the truncated file `install.sh` skips over.
+fn executable(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| {
+        meta.is_file() && std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0
+    })
+}
+
+/// PATH lookup, so nothing has to record where the bootstrap put a core dependency.
+fn on_path(program: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(program))
+        .find(|path| executable(path))
+}
+
+/// What `install.sh` puts beside the vizfold binary. Every environment is created and run through it.
+fn core_deps_health() -> Component {
+    let found = on_path("micromamba");
+    Component {
+        name: "core deps",
+        detail: found.as_ref().map_or_else(
+            || "micromamba".to_owned(),
+            |path| path.display().to_string(),
+        ),
+        problems: found
+            .is_none()
+            .then(|| "no executable `micromamba` on PATH".to_owned())
+            .into_iter()
+            .collect(),
+        remedy: format!(
+            "curl -fsSL https://raw.githubusercontent.com/{}/main/install.sh | bash",
+            release::repo()
+        ),
+        ..Default::default()
+    }
 }
 
 fn binary_health() -> Component {
@@ -716,7 +791,8 @@ fn config_health() -> Component {
         return Component {
             name: "config",
             state: State::Absent,
-            detail: "not initialized; run `vizfold install <backend>`".to_owned(),
+            detail: "not initialized".to_owned(),
+            remedy: "vizfold install <backend>".to_owned(),
             ..Default::default()
         };
     }
@@ -796,6 +872,7 @@ fn backend_health(backend: Backend) -> Component {
             name: backend.slug(),
             state: State::Absent,
             detail: format!("not installed ({})", env.display()),
+            remedy: format!("vizfold install {}", backend.slug()),
             ..Default::default()
         };
     }
@@ -1201,7 +1278,9 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             {
                 let _ = std::fs::remove_dir(dir);
             }
-            println!("\nKept: fold outputs, the vizfold checkout, and the vizfold binary itself.");
+            println!(
+                "\nKept: fold outputs, the vizfold checkout, and the binaries in ~/.local/bin (vizfold, micromamba)."
+            );
         }
     }
     Ok(())
@@ -1214,8 +1293,7 @@ fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         config::env_dir("workbench"),
         prefix.join("vizfold.db"),
         config::config_file(),
-        // micromamba and its root serve every environment, so they outlive any one backend.
-        config::micromamba(prefix),
+        // The package cache outlives any one backend; the binary is bootstrap state, beside `vizfold` itself.
         prefix.join("mamba"),
     ];
     // The staged copy only; with no prefix settled the two are one path, the source tree.
@@ -1375,12 +1453,11 @@ fn ensure_node() -> Result<PathBuf, DbErr> {
     if let Some(system) = system_node_bin() {
         return Ok(system);
     }
-    let micromamba = ensure_micromamba()?;
     println!("Provisioning Node (first run only)...");
     // --no-rc so a user ~/.condarc envs_dirs/channels can't hijack it, as the backend installs do.
     run_to_completion(
         "provisioning Node",
-        std::process::Command::new(&micromamba)
+        std::process::Command::new("micromamba")
             .args([
                 "create",
                 "-y",
@@ -1394,35 +1471,6 @@ fn ensure_node() -> Result<PathBuf, DbErr> {
             .env("MAMBA_ROOT_PREFIX", config::prefix().join("mamba")),
     )?;
     Ok(bin)
-}
-
-/// The one micromamba, fetched the way `mamba::ensure` does when no backend is installed yet.
-fn ensure_micromamba() -> Result<PathBuf, DbErr> {
-    let prefix = config::prefix();
-    let micromamba = config::micromamba(&prefix);
-    if micromamba.is_file() {
-        return Ok(micromamba);
-    }
-    let arch = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64" | "arm64") => "osx-arm64",
-        ("macos", _) => "osx-64",
-        (_, "aarch64" | "arm64") => "linux-aarch64",
-        _ => "linux-64",
-    };
-    std::fs::create_dir_all(prefix.join("bin")).map_err(|error| {
-        DbErr::Custom(format!(
-            "failed to create '{}/bin': {error}",
-            prefix.display()
-        ))
-    })?;
-    run_to_completion(
-        "fetching micromamba",
-        std::process::Command::new("sh").arg("-c").arg(format!(
-            "curl -fsSL 'https://micro.mamba.pm/api/micromamba/{arch}/latest' | tar -xj -C '{}' bin/micromamba",
-            prefix.display()
-        )),
-    )?;
-    Ok(micromamba)
 }
 
 fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
@@ -2411,10 +2459,11 @@ mod tests {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
         assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
-        // micromamba serves the workbench env too; one backend's uninstall must not take it.
-        for shared in [prefix.join("mamba"), config::micromamba(&prefix)] {
-            assert!(!paths.contains(&shared), "{} is shared", shared.display());
-        }
+        // The package cache serves the workbench env too; one backend's uninstall must not take it.
+        assert!(
+            !paths.contains(&prefix.join("mamba")),
+            "the cache is shared"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -2550,6 +2599,27 @@ mod tests {
                 component.problems.len()
             );
         }
+    }
+
+    /// A failed micromamba fetch leaves a truncated, non-executable file; reading that as installed
+    /// sends the user into `Permission denied` from inside an installer instead of at the gate.
+    #[test]
+    fn a_present_but_non_executable_file_is_not_the_dependency() {
+        let dir = std::env::temp_dir().join(format!("vizfold-exec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("micromamba");
+        std::fs::write(&program, "").unwrap();
+
+        assert!(!super::executable(&program), "0644 is not runnable");
+        std::fs::set_permissions(
+            &program,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        assert!(super::executable(&program));
+        assert!(!super::executable(&dir), "a directory is not a program");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -209,8 +209,7 @@ records the run. To use the backend on its own instead, run its CLI inside its e
 `vizfold install openfold` prints this line:
 
 ```bash
-/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba \
-  run -p /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold openfold --help
+micromamba run -p /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold openfold --help
 ```
 
 `run -p` applies the environment's `activate.d` hook — `CUTLASS_PATH`, `OPENFOLD_DATA_DIR`, the

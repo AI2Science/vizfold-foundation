@@ -28,7 +28,9 @@ config::file() {
 # environment first, then the file's own keys, in any order. No commands run; an unknown name is empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
-    [ -r "$file" ] && command -v python3 >/dev/null || return 0
+    [ -r "$file" ] || return 0
+    # Not a missing file: without python3 every site default and saved answer is silently lost.
+    command -v python3 >/dev/null || die "no python3 on PATH: cannot read or write $file"
     echo "$label: $file" >&2
     # `if`, not `&&`: a skipped last line would return non-zero and abort a set -e caller.
     while IFS='=' read -r key value; do
@@ -53,25 +55,8 @@ for k, v in scope.items():
     return 0
 }
 
-# Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
-mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
-
-# One micromamba at <prefix>/bin, downloaded once: every environment comes from this copy.
-mamba::ensure() {
-    local prefix=$1 mm=$1/bin/micromamba build
-    if ! "$mm" --version >/dev/null 2>&1; then
-        case "$(uname -s)-$(uname -m)" in
-            Linux-aarch64|Linux-arm64)   build=linux-aarch64 ;;
-            Linux-*)                     build=linux-64 ;;
-            Darwin-arm64|Darwin-aarch64) build=osx-arm64 ;;
-            Darwin-*)                    build=osx-64 ;;
-            *) die "no micromamba build for $(uname -s)-$(uname -m)" ;;
-        esac
-        mkdir -p "$prefix"
-        curl -fsSL "https://micro.mamba.pm/api/micromamba/$build/latest" | tar -xj -C "$prefix" bin/micromamba
-    fi
-    echo "$mm"
-}
+# Activate a micromamba env ($1, a name or path). set +u: the conda gcc hook reads SYS_SYSROOT unset.
+mamba::activate() { set +u; eval "$(micromamba shell hook --shell bash)"; micromamba activate "$1"; set -u; }
 
 # The previous install's answers. Never at source time: that would land them ahead of live discovery.
 # Called after <site>.json, fixing the precedence at
