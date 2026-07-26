@@ -16,7 +16,7 @@ run time.
 Releases are Linux only, x86_64 or aarch64. Two steps on a cluster. First bootstrap the CLI:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 ```
 
 That fetches the prebuilt binary for your architecture from the latest GitHub release into

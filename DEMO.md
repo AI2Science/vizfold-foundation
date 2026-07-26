@@ -11,7 +11,7 @@ The `vizfold` binary and an installed OpenFold backend — the two-command boots
 [README](README.md#install):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 vizfold install openfold
 ```
 

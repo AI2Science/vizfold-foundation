@@ -33,7 +33,7 @@ bootstrap::asset() {
 bootstrap::download() {
     mkdir -p "$BIN"
     echo "downloading $ASSET ($VERSION) from $REPO ..."
-    curl -fSL "$URL" -o "$BIN/vizfold" ||
+    curl -fsSL "$URL" -o "$BIN/vizfold" ||
         die "download failed: $URL -- check that a release with this asset exists (set VIZFOLD_VERSION to pin one)"
     chmod +x "$BIN/vizfold"
     echo "installed vizfold to $BIN/vizfold"

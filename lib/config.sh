@@ -68,7 +68,7 @@ mamba::ensure() {
             *) die "no micromamba build for $(uname -s)-$(uname -m)" ;;
         esac
         mkdir -p "$prefix"
-        curl -Ls "https://micro.mamba.pm/api/micromamba/$build/latest" | tar -xj -C "$prefix" bin/micromamba
+        curl -fsSL "https://micro.mamba.pm/api/micromamba/$build/latest" | tar -xj -C "$prefix" bin/micromamba
     fi
     echo "$mm"
 }
