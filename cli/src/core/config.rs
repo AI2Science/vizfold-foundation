@@ -106,12 +106,6 @@ pub fn default_src() -> PathBuf {
     PathBuf::from(format!("{}/vizfold-src", home_dir()))
 }
 
-/// The site's AlphaFold2 mirror, when one is configured. Where the databases and the parameters
-/// really live; everything under `data_dir` is linked from here.
-pub fn af2_root() -> Option<PathBuf> {
-    resolved("OPENFOLD_AF2_ROOT").map(PathBuf::from)
-}
-
 pub fn data_dir() -> PathBuf {
     resolved("OPENFOLD_DATA_DIR")
         .map(PathBuf::from)
