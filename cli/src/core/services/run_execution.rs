@@ -220,12 +220,27 @@ fn activate_env_command(command: &CommandSpec, env_prefix: &Path) -> CommandSpec
         command.program.clone(),
     ];
     args.extend(command.args.iter().cloned());
-    CommandSpec {
+    let mut wrapped = CommandSpec {
         // Off PATH: install.sh puts it in ~/.local/bin, which srun's default --export=ALL carries over.
         program: "micromamba".to_owned(),
         args,
         ..command.clone()
+    };
+    // Carried, not left to the env's activate.d hook: that hook is written by whichever installer
+    // built the env, so a fold through an older one runs without them. Triton's default is NFS $HOME.
+    let user = std::env::var("USER").unwrap_or_else(|_| "vizfold".to_owned());
+    for (key, value) in [
+        (
+            "OPENFOLD_DATA_DIR",
+            config::data_dir().display().to_string(),
+        ),
+        ("TRITON_CACHE_DIR", format!("/tmp/vizfold-triton-{user}")),
+    ] {
+        if std::env::var_os(key).is_none() {
+            wrapped.env.entry(key.to_owned()).or_insert(value);
+        }
     }
+    wrapped
 }
 
 /// The env inside srun, streaming always on. srun must stay outermost, or the env is entered on the submit host.
@@ -378,6 +393,19 @@ mod tests {
             ]
         );
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
+    }
+
+    /// An env's activate.d hook is written by whichever installer built it, so the fold carries its
+    /// own: through an older env it would otherwise run with neither set.
+    #[test]
+    fn the_fold_carries_the_data_root_and_a_node_local_cache() {
+        let wrapped = activate_env_command(&CommandSpec::default(), &PathBuf::from("/env"));
+
+        assert_eq!(
+            wrapped.env.get("OPENFOLD_DATA_DIR").map(String::as_str),
+            Some(config::data_dir().display().to_string().as_str())
+        );
+        assert!(wrapped.env["TRITON_CACHE_DIR"].starts_with("/tmp/"));
     }
 
     #[test]
