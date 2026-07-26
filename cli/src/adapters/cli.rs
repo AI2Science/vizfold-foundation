@@ -183,6 +183,19 @@ impl Backend {
                     ]
                     .map(|entry| backend.join(entry)),
                 );
+                // The CUDA extension, named for the Python ABI and arch that built it. Left behind
+                // it would be importable against an environment it was not built for.
+                paths.extend(
+                    std::fs::read_dir(&backend)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|entry| entry.path())
+                        .filter(|path| {
+                            path.extension().is_some_and(|ext| ext == "so")
+                                && file_name(path).starts_with("attn_core_inplace_cuda.")
+                        }),
+                );
             }
         }
         paths
@@ -1070,7 +1083,11 @@ fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
             src.display()
         )));
     }
-    if !git(&src, &["status", "--porcelain"]).is_some_and(|out| out.trim().is_empty()) {
+    // Tracked edits only: the install builds OpenFold's CUDA extension in place, so this checkout
+    // is expected to carry untracked build output, and a checkout preserves it anyway.
+    if !git(&src, &["status", "--porcelain", "--untracked-files=no"])
+        .is_some_and(|out| out.trim().is_empty())
+    {
         return Err(DbErr::Custom(format!(
             "{} has uncommitted changes; commit or discard them first",
             src.display()
@@ -2481,6 +2498,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(prefix.join("nvrtc-12.2")).unwrap();
         std::fs::create_dir_all(prefix.join("outputs")).unwrap();
+        // The editable install's extension, named for the Python ABI and arch that built it.
+        let backend = home.join("backends/openfold");
+        std::fs::create_dir_all(&backend).unwrap();
+        let extension = backend.join("attn_core_inplace_cuda.cpython-311-x86_64-linux-gnu.so");
+        std::fs::write(&extension, "").unwrap();
 
         let paths = Backend::Openfold.install_paths(&prefix, &home);
 
@@ -2493,6 +2515,7 @@ mod tests {
             // Under the backend subtree, where setup.sh actually plants them.
             home.join("backends/openfold/openfold/resources/params"),
             home.join("backends/openfold/openfold.egg-info"),
+            extension,
         ] {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
