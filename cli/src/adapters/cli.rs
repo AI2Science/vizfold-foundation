@@ -884,10 +884,8 @@ fn missing(what: &str, path: PathBuf) -> Option<String> {
     (!path.is_file()).then(|| format!("no {what} at {}", path.display()))
 }
 
-/// A fold reads the weights through the checkout: `run_pretrained_openfold.py` resolves them
-/// relative to the installed `openfold` package, and the install is editable. So that link is what
-/// has to resolve -- but naming where they really are is the difference between replanting a
-/// symlink and fetching 4 GB.
+/// The checkout link is what has to resolve: run_pretrained_openfold.py finds the weights relative
+/// to the installed `openfold` package, and the install is editable.
 fn params_problem() -> Option<String> {
     let mirror = config::resolved("OPENFOLD_AF2_ROOT").map(PathBuf::from);
     params_problem_in(
@@ -899,7 +897,6 @@ fn params_problem() -> Option<String> {
     )
 }
 
-/// `sources` in preference order: the site's mirror, then where the install downloads.
 fn params_problem_in(reached: &Path, sources: &[PathBuf]) -> Option<String> {
     const WEIGHTS: &str = "params/params_model_1_ptm.npz";
     let reached = reached.join(WEIGHTS);
