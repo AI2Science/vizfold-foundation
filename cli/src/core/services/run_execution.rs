@@ -14,9 +14,8 @@ use crate::core::{
 
 use super::runs::{self, UpdateRunStatusInput};
 
-/// Which backend a run targets. Selects the preflight and the way the planned command is wrapped
-/// for execution; the schema-driven planner and artifact registration are shared. Unknown slugs
-/// fall through to OpenFold (the default backend, and what the execution tests register).
+/// Selects the preflight and the env wrapping; planning and artifact registration are shared.
+/// Unknown slugs fall through to OpenFold, which is what the execution tests register.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BackendKind {
     Openfold,
@@ -46,8 +45,7 @@ pub struct ExecutionOutcome {
     pub output: Option<CommandOutput>,
 }
 
-/// Plans and executes a run stored in the executor database, dispatching preflight and env
-/// wrapping on the run's model backend (OpenFold or ESMFold).
+/// Plans and executes a run stored in the executor database.
 pub async fn execute_run(
     db: &DatabaseConnection,
     run_id: i32,
@@ -91,7 +89,6 @@ pub async fn execute_run(
             ))
         })?;
 
-        // The shared schema-driven planner emits either backend's CLI from its parameter schema.
         let command = plan_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
         // Preflight validates the bare command; the runner gets an env-wrapped one so the model's
@@ -305,8 +302,7 @@ fn compose_esmfold_command(
     }
 }
 
-/// Prefix a command with the SLURM launcher. Applied *outside* the micromamba wrapper so the
-/// environment is activated on the compute node, not the submit host.
+/// Prefix a command with the SLURM launcher.
 fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
     let Some((program, prefix)) = launch.split_first() else {
         return command;

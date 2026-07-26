@@ -1,9 +1,7 @@
 //! The schema-driven command planner, shared by every backend.
 //!
 //! A backend's invocation profile declares its CLI in JSON; this turns that declaration plus a
-//! run's parameters into a CommandSpec. `run_execution` calls it for OpenFold and ESMFold alike --
-//! it lived in the OpenFold runner, which is most of why that file was ten times the size of the
-//! ESMFold one.
+//! run's parameters into a CommandSpec. `run_execution` calls it for OpenFold and ESMFold alike.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -15,6 +13,7 @@ use crate::core::{
     commands::CommandSpec,
     entities::{execution_targets, model_backends, model_invocation_profiles, runs},
     output_locations::resolve_output_location,
+    services::validation::require_json_object,
 };
 
 pub(crate) fn plan_command(
@@ -25,20 +24,21 @@ pub(crate) fn plan_command(
 ) -> Result<CommandSpec, DbErr> {
     validate_entity_consistency(invocation_profile)?;
 
-    let config = parse_object(
+    let config = require_json_object(
         "model invocation profile config_json",
         &invocation_profile.config_json,
     )?;
-    let model_schema = parse_object(
+    let model_schema = require_json_object(
         "model backend parameter_schema_json",
         &model_backend.parameter_schema_json,
     )?;
-    let available_resources = parse_object(
+    let available_resources = require_json_object(
         "execution target available_resources_json",
         &execution_target.available_resources_json,
     )?;
-    let model_parameters = parse_object("run model_parameters_json", &run.model_parameters_json)?;
-    let execution_parameters = parse_object(
+    let model_parameters =
+        require_json_object("run model_parameters_json", &run.model_parameters_json)?;
+    let execution_parameters = require_json_object(
         "run execution_parameters_json",
         &run.execution_parameters_json,
     )?;
@@ -74,9 +74,7 @@ pub(crate) fn plan_command(
         args.extend(["--use_precomputed_alignments".into(), alignment_dir]);
     }
 
-    // Intentionally do not emit model_preset. The OpenFold script used by this
-    // repository currently exposes --config_preset, and model_preset is not part
-    // of the MVP OpenFold parameter schema.
+    // No model_preset: this repository's OpenFold script exposes --config_preset instead.
 
     Ok(CommandSpec {
         program,
@@ -87,12 +85,12 @@ pub(crate) fn plan_command(
     })
 }
 
-pub(crate) fn validate_entity_consistency(
+fn validate_entity_consistency(
     invocation_profile: &model_invocation_profiles::Model,
 ) -> Result<(), DbErr> {
     if invocation_profile.invocation_kind != "local_subprocess" {
         return Err(DbErr::Custom(format!(
-            "OpenFold planner only supports local_subprocess invocation profiles, got '{}'",
+            "command planner only supports local_subprocess invocation profiles, got '{}'",
             invocation_profile.invocation_kind
         )));
     }
@@ -100,7 +98,7 @@ pub(crate) fn validate_entity_consistency(
     Ok(())
 }
 
-pub(crate) fn append_model_schema_args(
+fn append_model_schema_args(
     args: &mut Vec<String>,
     model_schema: &Value,
     model_parameters: &Value,
@@ -247,7 +245,7 @@ pub(crate) fn resolve_declared_value(
     }
 }
 
-pub(crate) fn required_invocation_profile_config_string(
+fn required_invocation_profile_config_string(
     config: &Value,
     parameter_name: &str,
 ) -> Result<String, DbErr> {
@@ -343,17 +341,6 @@ pub(crate) fn validate_execution_parameters_against_available_resources(
     }
 
     Ok(())
-}
-
-pub(crate) fn parse_object(field_name: &str, raw: &str) -> Result<Value, DbErr> {
-    let value: Value = serde_json::from_str(raw)
-        .map_err(|error| DbErr::Custom(format!("{field_name} must be valid JSON: {error}")))?;
-
-    if !value.is_object() {
-        return Err(DbErr::Custom(format!("{field_name} must be a JSON object")));
-    }
-
-    Ok(value)
 }
 
 pub(crate) fn parse_env(config: &Value) -> Result<BTreeMap<String, String>, DbErr> {

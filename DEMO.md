@@ -26,7 +26,7 @@ COMPONENT  STATUS  DETAIL
 ---------  ------  ------
 binary     ok      0.5.0 (latest)
 repo       ok      /u/yjayawardana/vizfold-src at v0.5.0
-config     ok      20 keys
+config     ok      19 keys
 openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
 scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
@@ -62,16 +62,14 @@ every reader treats as unset. The values are resolved live during install — on
 data directory land under your `/work/nvme` allocation. Everything after this point reads them from
 `vizfold.json`.
 
-`status` leads with the health of each part rather than only reporting the config: it checks the key
-set against this binary's, that every path exists, that the environment and the AlphaFold2
-parameters are in place, and that the scheduler knows the accounts and partitions. Anything wrong
+`status` leads with the health of each part rather than only reporting the config; anything wrong
 is listed under `Problems:` with the command that fixes it.
 
 ## 1. Seed the executor records
 
-Once per install, create the catalog the runs reference — the OpenFold backend, the local
-execution target, and the invocation profile that ties them together. It is existence-guarded, so
-re-running is harmless.
+Queueing a run seeds these records for you; run this to create the catalog up front — the OpenFold
+backend, the local execution target, and the invocation profile that ties them together. It is
+existence-guarded, so re-running is harmless.
 
 ```bash
 vizfold seed
@@ -91,7 +89,7 @@ vizfold list profiles
 
 ## 2. Queue a run
 
-Queue the bundled example, 6KWC (a ~190-residue monomer). On a cluster install the input paths all
+Queue the bundled example, 6KWC (a 191-residue monomer). On a cluster install the input paths all
 default off the config and the checkout examples, and the sequence is read from the FASTA, so the
 id is the only flag you need:
 
@@ -121,10 +119,9 @@ What the omitted flags default to (all overridable — see `vizfold queue-run op
 | `--use-precomputed-alignments` | `true` — reuse `alignment-dir/6KWC_1`, skipping the MSA search |
 
 The id and the sequence both come from the FASTA's header record, so they cannot disagree with what
-is folded; pass `--fasta <path>` to fold one of your own and `--input-id` becomes optional. With
-precomputed alignments enabled the directory `alignment-dir/<input-id>` (here
-`examples/monomer/alignments/6KWC_1`) must exist. The queue step canonicalizes and stores absolute
-paths in the run record, so all inputs must be present when you queue.
+is folded; pass `--fasta <path>` to fold one of your own and `--input-id` becomes optional. The
+queue step canonicalizes and stores absolute paths in the run record, so all inputs must be present
+when you queue.
 
 ## 3. Execute the run
 
@@ -237,20 +234,20 @@ ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu
 ## Driving the model directly
 
 Everything above goes through the executor, which fills the model's arguments in from the config
-and records the run. To use the backend on its own instead, activate its environment and call its
-CLI — `vizfold install openfold` prints the activation:
+and records the run. To use the backend on its own instead, run its CLI inside its environment —
+`vizfold install openfold` prints this line:
 
 ```bash
-export MAMBA_ROOT_PREFIX=/work/nvme/bbol/yjayawardana/vizfold/mamba
-eval "$(/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba shell hook --shell bash)"
-micromamba activate /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
-
-openfold --help                 # or: python -m openfold --help
+/work/nvme/bbol/yjayawardana/vizfold/bin/micromamba \
+  run -p /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold openfold --help
 ```
 
-That is the model's own CLI, so every path is yours to pass — the databases, the alignment
-directory, the output directory. ESMFold's environment works the same way, as `esmfold` or
-`python -m esmfold`. Nothing about either needs the `vizfold` binary on your `PATH`.
+`micromamba run -p` applies the environment's activation hooks — `CUTLASS_PATH`, the library
+paths, and the NVRTC `LD_PRELOAD` where the install pinned one — so the model sees exactly what it
+sees under `vizfold fold`. That is the model's own CLI, so every path is yours to pass: the
+databases, the alignment directory, the output directory. ESMFold's environment needs no
+activation hooks, so `$ESMFOLD_ENV_PREFIX/bin/esmfold --help` is enough there. Nothing about either
+needs the `vizfold` binary on your `PATH`.
 
 ## Common failure modes
 

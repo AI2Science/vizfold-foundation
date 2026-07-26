@@ -1,8 +1,7 @@
 # ESMFold Backend Reproducibility Guide
 
 This document describes how to run the HuggingFace-based ESMFold backend with
-VizFold-compatible trace export using the shared `feature/esmfold-backend`
-integration branch.
+VizFold-compatible trace export.
 
 It provides instructions for verifying structure inference, attention extraction,
 activation extraction, and expected archive outputs locally and on the ICE cluster.
@@ -72,12 +71,6 @@ Trace directory should contain:
 
 ## Verified Tensor Outputs (Local Validation)
 
-Successful execution produces:
-
-- 36 attention tensors
-- 36 activation tensors
-- 72 total `.pt` trace tensors
-
 Attention tensors follow expected shape:
 
 `[B, H, N, N]`
@@ -126,34 +119,7 @@ Activate environment:
 source .venv/bin/activate
 ```
 
-Run structure inference:
-
-```bash
-python scripts/esmfold/run_pretrained_esmf.py \
-  --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
-  --out outputs/test_run \
-  --trace_mode none \
-  --device cuda
-```
-
-Run trace extraction:
-
-```bash
-python scripts/esmfold/run_pretrained_esmf.py \
-  --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
-  --out outputs/test_trace \
-  --trace_mode attention+activations \
-  --device cuda
-```
-
-Expected outputs:
-
-- `structure/predicted.pdb`
-- `meta.json`
-- `trace/attention/`
-- `trace/activations/`
-
-GPU execution confirms cluster compatibility for larger inference workloads.
+Run the same two commands as above with `--device cuda`; the expected outputs are unchanged.
 
 
 ## Additional Intermediate Output Validation

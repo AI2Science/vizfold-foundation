@@ -5,20 +5,17 @@
 [ -n "${CONFIG_SH:-}" ] && return 0
 CONFIG_SH=1
 
-# The checkout root every backend shares. OPENFOLD_HOME wins (exported by `vizfold install`);
-# otherwise it is one level up from this neutral lib at lib/config.sh.
+# The checkout root every backend shares; OPENFOLD_HOME is exported by `vizfold install`.
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-# The OpenFold backend subtree, for OpenFold's own scripts (esmfold never reads OF). Backend-local
-# files (setup.py, environment.yml, install/) live here; shared demo assets (examples/) at the root.
+# OpenFold-only subtree (setup.py, environment.yml, install/); shared assets like examples/ stay at the root.
 OF=$REPO/backends/openfold
 die() { echo "FATAL: $*" >&2; exit 1; }
 
 # Progress line, shared so every installer's output reads the same.
 log() { echo "== $* (+$((SECONDS))s)"; }
 
-# The install root, and the one base directory every environment it creates lives in under a fixed
-# vizfold-<backend> name -- so one directory holds them all and nothing has to be told where any of
-# them is. Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
+# The install root and the one env base under it, each env a fixed vizfold-<backend> name.
+# Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
 vizfold::prefix() { echo "${OPENFOLD_PREFIX:-$HOME/openfold}"; }
 vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-$(vizfold::prefix)/envs}"; }
 vizfold::env() { echo "$(vizfold::env_base)/vizfold-$1"; }
@@ -28,9 +25,8 @@ config::file() {
 }
 
 # Fill unset vars from a JSON file, never overwriting -- so inline > user file > site defaults.
-# Values are templates: $VAR/${VAR} resolve against the environment first, then against other keys in
-# the same file, recursively -- so a <site>.json builds OPENFOLD_PREFIX off OPENFOLD_BASE off a
-# discovered $OPENFOLD_ALLOCATION, in any key order. No commands run; an unresolved name expands to empty.
+# Values are templates: $VAR/${VAR} resolves against the environment first, then against the file's
+# own keys, recursively and in any key order. No commands run; an unresolved name expands to empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
     [ -r "$file" ] && command -v python3 >/dev/null || return 0
@@ -53,7 +49,7 @@ def resolve(name, seen):
 def expand(val, seen):
     return ref.sub(lambda m: resolve(m.group(1) or m.group(2), seen), val)
 for k, v in scope.items():
-    if k not in os.environ:                                  # fill unset only
+    if k not in os.environ:
         print(f"{k}={expand(v, {k})}")' "$file" 2>/dev/null)
     return 0
 }
@@ -89,8 +85,7 @@ config::load() { config::fill "$(config::file)" "config"; }
 # <site>.sh loads its own <site>.json: same basename, beside it.
 config::site_defaults() { config::fill "${1%.sh}.json" "site defaults"; }
 
-# The config's schema. The same binary reads it everywhere, so it holds the same names everywhere:
-# one fixed set, whatever the cluster settled and whichever backend was installed last.
+# The config's schema: the same binary reads it everywhere, so the key set is fixed -- same on every cluster, whichever backend installed last.
 VIZFOLD_CONFIG_KEYS="OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_SITE OPENFOLD_DATA_DIR OPENFOLD_AF2_ROOT
 VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX ESMFOLD_ENV_PREFIX OPENFOLD_MAX_CUDA OPENFOLD_DRIVER_CUDA
 OPENFOLD_ACCOUNT OPENFOLD_PARTITION OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION
@@ -110,8 +105,7 @@ path, names = sys.argv[1], sys.argv[2:]
 with open(path, "w") as f:
     json.dump({n: os.environ.get(n, "") for n in names}, f, indent=2, sort_keys=True)
     f.write("\n")' "$file" $VIZFOLD_CONFIG_KEYS ||
-        die "could not write $file"
-    # Not a warning: everything downstream reads this file, so an install that could not write it
-    # has not installed anything usable, and saying so at the end beats failing later somewhere else.
+        die "could not write $file"   # not a warning: everything downstream reads this file
     echo "wrote $file"
+
 }

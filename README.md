@@ -153,9 +153,9 @@ those layers settled on below it:
 ```text
 COMPONENT  STATUS  DETAIL
 ---------  ------  ------
-binary     ok      0.5.0 (latest)
-repo       ok      /u/you/vizfold-src at v0.5.0
-config     ok      20 keys
+binary     ok      0.5.3 (latest)
+repo       ok      /u/you/vizfold-src at v0.5.3
+config     ok      19 keys
 openfold   BROKEN  /work/nvme/bbol/you/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/you/vizfold/envs/vizfold-esmfold)
 scheduler  ok      cpu, gpuA100x4-interactive, bbol-delta-cpu, bbol-delta-gpu
@@ -232,10 +232,8 @@ To override for one run, put the variable inline — it wins over both files:
 OPENFOLD_EXAMPLE=1UBQ_1 OPENFOLD_GPU_PARTITION=gpuA100x4 vizfold install openfold
 ```
 
-Only the login-specific atom is discovered at run time (the allocation, account, or install
-base); the templates in the `.json` derive the rest. Every value it settles on — fully
-expanded — is written to `~/.config/vizfold/vizfold.json`, so other tools can read where things
-ended up instead of guessing.
+Every value the install settles on — fully expanded — is written to
+`~/.config/vizfold/vizfold.json`, so other tools can read where things ended up instead of guessing.
 
 That file has a fixed shape. The same binary reads it on every cluster, so it holds the same keys
 on every cluster: the schema is `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`, and a name the install
@@ -273,7 +271,7 @@ key that changes something shows up in the diff. Run it after editing any site f
 `fold <example-id>` queues it, runs it, and registers its outputs. A sequence of your own is the
 same command with a path: `fold ./my.fasta`. `queue-run` records a run without executing it, and
 `fold` takes the id it prints. `serve` opens the dashboard
-over the results. `vizfold <command> --help` details any one.
+over the outputs. `vizfold <command> --help` details any one.
 
 ```text
 install                  Install a model backend (openfold or esmfold) on this machine
@@ -320,17 +318,17 @@ The repository is laid out as:
 - `workbench/` — a Next.js dashboard that reads the executor's SQLite directly (read-only) and renders each run's outputs: an interactive 3D structure viewer for predicted PDBs plus the attention-map images.
 - `backends/<name>/` — one pip/conda-installable package per model backend: its Python package, packaging metadata, environment spec, and env-provisioning installer (`install/`). `backends/openfold/` installs as `import openfold` (conda env, CUDA extension; its dataprep/training tooling is the installed `openfold.scripts` subpackage); `backends/esmfold/` as `import esmfold` (micromamba env with its own Python, no CUDA build).
 - `downloaders/<name>/` — data-download scripts. `downloaders/openfold/` holds the AlphaFold2 database/params fetchers (`vizfold download openfold`); ESMFold has none — it pulls weights from HuggingFace at run time.
-- `scripts/<name>/` — the model entrypoints the executor runs (`run_pretrained_*.py`, slurm). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
+- `scripts/<name>/` — the model entrypoints the executor runs (`run_pretrained_*.py`). Each imports its backend **by module** from the installed env — no relative paths, no cross-backend dependencies.
 - Each backend's package installs its own CLI into its environment as `<name>` (also `python -m <name>`), usable without the `vizfold` binary. Through vizfold, `queue-run`/`fold` are the way in — they fill the model's arguments from the config and record the run.
 - `lib/` — the backend-neutral shared install machinery (`config.sh`, `slurm.sh`, `interactive.sh`), owned by no backend. `sites/` — one `<ClusterName>.sh`/`.json` pair per supported cluster; `tests/` — the install-side test suites.
-- `docs/` — architecture notes and backlog. `examples/` — demo inputs, attention-viz utilities, and notebooks.
+- `docs/` — architecture notes and backlog. `examples/` — example inputs, attention-viz utilities, and notebooks.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from source.
 
 ### Prerequisites
 
 - Rust toolchain (`cargo`, `rustc`)
-- Node.js 22 LTS or later, and npm (for the workbench)
+- Node.js 22.13 or later, and npm (for the workbench)
 
 ### CLI and executor
 

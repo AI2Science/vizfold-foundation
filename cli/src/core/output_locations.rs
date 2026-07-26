@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
+use crate::core::services::validation::require_json_object;
 use sea_orm::DbErr;
-use serde_json::Value;
 
 use crate::core::entities::{model_invocation_profiles, runs};
 
@@ -35,17 +35,7 @@ pub fn output_location_from(
         return Ok(location.to_owned());
     }
 
-    let config: Value = serde_json::from_str(profile_config_json).map_err(|error| {
-        DbErr::Custom(format!(
-            "model invocation profile config_json must be valid JSON: {error}"
-        ))
-    })?;
-
-    if !config.is_object() {
-        return Err(DbErr::Custom(
-            "model invocation profile config_json must be a JSON object".into(),
-        ));
-    }
+    let config = require_json_object("model invocation profile config_json", profile_config_json)?;
 
     let output_location = config
         .get("output_location")

@@ -12,7 +12,7 @@ SLURM_SH=1
 SITES=$REPO/sites
 
 # A site overrides this to export the account-specific vars its <site>.json templates reference
-# (OPENFOLD_ALLOCATION, OPENFOLD_ACCOUNT, OPENFOLD_BASE). No-op by default; runs before <site>.json is filled.
+# (OPENFOLD_ALLOCATION, OPENFOLD_ACCOUNT, OPENFOLD_BASE); runs before <site>.json is filled.
 slurm::discover() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
@@ -49,10 +49,8 @@ slurm::nvme_alloc() {
 # The user's Slurm default account, overridable inline.
 slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
 
-# The cluster this node belongs to, by whichever source answers: a job carries the name, the
-# controller knows it, and slurm.conf has it with no daemon at all -- Delta's login nodes cannot
-# always reach slurmctld, and scontrol then exits 1 with nothing on stdout. Slurm lower-cases the
-# name for accounting and the sites/ files follow it, so slurm.conf's raw spelling is normalised.
+# No single source works everywhere -- Delta's login nodes cannot always reach slurmctld (scontrol
+# exits 1, empty), so slurm.conf is read directly. Lower-cased to match Slurm accounting and sites/.
 slurm::cluster() {
     local name=${SLURM_CLUSTER_NAME:-}
     [ -n "$name" ] || name=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }')
@@ -90,9 +88,8 @@ slurm::launch_args() {
     return 0
 }
 
-# Pick the site, run its discover hook, and settle the layers under it. Every backend's installer
-# starts here: choosing a cluster and an install prefix is the platform's job, not any one model's.
-# Leaves OPENFOLD_SITE and (where anything settled one) OPENFOLD_PREFIX exported.
+# Pick the site, run its discover hook, and settle the layers under it -- every backend's installer
+# starts here. Leaves OPENFOLD_SITE and (where anything settled one) OPENFOLD_PREFIX exported.
 vizfold::settle_site() {
     local cluster site prefix
     cluster=$(slurm::cluster)
@@ -121,7 +118,6 @@ slurm::run() {
         exec bash "$OF/install/setup.sh"          # no scheduler: install here
     fi
     local PREFIX ACCOUNT PARTITION SETUP PTY
-    # vizfold::settle_site resolved this; the build needs somewhere big for an env, so it insists.
     PREFIX=${OPENFOLD_PREFIX:-}
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
     # May already be set: inline env, slurm::discover, or a <site>.json template off its vars.

@@ -6,4 +6,4 @@ pub mod model_invocation_profiles;
 pub mod run_artifacts;
 pub mod run_execution;
 pub mod runs;
-mod validation;
+pub(crate) mod validation;

@@ -19,7 +19,6 @@ from esmfold.trace_adapter import (
     write_attention_txt,
 )
 
-# HuggingFace ESMFold
 try:
     from transformers import AutoTokenizer, EsmForProteinFolding
     HAS_ESM = True
@@ -83,11 +82,7 @@ def read_fasta(fasta_path: str) -> Tuple[str, str, str]:
 
 
 class ESMFoldRunner:
-    """
-    Runs ESMFold inference and writes VizFold-compatible output.
-
-    Uses HuggingFace EsmForProteinFolding (no fair-esm / OpenFold build).
-    """
+    """Runs ESMFold inference and writes VizFold-compatible output."""
 
     def __init__(
         self,
@@ -108,9 +103,6 @@ class ESMFoldRunner:
         self.deterministic = deterministic
         self._model = None
         self._tokenizer = None
-
-
-    # --- Internal model loading ---
 
     def _load_model(self) -> Any:
         if self._model is not None:
@@ -144,15 +136,7 @@ class ESMFoldRunner:
         structure_traces: bool = False,
         log_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Run inference and write structure + optional traces.
-
-        trace_mode: "attention" | "activations" | "attention+activations" | "none"
-        layers: "all" or "0,1,2" or "0:12"
-        heads: "all" or "0,1,2"
-        structure_traces: if True, capture IPA attention weights and per-recycle
-            backbone positions from the folding trunk structure module.
-        """
+        """Run inference and write structure + optional traces."""
         os.makedirs(out_dir, exist_ok=True)
         if log_path is None:
             log_path = os.path.join(out_dir, "logs.txt")
@@ -162,7 +146,7 @@ class ESMFoldRunner:
                 f.write(msg + "\n")
             print(msg)
 
-        seq, seq_id, fasta_hash = read_fasta(fasta_path)
+        seq, fasta_hash = _read_fasta_and_hash(fasta_path)
         seq_len = len(seq)
 
         if seq_len > LONG_SEQ_WARN_THRESHOLD and "attention" in trace_mode:
@@ -209,7 +193,6 @@ class ESMFoldRunner:
             # Hook each evoformer block to capture per-block sequence/pair state
             collector.register_trunk_hooks(model)
 
-        # Structure module hooks: IPA attention + per-recycle backbone
         sm_collector = None
         if structure_traces:
             sm_collector = StructureModuleTraceCollector()
@@ -255,13 +238,7 @@ class ESMFoldRunner:
         # Traces
         shapes_recorded = {"attention": {}, "activations": {}}
         if trace_mode != "none" and (collector.attention or collector.activations):
-            attn_idx, act_idx = write_traces(
-                out_dir,
-                collector,
-                save_fp16=save_fp16,
-                layer_indices=layer_list,
-                head_indices=head_list,
-            )
+            attn_idx, act_idx = write_traces(out_dir, collector, save_fp16=save_fp16)
             for k, v in attn_idx.items():
                 shapes_recorded["attention"][k] = v.get("shape", [])
             for k, v in act_idx.items():
