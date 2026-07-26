@@ -12,9 +12,7 @@ use crate::core::commands::CommandSpec;
 
 static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
 
-/// Local-filesystem fixture shared by OpenFold planning/preflight/execution tests: a working
-/// directory with a test script, a FASTA directory with one matching record, and empty data /
-/// output-location / alignment directories.
+/// Shared OpenFold fixture: a script, a one-record FASTA dir, and empty data/output/alignment dirs.
 pub(crate) struct TestLayout {
     pub root: PathBuf,
     pub working_dir: PathBuf,
@@ -25,8 +23,7 @@ pub(crate) struct TestLayout {
 }
 
 impl TestLayout {
-    /// `fasta_header` is written verbatim after `>` on the FASTA record's header line, so callers
-    /// control both the tag a test's run `input_id` must match and any trailing header text.
+    /// Written verbatim after `>`, so a caller controls both the tag and any trailing header text.
     pub fn new(fasta_header: &str) -> Self {
         let root = env::temp_dir().join(format!(
             "executor-test-layout-{}-{}",

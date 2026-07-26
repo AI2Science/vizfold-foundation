@@ -3,10 +3,7 @@
 # Install OpenFold into a micromamba env on the node that runs this. Idempotent per step.
 set -euo pipefail
 
-# slurm::run execs this by path; OPENFOLD_HOME (exported by install.sh) finds the libs without
-# walking up. The BASH_SOURCE fallback covers a direct local run (lib/ is three levels up).
-LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
-. "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
+. "${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/lib/config.sh"
 # For a direct run: under `vizfold install` install.sh already exported these, and config::fill never overwrites.
 config::load
 
@@ -19,25 +16,25 @@ step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1
 
 setup::config() {
     PREFIX=$(vizfold::prefix)
+    STATE=$(vizfold::state openfold)                 # everything this backend plants under the prefix
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
     # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
         aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
         *)             ENV_YML=$OF/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
     esac
-    DATA=${OPENFOLD_DATA_DIR:-$PREFIX/data}          # a schema key, so it has to be readable too
+    DATA=${OPENFOLD_DATA_DIR:-$STATE/data}           # the one root every data path resolves under
     ENV_DIR=${OPENFOLD_ENV_PREFIX:-$(vizfold::env openfold)}
     MM=$PREFIX/bin/micromamba
-    CUTLASS=$PREFIX/cutlass
+    CUTLASS=$STATE/cutlass
     UNICLUST=$DATA/uniclust30/uniclust30_2018_08
     STEREO=$OF/openfold/resources/stereo_chemical_props.txt
-    sentinel=$PREFIX/.done
+    sentinel=$STATE/.done
 
-    export CONDA_PKGS_DIRS=$PREFIX/../.openfold-pkgs
-    export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
-    export PIP_CACHE_DIR=$PREFIX/../.openfold-pip
-    # setup::verify imports deepspeed, whose autotune cache defaults to a quota'd NFS $HOME.
-    # Node-local, as run_execution.rs gives a fold.
+    export CONDA_PKGS_DIRS=$STATE/pkgs
+    export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$STATE/tmp
+    export PIP_CACHE_DIR=$STATE/pip
+    # deepspeed's autotune cache defaults to a quota'd NFS $HOME; setup::activate repeats this for runs.
     export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}
     export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
     # Every GPU these sites schedule (7.0 V100 .. 9.0 H100); a missing arch = "no kernel image".
@@ -52,7 +49,7 @@ setup::preflight() {
     mkdir -p "$PREFIX/bin" "$TMPDIR" "$DATA" "$OF/openfold/resources"
     hostname
     nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
-    echo "prefix=$PREFIX repo=$REPO env=$ENV_DIR max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
+    echo "prefix=$PREFIX repo=$REPO env=$ENV_DIR data=$DATA max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
     test -f "$OF/setup.py" || die "no openfold backend at $OF; is $REPO a vizfold checkout?"
 }
 
@@ -64,6 +61,7 @@ setup::env() {
     "$MM" create -y --no-rc -p "$ENV_DIR" -f "$ENV_YML" "cuda-version<=$MAX_CUDA"
 }
 
+# activate.d is the one place a fold's runtime variables come from; `micromamba run -p` applies it.
 setup::activate() {
     log activate
     mamba::activate "$MM" "$ENV_DIR"
@@ -71,6 +69,8 @@ setup::activate() {
     cat > "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh" <<ACTIVATE
 export CUTLASS_PATH=$CUTLASS
 export KMP_AFFINITY=none
+export OPENFOLD_DATA_DIR=$DATA
+export TRITON_CACHE_DIR=\${TRITON_CACHE_DIR:-/tmp/vizfold-triton-\$(id -u)}
 export LIBRARY_PATH=\$CONDA_PREFIX/lib:\${LIBRARY_PATH:-}
 export LD_LIBRARY_PATH=\$CONDA_PREFIX/lib:\${LD_LIBRARY_PATH:-}
 ACTIVATE
@@ -104,15 +104,15 @@ print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
 
 # Pin NVRTC beside the env, LD_PRELOAD (beats its RPATH), so OpenMM emits PTX the driver accepts.
 setup::nvrtc_create() {
-    local nvrtc=$PREFIX/nvrtc-$DRIVER_CUDA
+    local nvrtc=$STATE/nvrtc-$DRIVER_CUDA
     rm -rf "$nvrtc"
     "$MM" create -y --no-rc -p "$nvrtc" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
 }
 
 # Append every run: setup::activate rewrites openfold.sh from scratch, so this must not sit behind the create's sentinel.
 setup::nvrtc_preload() {
-    local lib; lib=$(ls "$PREFIX/nvrtc-$DRIVER_CUDA"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
-    test -n "$lib" || die "no libnvrtc in $PREFIX/nvrtc-$DRIVER_CUDA"
+    local lib; lib=$(ls "$STATE/nvrtc-$DRIVER_CUDA"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
+    test -n "$lib" || die "no libnvrtc in $STATE/nvrtc-$DRIVER_CUDA"
     echo "export LD_PRELOAD=$lib\${LD_PRELOAD:+:\$LD_PRELOAD}" \
         >> "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
     . "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
@@ -136,11 +136,9 @@ setup::link_mirror() {
     log datasets
     for d in "$AF2"/*; do
         [ "${d##*/}" = uniclust30 ] && continue
-        # Explicit link name, not "$DATA/": GNU ln -sfn onto a real dir (empty on a cold start)
-        # errors with "cannot overwrite directory" instead of creating the link inside it.
+        # Explicit link name: GNU ln -sfn onto a real dir errors instead of linking inside it.
         ln -sfn "$d" "$DATA/${d##*/}"
     done
-    ln -sfn "$AF2/params" "$OF/openfold/resources/params"
     # uniclust30_2018_08 goes in a writable canonical dir (not the read-only mirror symlink): the mirror's real set if present (single- or double-nested), else aliased from uniref30.
     mkdir -p "$UNICLUST"
     local src="" c
@@ -158,8 +156,7 @@ setup::link_mirror() {
     fi
 }
 
-# No mirror: fetch params (4 GB, into the data dir) and the mmCIFs the examples cite. $DATA, not
-# $PREFIX: `vizfold download openfold alphafold_params` hands the same script the same directory.
+# No mirror: fetch params (4 GB) into the one data root, where `vizfold download` also puts them.
 setup::fetch_params() {
     rm -rf "$DATA/params"   # a half-extracted tar would pass a single-file check
     bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$DATA"
@@ -167,7 +164,6 @@ setup::fetch_params() {
 
 setup::fetch_templates() {
     log templates
-    ln -sfn "$DATA/params" "$OF/openfold/resources/params"
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
     # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. || true tolerates a 404; assert catches total failure.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
@@ -199,7 +195,7 @@ assert util.find_spec("flash_attn"), "flash_attn is not importable"
 assert os.path.isdir(os.environ.get("CUTLASS_PATH", "")), "CUTLASS_PATH is unset"
 print("flash_attn ok, CUTLASS_PATH", os.environ["CUTLASS_PATH"])
 PY
-    local b p required=("$OF/openfold/resources/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
+    local b p required=("$DATA/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
     [ "$MIRROR" = yes ] && required+=(
         "$DATA/uniref90/uniref90.fasta"
         "$DATA/mgnify/mgy_clusters_2022_05.fa"
@@ -236,7 +232,7 @@ setup::ready() {
 
 Check it works -- fold the bundled example, onto a GPU node if one is configured:
 
-  vizfold fold $EXAMPLE
+  vizfold run $EXAMPLE
 
 To drive the model yourself, use its own CLI:
 

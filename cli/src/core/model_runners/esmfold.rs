@@ -14,8 +14,7 @@ use crate::core::{
     services::validation::require_json_object,
 };
 
-/// ESMFold is single-sequence, so it needs none of OpenFold's MSA/template checks: just the
-/// command itself, a readable `--fasta` file, and a writable output workspace.
+/// Single-sequence, so none of OpenFold's MSA checks: the command, a readable `--fasta`, a writable output.
 pub fn preflight_esmfold(
     command: &CommandSpec,
     invocation_profile: &model_invocation_profiles::Model,

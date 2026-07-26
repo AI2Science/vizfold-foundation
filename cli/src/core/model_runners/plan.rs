@@ -1,7 +1,5 @@
-//! The schema-driven command planner, shared by every backend.
-//!
-//! A backend's invocation profile declares its CLI in JSON; this turns that declaration plus a
-//! run's parameters into a CommandSpec. `run_execution` calls it for OpenFold and ESMFold alike.
+//! The schema-driven command planner: a backend declares its CLI in JSON, this turns that plus a
+//! run's parameters into a CommandSpec. Shared by every backend.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -294,9 +292,7 @@ pub(crate) fn validate_execution_parameters_against_available_resources(
         return Ok(());
     };
 
-    // A present field is validated against its raw JSON type, not skipped when the
-    // type is wrong: emission (json_value_to_string) stringifies numbers/bools, so a
-    // wrong-typed value would otherwise bypass the enum/range guard yet still be emitted.
+    // Validated on its raw JSON type: emission stringifies, so a wrong type would skip the guard yet emit.
     if let Some(declaration) = properties.get("model_device")
         && let Some(value) = execution_parameters.get("model_device")
     {

@@ -11,17 +11,18 @@ bootstrap::config() {
     BIN=${VIZFOLD_BIN_DIR:-$HOME/.local/bin}
 }
 
-# Map uname to the release asset name the workflow publishes (vizfold-<os>-<arch>).
+# The release asset for this machine. Linux only: that is what release.yml publishes, and a model
+# backend needs CUDA and a scheduler anyway.
 bootstrap::asset() {
-    local os arch
-    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local arch
+    [ "$(uname -s)" = Linux ] || die "vizfold releases are Linux-only (this is $(uname -s))"
     arch=$(uname -m)
     case "$arch" in
         x86_64|amd64)  arch=x86_64 ;;
         aarch64|arm64) arch=aarch64 ;;
         *) die "unsupported architecture: $arch" ;;
     esac
-    ASSET="vizfold-${os}-${arch}"
+    ASSET="vizfold-linux-${arch}"
     if [ "$VERSION" = latest ]; then
         URL="https://github.com/$REPO/releases/latest/download/$ASSET"
     else

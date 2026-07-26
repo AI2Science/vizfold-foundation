@@ -2,8 +2,7 @@ use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// Path to the install-time config written by `lib/config.sh` (`config::save`).
-/// This flat JSON map is the single source of storage, DB, and cluster-inferrable paths.
+/// The install-time config `config::save` writes: one flat JSON map, the source of every resolved path.
 pub fn config_file() -> PathBuf {
     if let Ok(explicit) = std::env::var("VIZFOLD_CONFIG")
         && !explicit.is_empty()
@@ -21,8 +20,7 @@ pub fn is_initialized() -> bool {
     config_file().is_file()
 }
 
-/// The config's schema, mirroring `VIZFOLD_CONFIG_KEYS` in `lib/config.sh` --
-/// `tests/vocabulary.sh` fails if the two ever differ.
+/// Mirrors `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`; `tests/vocabulary.sh` fails if the two differ.
 pub const CONFIG_KEYS: &[&str] = &[
     "ESMFOLD_ENV_PREFIX",
     "OPENFOLD_ACCOUNT",
@@ -64,15 +62,12 @@ fn vizfold_config() -> &'static Map<String, Value> {
     })
 }
 
-/// Empty is unset. The config carries a fixed key set, so every name the install did not settle is
-/// present with an empty value, and those must fall through to the caller's default like a missing
-/// key -- exactly as an empty env var already does.
+/// Empty is unset: the key set is fixed, so an unsettled name is present-but-empty and must fall through.
 fn non_empty(value: Option<&str>) -> Option<String> {
     value.filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
-/// inline env var of the same name > vizfold.json entry > None. Public for code that checks the
-/// config by name rather than consuming one known key.
+/// inline env var of the same name > vizfold.json entry > None.
 pub fn resolved(key: &str) -> Option<String> {
     if let Ok(v) = std::env::var(key)
         && !v.is_empty()
@@ -88,48 +83,46 @@ pub fn openfold_home() -> PathBuf {
         .unwrap_or_else(repository_root)
 }
 
-/// The file whose presence makes a directory a vizfold checkout: OpenFold's installer, the one
-/// `vizfold install` runs. Also `Backend::Openfold.installer()`.
+/// The file whose presence makes a directory a vizfold checkout.
 pub const INSTALLER: &str = "backends/openfold/install/install.sh";
 
-/// Repo checkout holding `INSTALLER`. `OPENFOLD_HOME` -- the config's own name for it -- else the
-/// default clone location (`$HOME/vizfold-src`).
+/// Checkout holding `INSTALLER`: `OPENFOLD_HOME`, else the default clone location.
 pub fn vizfold_src() -> PathBuf {
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(default_src)
 }
 
-/// Where `vizfold install` clones the checkout when nothing points at an existing one --
-/// the only checkout `vizfold uninstall` may delete.
+/// Where `vizfold install` clones -- the only checkout `vizfold uninstall` may delete.
 pub fn default_src() -> PathBuf {
     PathBuf::from(format!("{}/vizfold-src", home_dir()))
 }
 
+/// The one root every OpenFold data path resolves under, weights included. Mirrors `setup::config`.
 pub fn data_dir() -> PathBuf {
     resolved("OPENFOLD_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| prefix().join("data"))
+        .unwrap_or_else(|| prefix().join("openfold/data"))
 }
 
-/// The one directory holding every environment the install creates. Mirrors `vizfold::env_base`
-/// in `lib/config.sh`.
+/// The one micromamba every environment is created and run through. Mirrors `mamba::ensure`.
+pub fn micromamba(prefix: &Path) -> PathBuf {
+    prefix.join("bin/micromamba")
+}
+
+/// The one directory holding every environment. Mirrors `vizfold::env_base`.
 pub fn env_base() -> PathBuf {
     resolved("VIZFOLD_ENV_BASE")
         .map(PathBuf::from)
         .unwrap_or_else(|| prefix().join("envs"))
 }
 
-/// `<env base>/vizfold-<backend>` — a fixed name per backend, so nothing
-/// has to be told where any of them is.
+/// `<env base>/vizfold-<backend>`: a fixed name per backend, so nothing has to be told where one is.
 pub fn env_dir(name: &str) -> PathBuf {
     env_base().join(format!("vizfold-{name}"))
 }
 
-/// micromamba env prefix for local OpenFold execution. Every OpenFold install records it
-/// (`setup::config_save` writes `OPENFOLD_ENV_PREFIX=$CONDA_PREFIX`), so the config normally
-/// answers; the `<env base>/vizfold-openfold` fallback covers a config that left the key empty --
-/// only the ESMFold backend was installed.
+/// OpenFold's env. The install records it; the fallback covers a config where only ESMFold was installed.
 pub fn openfold_env_prefix() -> PathBuf {
     resolved("OPENFOLD_ENV_PREFIX")
         .map(PathBuf::from)
@@ -153,9 +146,7 @@ pub fn config_entries() -> Vec<(String, String)> {
     entries
 }
 
-/// Mirrors `vizfold::prefix` in `lib/config.sh`, down to the fallback: the installer's default is
-/// `$HOME/openfold`, and answering with the checkout instead made `status` and `uninstall` describe
-/// a different directory than the one an install would use.
+/// Mirrors `vizfold::prefix`, fallback included -- otherwise `status` describes a directory no install uses.
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
@@ -186,8 +177,7 @@ fn or_default<'a>(value: Option<&'a str>, default: &'a str) -> &'a str {
     value.filter(|v| !v.is_empty()).unwrap_or(default)
 }
 
-/// SLURM launch prefix for a fold, mirroring `setup::fold_vars`. Empty means run bare --
-/// either we are already on the node, or no GPU partition is configured (the workstation case).
+/// SLURM launch prefix, mirroring `setup::fold_vars`. Empty means run bare, here or on a workstation.
 pub fn gpu_launch(
     context: SlurmContext,
     partition: Option<&str>,
@@ -240,12 +230,6 @@ pub fn gpu_partition() -> Option<String> {
 }
 
 pub fn database_url() -> String {
-    // DATABASE_URL used to win here. It names nothing the install writes, so it is no longer a
-    // source -- but README shipped it, and silently moving someone's database is the worst way to
-    // say so. VIZFOLD_DB takes a full sqlite: URL, so it covers every use.
-    if std::env::var("DATABASE_URL").is_ok_and(|u| !u.is_empty()) {
-        eprintln!("warning: DATABASE_URL is ignored; set VIZFOLD_DB instead");
-    }
     if let Some(db) = resolved("VIZFOLD_DB") {
         return if db.starts_with("sqlite:") {
             db
@@ -270,9 +254,7 @@ pub fn database_path() -> Option<PathBuf> {
     (!path.is_empty() && path != ":memory:").then(|| PathBuf::from(path))
 }
 
-/// Repository root for the local development layout: this crate is `<root>/cli`, so the root is one
-/// level up. Baked in at build time, so for a released binary it names the machine that built it --
-/// use it only when it is actually present, else the checkout `vizfold install` clones.
+/// The dev checkout, one level up from this crate. Baked in at build time, so use it only if it exists.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -284,8 +266,7 @@ fn repository_root() -> PathBuf {
 mod tests {
     use super::{SlurmContext, env_base, env_dir, gpu_launch, non_empty};
 
-    /// Compiled in from the build machine, so it has to name a checkout that is actually here --
-    /// a released binary otherwise reports its CI workspace as the install root.
+    /// Compiled in from the build machine, so a released binary would report its CI workspace.
     #[test]
     fn repository_root_names_a_real_checkout() {
         let root = super::repository_root();
@@ -296,8 +277,7 @@ mod tests {
         );
     }
 
-    /// The fixed key set writes "" for every name the install did not settle, so a consumer must
-    /// not tell those apart from a missing key.
+    /// The fixed key set writes "" for what the install did not settle; that must read as missing.
     #[test]
     fn an_empty_config_value_reads_as_unset() {
         assert_eq!(non_empty(Some("")), None);
@@ -305,8 +285,7 @@ mod tests {
         assert_eq!(non_empty(Some("gpu:a100:1")), Some("gpu:a100:1".to_owned()));
     }
 
-    /// Every environment is `<base>/vizfold-<backend>` — one directory, a fixed name each. Keeps
-    /// the Rust side in step with `vizfold::env` in lib/config.sh.
+    /// Keeps `env_dir` in step with `vizfold::env` in lib/config.sh.
     #[test]
     fn every_env_is_a_fixed_name_under_one_base() {
         for backend in ["openfold", "esmfold", "workbench"] {

@@ -14,8 +14,7 @@ use crate::core::{
 
 use super::runs::{self, UpdateRunStatusInput};
 
-/// Selects the preflight and the env wrapping; planning and artifact registration are shared.
-/// Unknown slugs fall through to OpenFold, which is what the execution tests register.
+/// Selects the preflight and the env wrapping. Unknown slugs fall through to OpenFold.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BackendKind {
     Openfold,
@@ -74,9 +73,7 @@ pub async fn execute_run(
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
-        // Create the run workspace so a fresh install runs without a manual mkdir and preflight's
-        // output_dir check passes. OpenFold also seeds attention/ (its --attn_map_dir target);
-        // ESMFold's script creates its own subdirs under --out.
+        // Create the workspace so a fresh install needs no mkdir; OpenFold also seeds its attention/ dir.
         let workspace = resolve_output_location(&invocation_profile, &run)?;
         let to_create = match kind {
             BackendKind::Openfold => workspace.join("attention"),
@@ -91,9 +88,7 @@ pub async fn execute_run(
 
         let command = plan_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
-        // Preflight validates the bare command; the runner gets an env-wrapped one so the model's
-        // deps resolve. OpenFold activates its micromamba env; ESMFold runs its own python.
-        // Both gate on the env actually being installed, so tests/dev run the command bare.
+        // Preflight sees the bare command, the runner an env-wrapped one -- bare where nothing is installed.
         let exec_command = match kind {
             BackendKind::Openfold => {
                 let prefix = config::prefix();
@@ -102,7 +97,7 @@ pub async fn execute_run(
                     &prefix,
                     &config::openfold_env_prefix(),
                     &config::gpu_launch_args(),
-                    prefix.join("bin/micromamba").is_file(),
+                    config::micromamba(&prefix).is_file(),
                 )
             }
             BackendKind::Esmfold => {
@@ -127,8 +122,7 @@ pub async fn execute_run(
                 output: None,
             });
         }
-        // Mark running (with started_at) before the fold blocks, so `show run`/the dashboard
-        // reflect an in-flight run instead of a stale `submitted`/started_at=NULL.
+        // Mark running before the fold blocks, so nothing reads a stale `submitted`.
         runs::update_run_status(
             db,
             run_id,
@@ -181,8 +175,7 @@ pub async fn execute_run(
                     },
                 )
                 .await?;
-                // Register produced output directories inline so a completed run has its
-                // artifacts without a separate `register-artifacts` command. Idempotent.
+                // Inline, so a completed run has its artifacts without a second command. Idempotent.
                 super::run_artifacts::register_known_run_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
@@ -226,40 +219,24 @@ async fn mark_failed(
     Ok(())
 }
 
-/// Wrap a planned local OpenFold command so it runs inside the installed micromamba env:
-/// activate the env, source the installer's activate.d hook (CUTLASS_PATH / LD_LIBRARY_PATH /
-/// NVRTC LD_PRELOAD), and point TRITON_CACHE_DIR node-local (overridable). `exec "$@"` runs the
-/// original program+args passed positionally, so no argument re-quoting is needed.
+/// `micromamba run -p` applies the env's activate.d hook, where every runtime variable a fold needs
+/// is set -- the same one command `setup::ready` hands the user.
 fn activate_env_command(command: &CommandSpec, prefix: &Path, env_prefix: &Path) -> CommandSpec {
-    let prefix = prefix.display();
-    let env_prefix = env_prefix.display();
-    let script = format!(
-        "export MAMBA_ROOT_PREFIX='{prefix}/mamba'; \
-         eval \"$('{prefix}/bin/micromamba' shell hook -s bash)\"; \
-         micromamba activate '{env_prefix}'; \
-         [ -f '{env_prefix}/etc/conda/activate.d/openfold.sh' ] && . '{env_prefix}/etc/conda/activate.d/openfold.sh'; \
-         export TRITON_CACHE_DIR=\"${{TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}}\"; \
-         exec \"$@\""
-    );
     let mut args = vec![
-        "-c".to_owned(),
-        script,
-        "openfold".to_owned(),
+        "run".to_owned(),
+        "-p".to_owned(),
+        env_prefix.display().to_string(),
         command.program.clone(),
     ];
     args.extend(command.args.iter().cloned());
     CommandSpec {
-        program: "bash".to_owned(),
+        program: config::micromamba(prefix).display().to_string(),
         args,
-        current_dir: command.current_dir.clone(),
-        env: command.env.clone(),
-        stream: command.stream,
+        ..command.clone()
     }
 }
 
-/// Composes the exec-time wrapping: env activation (if installed) inside srun (if launched),
-/// with streaming always on. Order is load-bearing -- srun must be outermost so the activation
-/// happens on the compute node it lands on, not the submit host.
+/// The env inside srun, streaming always on. srun must stay outermost, or the env is entered on the submit host.
 fn compose_exec_command(
     command: &CommandSpec,
     prefix: &Path,
@@ -278,10 +255,7 @@ fn compose_exec_command(
     }
 }
 
-/// Wrap a planned ESMFold command for execution. Its environment carries its own Python and needs
-/// no activate.d hook, so running that interpreter directly -- `<env>/bin/python` -- is the whole
-/// activation. srun still wraps it so the fold lands on a GPU node when a partition is configured.
-/// `installed` is false in tests/dev (nothing to run): the command runs bare.
+/// ESMFold needs no activate.d hook, so its own `<env>/bin/python` is the whole activation.
 fn compose_esmfold_command(
     command: &CommandSpec,
     env_prefix: &Path,
@@ -293,9 +267,7 @@ fn compose_esmfold_command(
             program: env_prefix.join("bin/python").display().to_string(),
             ..command.clone()
         };
-        // The weights (~2.6 GB) download on the first fold. HuggingFace's default puts them in
-        // $HOME/.cache, the quota'd home this install exists to stay off, and nothing ever removes
-        // them; under the env prefix, `vizfold uninstall esmfold` takes them with it.
+        // ~2.6 GB on the first fold; HuggingFace's default is the quota'd $HOME nothing ever cleans.
         if std::env::var_os("HF_HOME").is_none() {
             let cache = env_prefix.join("hf");
             command
@@ -331,8 +303,7 @@ fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
-    /// The weights are fetched on the first fold, so the env var has to be on the command that
-    /// runs it -- not just recorded somewhere. Without it HuggingFace writes ~2.6 GB to $HOME.
+    /// The var has to be on the command that folds, not merely recorded: HuggingFace writes ~2.6 GB.
     #[test]
     fn an_installed_esmfold_command_caches_its_weights_under_the_env() {
         let env = PathBuf::from("/scratch/me/vizfold/envs/vizfold-esmfold");
@@ -407,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn activate_env_command_wraps_planned_command_in_micromamba_activation() {
+    fn activate_env_command_runs_the_plan_through_micromamba_run() {
         let command = CommandSpec {
             program: "python3".into(),
             args: vec!["-u".into(), "run_openfold.py".into(), "6KWC_1".into()],
@@ -420,18 +391,19 @@ mod tests {
             &PathBuf::from("/work/of/envs/vizfold-openfold"),
         );
 
-        assert_eq!(wrapped.program, "bash");
-        assert_eq!(wrapped.args[0], "-c");
-        let script = &wrapped.args[1];
-        assert!(script.contains("'/work/of/bin/micromamba' shell hook -s bash"));
-        assert!(script.contains("micromamba activate '/work/of/envs/vizfold-openfold'"));
-        assert!(script.contains("activate.d/openfold.sh"));
-        assert!(script.contains("TRITON_CACHE_DIR"));
-        assert!(script.trim_end().ends_with("exec \"$@\""));
-        // Original program+args are passed positionally for `exec "$@"` (no re-quoting).
+        // No shell, so nothing is re-quoted; `run -p` applies the env's activate.d hook.
+        assert_eq!(wrapped.program, "/work/of/bin/micromamba");
         assert_eq!(
-            &wrapped.args[2..],
-            &["openfold", "python3", "-u", "run_openfold.py", "6KWC_1"]
+            wrapped.args,
+            [
+                "run",
+                "-p",
+                "/work/of/envs/vizfold-openfold",
+                "python3",
+                "-u",
+                "run_openfold.py",
+                "6KWC_1"
+            ]
         );
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
     }
@@ -452,15 +424,21 @@ mod tests {
             true,
         );
 
-        // srun outermost, wrapping the whole activation script -- not the reverse, which would
-        // activate on the submit host instead of the compute node srun lands on.
+        // srun outermost: the reverse enters the env on the submit host, not the compute node.
         assert_eq!(composed.program, "srun");
-        assert_eq!(&composed.args[..2], &["-p".to_owned(), "gpu".to_owned()]);
-        assert_eq!(composed.args[2], "bash");
-        assert_eq!(composed.args[3], "-c");
         assert_eq!(
-            &composed.args[5..],
-            &["openfold", "python3", "-u", "run_openfold.py"]
+            composed.args,
+            [
+                "-p",
+                "gpu",
+                "/work/of/bin/micromamba",
+                "run",
+                "-p",
+                "/work/of/envs/vizfold-openfold",
+                "python3",
+                "-u",
+                "run_openfold.py"
+            ]
         );
         assert!(composed.stream);
     }
@@ -549,14 +527,12 @@ mod tests {
         .await
     }
 
-    /// An `esmfold` run: slug routes it through the ESMFold preflight/compose path, folding a
-    /// single `--fasta` file with no data_dir. Reuses TestLayout's script + fasta fixtures.
+    /// An `esmfold` run: the slug routes it through the ESMFold path, one `--fasta` and no data_dir.
     async fn create_esmfold_run(
         db: &sea_orm::DatabaseConnection,
         layout: &TestLayout,
     ) -> Result<crate::core::entities::runs::Model, DbErr> {
-        // Reuse the seeded esmfold backend: its slug is what routes execution through the ESMFold
-        // path, and re-registering "esmfold" would violate the unique-slug constraint.
+        // Reuse the seeded esmfold backend; re-registering the slug violates its unique constraint.
         let backend = model_backends::list_model_backends(db)
             .await?
             .into_iter()
@@ -676,8 +652,7 @@ mod tests {
 
         assert!(called.load(Ordering::SeqCst));
         assert_eq!(result.output.expect("output").exit_code, 0);
-        // The schema-driven planner emitted the ESMFold CLI; nothing installed in tests, so the
-        // program stays bare python3 (not <env>/bin/python).
+        // Nothing installed in tests, so the program stays bare python3.
         let command = command
             .lock()
             .expect("command lock")
@@ -694,8 +669,7 @@ mod tests {
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
-        // ESMFold creates the workspace itself but not an attention/ subdir up front, so only the
-        // run output directory is registered.
+        // ESMFold seeds no attention/ dir, so only the run output directory registers.
         let workspace = layout.output_location.join(run.id.to_string());
         assert!(workspace.is_dir());
         assert!(!workspace.join("attention").exists());

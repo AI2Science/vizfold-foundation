@@ -25,15 +25,15 @@ export async function listExamples(): Promise<Example[]> {
 export async function queueRun(example: Example, attn: boolean): Promise<number> {
   // --attn takes a value and defaults to true, so it has to be passed either way; the CLI reads
   // the sequence out of the example's FASTA itself.
-  const args = ["queue-run", "openfold", "--input-id", example.id, `--attn=${attn}`];
+  const args = ["queue", "openfold", "--input-id", example.id, `--attn=${attn}`];
   const { stdout } = await run(BIN, args);
   const id = stdout.match(/Queued OpenFold run (\d+)/)?.[1];
-  if (!id) throw new Error(`no run id in queue-run output: ${stdout.trim()}`);
+  if (!id) throw new Error(`no run id in queue output: ${stdout.trim()}`);
   return Number(id);
 }
 
 /** Detached: a fold runs for minutes, far longer than a request may be held open. The page polls
- *  from there, and `execute-run` registers the artifacts itself once it lands. */
+ *  from there, and `fold` registers the artifacts itself once it lands. */
 export function foldInBackground(runId: number): void {
   // Without a prefix this used to resolve to "/runs" and try to mkdir at the filesystem root,
   // 500ing after the run row was already written.
@@ -41,7 +41,7 @@ export function foldInBackground(runId: number): void {
   const logs = `${PREFIX}/runs`;
   mkdirSync(logs, { recursive: true });
   const log = openSync(`${logs}/${runId}.submit.log`, "a");
-  const child = spawn(BIN, ["fold", String(runId)], {
+  const child = spawn(BIN, ["run", String(runId)], {
     detached: true,
     stdio: ["ignore", log, log],
   });

@@ -46,8 +46,7 @@ impl CommandRunner for LocalCommandRunner {
         };
 
         if spec.stream {
-            // Progress, not this command's result: stdout stays clean so `fold --json`'s one line
-            // parses. Copied rather than redirected by fd so it streams live on every platform.
+            // Progress, not the result: stdout stays clean so `fold --json` parses.
             command.stdout(std::process::Stdio::piped());
             let mut child = command.spawn().map_err(spawn_error)?;
             let relay = child.stdout.take().map(|mut out| {

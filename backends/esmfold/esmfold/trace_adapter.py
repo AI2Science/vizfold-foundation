@@ -70,10 +70,7 @@ def write_traces(
     layer_indices: Optional[list] = None,
     head_indices: Optional[list] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """
-    Write attention and activations from collector to trace/attention/ and trace/activations/.
-    Returns (attention_index, activations_index) for index.json.
-    """
+    """Attention and activations into trace/, returning the two indexes for index.json."""
     trace_root = os.path.join(out_dir, "trace")
     attn_dir = os.path.join(trace_root, "attention")
     act_dir = os.path.join(trace_root, "activations")
@@ -111,10 +108,7 @@ def write_attention_txt(
     collector: ESMFoldTraceCollector,
     top_k: int = 50,
 ) -> Optional[str]:
-    """
-    Write msa_row_attn_layer*.txt under out_dir/attention/ — the text format the VizFold
-    visualization tools read. Returns that directory, or None if no attention was captured.
-    """
+    """msa_row_attn_layer*.txt under attention/, the text format the VizFold tools read."""
 
     import numpy as np
 
@@ -124,8 +118,7 @@ def write_attention_txt(
     attn_dir = os.path.join(out_dir, "attention")
     os.makedirs(attn_dir, exist_ok=True)
 
-    # Try to use OpenFold's implementation for format consistency;
-    # fall back to the self-contained version if openfold is not installed.
+    # OpenFold's implementation when it is installed, for format consistency.
     try:
         from openfold.model.evoformer import save_attention_topk as _of_save
 
@@ -142,8 +135,7 @@ def write_attention_txt(
             )
 
     except ImportError:
-        # Standalone implementation — same output format as save_attention_topk.
-        # arr shape: [B, H, N, N]; msa_row_attn slices batch dim → [H, N, N].
+        # Same output format as save_attention_topk; [B, H, N, N] sliced to [H, N, N].
         def _save(arr: "np.ndarray", layer_idx: int) -> None:  # type: ignore[misc]
             heads = arr[0]  # [H, N, N]
             path = os.path.join(attn_dir, f"msa_row_attn_layer{layer_idx}.txt")
@@ -172,10 +164,7 @@ def write_trace_summary(
     out_dir: str,
     collector: "ESMFoldTraceCollector",
 ) -> Optional[str]:
-    """
-    Write trace/summary.json with per-layer attention entropy, mean/std, sparsity proxy,
-    and activation norms. Cheap to compute; useful for analysis.
-    """
+    """trace/summary.json: per-layer attention entropy, mean/std, sparsity proxy, activation norms."""
     import json
     import numpy as np
     summary = {"attention": {}, "activations": {}}

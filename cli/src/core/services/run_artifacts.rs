@@ -7,9 +7,7 @@ use crate::core::{
 
 use super::artifacts::{self as artifact_service, RecordArtifactByTypeSlugInput};
 
-/// The directories a registration considers, in order. `register-artifacts` reports against
-/// exactly this list rather than restating it, so the report cannot claim a set the registration
-/// never looked at.
+/// The directories a registration considers. `register-artifacts` reports against this, not a second copy.
 pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::path::PathBuf); 2] {
     [
         ("run_output_directory", workspace.to_path_buf()),
@@ -17,9 +15,7 @@ pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::pa
     ]
 }
 
-/// Registers a run's existing output directories -- the workspace and its `attention/` subdir --
-/// and returns the full current artifact list for the run. Both backends route here. Repeated
-/// calls do not add duplicate type/URI entries.
+/// Registers a run's existing output directories and returns its full artifact list. Idempotent.
 pub async fn register_known_run_artifacts(
     db: &DatabaseConnection,
     run_id: i32,
