@@ -108,7 +108,7 @@ re-confirmed in this pass; ⚙️ site profile written and its paths probed live
 1. AF2 mirrors: Delta & Delta-AI (shared `/work/hdd`) `/work/hdd/data/alphafold2/database`, Phoenix
    `/storage/coda1/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data`, ICE
    `/storage/ice1/shared/d-pace_community/…`, Bridges-2 `/ocean/datasets/community/alphafold/v2.3.2`,
-   Nexus `/media/volume/nexus-staging-slurm-data/database`. Each lays out `uniclust30` differently,
+   Nexus `/media/volume/data/alphafold2/database`. Each lays out `uniclust30` differently,
    so the install stages it into a canonical dir — real set if present, else aliased from uniref30.
    With no mirror the install downloads the ~4 GB parameters + the example's templates.
 2. Delta and Delta-AI share `/work/nvme`, so the aarch64 site uses a `-gh` suffix — otherwise the

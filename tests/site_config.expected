@@ -105,7 +105,7 @@ env=/projects/x-test/vizfold/envs/vizfold-openfold arch=x86_64 max_cuda=12.8 ove
 {
   "ESMFOLD_ENV_PREFIX": "",
   "OPENFOLD_ACCOUNT": "bbka",
-  "OPENFOLD_AF2_ROOT": "/media/volume/nexus-staging-slurm-data/database",
+  "OPENFOLD_AF2_ROOT": "/media/volume/data/alphafold2/database",
   "OPENFOLD_DATA_DIR": "/projects/x-test/vizfold/openfold/data",
   "OPENFOLD_DRIVER_CUDA": "",
   "OPENFOLD_ENV_PREFIX": "/projects/x-test/vizfold/envs/vizfold-openfold",
