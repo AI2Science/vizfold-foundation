@@ -43,9 +43,8 @@ pub async fn list_runs(db: &DatabaseConnection) -> Result<Vec<runs::Model>, DbEr
     runs::Entity::find().all(db).await
 }
 
-/// Immutable record of what produced a run. Catalog rows can be edited later; this cannot.
-/// Takes resolved paths as parameters rather than resolving them itself, matching the
-/// `gpu_launch`/`gpu_launch_args` split -- callers resolve from the environment.
+/// Immutable record of what produced a run; catalog rows can be edited later, this cannot.
+/// Takes resolved paths as parameters, as `gpu_launch` does.
 #[allow(clippy::too_many_arguments)]
 pub fn provenance_snapshot(
     backend_slug: &str,
@@ -114,8 +113,7 @@ pub async fn submit_run(
         require_json_object("execution_parameters", &input.execution_parameters_json)?;
     reject_unknown_keys("model_parameters", &model_schema, &model_params)?;
 
-    // Execution parameters are only shape-checked here; the planner validates their values
-    // against the target's available resources.
+    // Shape-checked only; the planner validates the values against the target's resources.
 
     runs::ActiveModel {
         model_backend_id: Set(input.model_backend_id),
@@ -263,10 +261,8 @@ mod tests {
         .await
     }
 
-    /// `UpdateRunStatusInput`'s `started_at`/`completed_at`/`error_message` are
-    /// `Option<Option<T>>`: an outer `None` must leave the column untouched, while `Some(None)`
-    /// writes NULL. A regression that treats outer `None` the same as `Some(None)` would silently
-    /// NULL these columns instead of failing loudly, so this asserts the values survive.
+    /// `Option<Option<T>>`: outer `None` leaves the column alone, `Some(None)` writes NULL. Conflating
+    /// them would silently NULL these columns rather than fail, so this asserts the values survive.
     #[tokio::test]
     async fn update_run_status_leaves_untouched_columns_alone() -> Result<(), DbErr> {
         let db = test_db().await?;

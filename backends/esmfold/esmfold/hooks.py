@@ -1,34 +1,7 @@
-"""
-Hook-based extraction of attention weights and hidden states from HuggingFace ESMFold.
-
-HF EsmForProteinFolding does NOT support output_attentions / output_hidden_states.
-We capture traces by registering forward hooks on three stages:
-
-  1. ESM-2 trunk (model.esm):
-     Attention weights: hook on each EsmSelfAttention module, monkey-patching
-                        the forward to force attn_weights to be returned.
-     Activations:       hook on each EsmLayer (full transformer block output).
-
-  2. Folding trunk (model.trunk):
-     Per-block: hook on each EsmFoldTriangularSelfAttentionBlock to capture
-                sequence_state [B, L, C_s] and pairwise_state [B, L, L, C_z].
-     Final:     capture out.s_s and out.s_z from the model output.
-
-  3. Structure module (model.trunk.structure_module):
-     IPA attention: StructureModuleTraceCollector wraps ipa.softmax to capture
-                    the attention matrix [H, N, N] at each block per recycle.
-     Backbone:      hook on structure_module to capture per-recycle positions
-                    and single representations.
-
-The ESM-2 tokenizer adds <cls> and <eos> tokens, so attention maps are
-(seq_len+2, seq_len+2). We slice out the special tokens so stored tensors
-are (seq_len, seq_len), matching the FASTA sequence.
-
-Structure module tracing:
-  StructureModuleTraceCollector hooks into model.trunk.structure_module.ipa
-  to capture IPA attention weights [H, N, N] at each block within each
-  recycling iteration, and hooks on trunk.structure_module to capture
-  per-recycle backbone positions and single representations.
+"""Trace extraction from HuggingFace ESMFold, which supports neither output_attentions nor
+output_hidden_states -- so everything here is forward hooks on the ESM-2 trunk, the folding trunk,
+and the structure module. The tokenizer adds <cls>/<eos>, so attention arrives as (N+2, N+2) and is
+sliced back to (N, N) to match the FASTA sequence.
 """
 import inspect
 import re
@@ -40,10 +13,7 @@ import torch.nn as nn
 
 
 class ESMFoldTraceCollector:
-    """
-    Collects attention weights, hidden states, and folding trunk intermediates
-    from HuggingFace EsmForProteinFolding.
-    """
+    """Attention, hidden states, and folding trunk intermediates from EsmForProteinFolding."""
 
     def __init__(
         self,
@@ -58,14 +28,12 @@ class ESMFoldTraceCollector:
         self.layer_indices = layer_indices  # None => all
         self.head_indices = head_indices
         self.expected_seq_len = expected_seq_len
-        # ESM-2 encoder outputs
         self.attention: Dict[str, torch.Tensor] = {}
         self.activations: Dict[str, torch.Tensor] = {}
         self._handles: List[Any] = []
         self._patched_forwards: List[Tuple[nn.Module, Callable]] = []
         self.recycled_s_s: List[torch.Tensor] = []
         self.recycled_s_z: List[torch.Tensor] = []
-        # Per-block evoformer intermediates from trunk.blocks[i]
         self.trunk_blocks: Dict[str, torch.Tensor] = {}
         self._slice_validated = False
 
@@ -81,17 +49,7 @@ class ESMFoldTraceCollector:
         return self.layer_indices is None or layer_idx in self.layer_indices
 
     def register_hooks(self, esm_model: nn.Module) -> None:
-        """
-        Register hooks on the ESM-2 trunk (model.esm passed in).
-
-        Targets:
-          - encoder.layer[i].attention.self  -> attention weights [B, H, N, N]
-          - encoder.layer[i]                 -> activations [B, N, D]
-
-        For HF ESM, EsmSelfAttention.forward() only returns attn_weights when
-        the framework's output capturing mechanism requests it. We monkey-patch
-        the forward to always emit (output, attn_weights).
-        """
+        """Hook `encoder.layer[i].attention.self` for [B, H, N, N] and `encoder.layer[i]` for [B, N, D]."""
         encoder_layers = self._find_encoder_layers(esm_model)
         if not encoder_layers:
             warnings.warn(
@@ -143,18 +101,10 @@ class ESMFoldTraceCollector:
         return None
 
     def _patch_and_hook_attention(self, self_attn: nn.Module, layer_idx: int) -> None:
-        """
-        Monkey-patch EsmSelfAttention.forward to always return attn_weights,
-        then register a hook to capture them.
-
-        HF EsmSelfAttention returns (attn_output, attn_weights) from its
-        internal attention function. But the outer EsmAttention layer discards
-        attn_weights with `attn_output, _ = self.self(...)`. We hook self_attn
-        directly to get the full tuple.
-        """
+        """Hooked on self_attn, not the outer EsmAttention, which discards attn_weights."""
         orig_forward = self_attn.forward
         params = list(inspect.signature(orig_forward).parameters)
-        # Find output_attentions position by name — robust to signature changes
+        # By name, so a signature change does not silently shift it.
         oa_pos = params.index("output_attentions") if "output_attentions" in params else -1
 
         def patched_forward(*args, **kwargs):
@@ -178,12 +128,10 @@ class ESMFoldTraceCollector:
             attn_weights = out[1]
             if attn_weights is None:
                 return
-            # attn_weights shape: [B, H, N+2, N+2] (includes <cls> and <eos>)
-            # Slice out special tokens -> [B, H, N, N]
+            # [B, H, N+2, N+2] with <cls>/<eos>, sliced to [B, H, N, N].
             if attn_weights.dim() == 4 and attn_weights.shape[-1] >= 3:
                 attn_weights = attn_weights[:, :, 1:-1, 1:-1]
 
-            # Validate that the sliced shape matches expected sequence length
             if (self.expected_seq_len is not None
                     and not self._slice_validated
                     and attn_weights.dim() == 4):
@@ -198,7 +146,6 @@ class ESMFoldTraceCollector:
                     )
                 self._slice_validated = True
 
-            # Filter heads if requested, to save memory
             if self.head_indices is not None:
                 head_dim = 1 if attn_weights.dim() == 4 else 0
                 idx = torch.tensor(self.head_indices, device=attn_weights.device)
@@ -209,16 +156,11 @@ class ESMFoldTraceCollector:
         return hook
 
     def _make_activation_hook(self, layer_idx: int) -> Callable:
-        """Hook that captures the transformer layer output (hidden state).
-
-        Strips the leading <cls> and trailing <eos> special tokens so the
-        activation shape [B, N, D] matches the attention shape [B, H, N, N].
-        """
+        """The layer output, <cls>/<eos> stripped so [B, N, D] matches the attention's [B, H, N, N]."""
         def hook(module: nn.Module, inp: Any, out: Any) -> None:
             h = out[0] if isinstance(out, tuple) else out
             if h is not None and isinstance(h, torch.Tensor) and h.dim() >= 2:
-                # Strip <cls> (index 0) and <eos> (index -1) to align with
-                # attention maps which are already sliced to seq_len.
+                # Strip <cls>/<eos> to align with the already-sliced attention maps.
                 if h.dim() == 3 and h.shape[1] >= 3:
                     h = h[:, 1:-1, :]
                 key = f"layer_{layer_idx:03d}"
@@ -230,35 +172,25 @@ class ESMFoldTraceCollector:
         def hook(module: nn.Module, inp: Any, out: Any) -> None:
             s_s, s_z = None, None
 
-            # Handle HF returning a tuple (usually s_s is index 0 and s_z is index 1)
+            # tuple
             if isinstance(out, tuple) and len(out) >= 2:
                 s_s, s_z = out[0], out[1]
-            # Handle HF returning a dataclass or object
+            # dataclass or object
             elif hasattr(out, 's_s') and hasattr(out, 's_z'):
                 s_s, s_z = out.s_s, out.s_z
-            # Handle dictionaries
+            # dict
             elif isinstance(out, dict):
                 s_s, s_z = out.get('s_s'), out.get('s_z')
 
             if s_s is not None and s_z is not None:
-                # Squeeze out the batch dimension and move to CPU to prevent RAM crashes
-                # s_s shape: [N, 1024] | s_z shape: [N, N, 128]
+                # Batch dim squeezed and moved to CPU: s_z is [N, N, 128].
                 self.recycled_s_s.append(s_s.squeeze(0).cpu().detach())
                 self.recycled_s_z.append(s_z.squeeze(0).cpu().detach())
         return hook
 
-    # -------------------------------------------------------------------
-    # Per-block evoformer hooks
-    # -------------------------------------------------------------------
 
     def register_trunk_hooks(self, model: nn.Module) -> None:
-        """
-        Register hooks on each EsmFoldTriangularSelfAttentionBlock inside
-        model.trunk.blocks to capture per-block sequence_state [B, L, C_s]
-        and pairwise_state [B, L, L, C_z].
-
-        Note: these tensors can be large (pair state is L×L×C_z per block).
-        """
+        """Per-block sequence_state [B, L, C_s] and pairwise_state [B, L, L, C_z] -- the latter is large."""
         trunk = getattr(model, "trunk", None)
         if trunk is None:
             warnings.warn("model.trunk not found; trunk block hooks skipped.", UserWarning)
@@ -273,15 +205,8 @@ class ESMFoldTraceCollector:
             self._handles.append(h)
 
     def _make_trunk_block_hook(self, block_idx: int) -> Callable:
-        """
-        Hook for EsmFoldTriangularSelfAttentionBlock.
-        Output is (sequence_state, pairwise_state).
-
-        Note: trunk blocks are called once per recycle iteration. Since dict
-        keys are the same across iterations, only the LAST recycle's data
-        is retained. This matches the behavior of recycled_s_s/s_z where
-        only the final values are used downstream. All recycle iterations
-        are captured in recycled_s_s/recycled_s_z lists for analysis if needed.
+        """Blocks fire once per recycle onto the same keys, so only the last recycle is retained here;
+        every iteration is in recycled_s_s/recycled_s_z.
         """
         def hook(module: nn.Module, inp: Any, out: Any) -> None:
             if not isinstance(out, tuple) or len(out) < 2:
@@ -295,19 +220,8 @@ class ESMFoldTraceCollector:
 
 
 class StructureModuleTraceCollector:
-    """
-    Captures IPA attention weights and per-recycling-iteration backbone
-    outputs from the ESMFold structure module.
-
-    Hook targets:
-      - trunk.structure_module.ipa: monkey-patched to stash the softmax
-        attention matrix a [*, H, N, N] before it's consumed internally.
-        Fires num_blocks times per recycle (IPA is a single shared module
-        reused across all structure module blocks).
-      - trunk.structure_module: captures the full output per recycle,
-        including stacked positions [num_blocks, B, N, 14, 3], frames,
-        and the final single representation. Handles both dict and
-        dataclass outputs from HuggingFace.
+    """IPA attention and per-recycle backbone outputs from the structure module. IPA is one shared
+    module reused across blocks, so its patched softmax fires num_blocks times per recycle.
     """
 
     def __init__(self) -> None:
@@ -329,12 +243,7 @@ class StructureModuleTraceCollector:
         self._block_idx = 0
 
     def register_hooks(self, model: nn.Module) -> None:
-        """
-        Register hooks on model.trunk.structure_module and its IPA submodule.
-
-        Args:
-            model: the full EsmForProteinFolding model (we navigate to trunk).
-        """
+        """Hook `model.trunk.structure_module` and its IPA submodule; `model` is the full model."""
         trunk = getattr(model, "trunk", None)
         if trunk is None:
             warnings.warn("model.trunk not found; structure module hooks skipped.", UserWarning)
@@ -352,16 +261,8 @@ class StructureModuleTraceCollector:
         self._handles.append(h)
 
     def _patch_ipa(self, ipa: nn.Module) -> None:
-        """
-        Monkey-patch IPA forward to stash the softmax attention matrix.
-
-        IPA computes a = softmax(scalar_attn + point_attn + pair_bias + mask)
-        but only returns the single-rep update. We intercept a after softmax
-        and store it, keyed by recycle_idx and block_idx.
-
-        ipa.softmax is an nn.Softmax module, so we can't replace it with a
-        plain function (PyTorch __setattr__ rejects non-Module assignments).
-        Instead we wrap it in an nn.Module subclass that captures the output.
+        """IPA returns only the single-rep update, so its softmax output is stashed on the way past.
+        Wrapped in an nn.Module: PyTorch __setattr__ rejects assigning a plain function.
         """
         orig_forward = ipa.forward
         orig_softmax_module = ipa.softmax
@@ -397,13 +298,11 @@ class StructureModuleTraceCollector:
     def _extract_from_output(self, out: Any) -> dict:
         """Extract fields from structure module output (dict or dataclass)."""
         result = {}
-        # Try dict access first
         if isinstance(out, dict):
             for key in ("positions", "frames", "single"):
                 if key in out:
                     result[key] = out[key]
         else:
-            # Handle dataclass / namedtuple / object with attributes
             for key in ("positions", "frames", "single"):
                 val = getattr(out, key, None)
                 if val is not None:
@@ -411,11 +310,7 @@ class StructureModuleTraceCollector:
         return result
 
     def _sm_output_hook(self, module: nn.Module, inp: Any, out: Any) -> None:
-        """
-        Fires once per recycling iteration after the full structure module
-        forward (all blocks). Captures backbone positions and states.
-        Handles both dict and dataclass outputs from HuggingFace.
-        """
+        """Once per recycle, after all blocks: backbone positions and states, dict or dataclass."""
         key = f"recycle_{self._recycle_idx:02d}"
         fields = self._extract_from_output(out)
 
@@ -426,8 +321,7 @@ class StructureModuleTraceCollector:
         if "single" in fields:
             self.sm_states[key] = fields["single"].detach().cpu()
 
-        # Always reset block counter and advance recycle counter,
-        # regardless of whether we captured any data.
+        # Always advance, captured or not.
         self._recycle_idx += 1
         self._block_idx = 0
 

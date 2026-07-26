@@ -1,15 +1,11 @@
-//! The published releases this binary comes from. `install.sh` bootstraps from the same URLs and
-//! derives the same asset names, so the two must agree.
+//! The published releases this binary comes from. `install.sh` derives the same URLs and asset names.
 
-/// This build's version. The checkout is pinned to the matching tag, so the two move together and
-/// `self-update` has to move both.
+/// This build's version; the checkout is pinned to the matching tag, so `self-update` moves both.
 pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// The release tag whose scripts this binary expects: its own, unless `VIZFOLD_VERSION` pins
-/// another -- the same override `install.sh` takes when choosing which binary to download. Every
-/// path that clones, moves or judges the checkout reads it here.
+/// The tag whose scripts this binary expects: its own, unless `VIZFOLD_VERSION` pins another.
 pub fn tag() -> String {
     match std::env::var("VIZFOLD_VERSION") {
         Ok(tag) if !tag.is_empty() => tag,
@@ -24,11 +20,9 @@ pub fn repo() -> String {
         .unwrap_or_else(|| "AI2Science/vizfold-foundation".to_owned())
 }
 
-/// Release asset name, as the release workflow publishes them. `install.sh` builds this from
-/// `uname`, which says `darwin` where Rust says `macos`.
-pub fn asset(os: &str, arch: &str) -> String {
-    let os = if os == "macos" { "darwin" } else { os };
-    format!("vizfold-{os}-{arch}")
+/// Asset name as the release workflow publishes it. Linux only, as `install.sh` also insists.
+pub fn asset(arch: &str) -> String {
+    format!("vizfold-linux-{arch}")
 }
 
 pub fn asset_url(tag: &str, asset: &str) -> String {
@@ -38,9 +32,7 @@ pub fn asset_url(tag: &str, asset: &str) -> String {
     )
 }
 
-/// The newest published tag, read off the redirect GitHub serves for `/releases/latest`. No token
-/// and no rate limit, unlike api.github.com -- and `status` asks on every run. `None` means the
-/// question could not be answered here, which is not the same as "no newer release".
+/// Newest tag, off the `/releases/latest` redirect: no token or rate limit, and `status` asks every run.
 pub fn latest_tag() -> Option<String> {
     let url = format!("https://github.com/{}/releases/latest", repo());
     let output = std::process::Command::new("curl")
@@ -63,8 +55,7 @@ pub fn latest_tag() -> Option<String> {
         .flatten()
 }
 
-/// `https://github.com/<repo>/releases/tag/v0.5.0` -> `v0.5.0`. With no releases at all GitHub
-/// lands on `/releases`, which carries no tag and correctly yields nothing.
+/// `.../releases/tag/v0.5.0` -> `v0.5.0`; with no releases GitHub lands on `/releases`, yielding nothing.
 fn tag_from_release_url(url: &str) -> Option<String> {
     let tag = url.trim().split_once("/releases/tag/")?.1.trim();
     (!tag.is_empty()).then(|| tag.to_owned())
@@ -92,9 +83,8 @@ mod tests {
     /// A mismatch would download nothing on the platform install.sh bootstrapped.
     #[test]
     fn asset_names_match_the_bootstrap_installer() {
-        assert_eq!(asset("linux", "x86_64"), "vizfold-linux-x86_64");
-        assert_eq!(asset("linux", "aarch64"), "vizfold-linux-aarch64");
-        assert_eq!(asset("macos", "aarch64"), "vizfold-darwin-aarch64");
+        assert_eq!(asset("x86_64"), "vizfold-linux-x86_64");
+        assert_eq!(asset("aarch64"), "vizfold-linux-aarch64");
     }
 
     #[test]

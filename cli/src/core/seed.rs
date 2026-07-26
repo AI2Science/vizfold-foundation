@@ -227,9 +227,7 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// ESMFold catalog rows: the backend's CLI schema, a local execution target, and a
-/// local_subprocess profile pointing at `run_pretrained_esmf.py`. Single-sequence, so no
-/// AlphaFold2 database schema -- just the model/trace flags and a `--device`.
+/// ESMFold catalog rows. Single-sequence, so no AlphaFold2 schema -- model/trace flags and a `--device`.
 async fn seed_esmfold(db: &DatabaseConnection) -> Result<(), DbErr> {
     if model_backends::Entity::find()
         .filter(model_backends::Column::Slug.eq("esmfold"))
@@ -314,9 +312,7 @@ async fn seed_esmfold(db: &DatabaseConnection) -> Result<(), DbErr> {
 fn local_openfold_config_json() -> String {
     json!({
         "program": "python3",
-        // The entrypoint imports the backend purely by module (`import openfold`,
-        // `openfold.scripts.*`) from the env's installed package, so its own location no longer
-        // matters. working_dir stays the checkout root so relative run inputs (examples/) resolve.
+        // The entrypoint imports by module, so working_dir only has to make examples/ resolve.
         "script": "scripts/openfold/run_pretrained_openfold.py",
         "working_dir": config::openfold_home(),
         "output_location": config::prefix().join("runs"),

@@ -32,9 +32,7 @@ pub async fn migrate_database(db: &DatabaseConnection) -> Result<(), DbErr> {
         .map_err(name_pre_baseline_database)
 }
 
-/// The migrator's own error for a database predating the migration collapse ("Migration file of
-/// version '...' is missing...") names no remedy. Point at the actual fix: the baseline
-/// migration recreates the schema from scratch once the stale file is gone.
+/// The migrator's "Migration file of version ... is missing" names no remedy; point at the actual fix.
 fn name_pre_baseline_database(error: DbErr) -> DbErr {
     match &error {
         DbErr::Custom(message) if message.contains("Migration file of version") => {
@@ -62,8 +60,7 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await?;
         migrate_database(&db).await?;
 
-        // Simulate a database migrated before the collapse: a version recorded as applied that
-        // no longer has a corresponding migration file in this binary.
+        // A version recorded as applied that this binary no longer has a migration file for.
         seaql_migrations::ActiveModel {
             version: Set("m20200101_000001_stale".to_owned()),
             applied_at: Set(0),

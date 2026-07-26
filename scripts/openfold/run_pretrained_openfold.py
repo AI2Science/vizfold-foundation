@@ -456,8 +456,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--jax_param_path", type=str, default=None,
         help="""Path to JAX model parameters. If None, and openfold_checkpoint_path
-             is also None, parameters are selected automatically according to 
-             the model name from openfold/resources/params"""
+             is also None, the config preset selects one under $OPENFOLD_DATA_DIR/params"""
     )
     parser.add_argument(
         "--openfold_checkpoint_path", type=str, default=None,
@@ -540,13 +539,16 @@ if __name__ == "__main__":
     print(args)
 
     if args.jax_param_path is None and args.openfold_checkpoint_path is None:
-        # Resolve params via the installed openfold package, not cwd: the entrypoint runs from the
-        # checkout root (for examples/) while the package + its symlinked resources live under
-        # backends/openfold/openfold/.
-        import openfold
+        # The install's one data root, exported by the env's activate.d hook -- the same place every
+        # database path resolves under, so nothing here depends on the cwd or on a symlink.
+        data_dir = os.environ.get("OPENFOLD_DATA_DIR")
+        if not data_dir:
+            parser.error(
+                "OPENFOLD_DATA_DIR is unset: run this inside the installed environment "
+                "(`micromamba run -p <env> openfold ...`), or pass --jax_param_path"
+            )
         args.jax_param_path = os.path.join(
-            os.path.dirname(openfold.__file__), "resources", "params",
-            "params_" + args.config_preset + ".npz"
+            data_dir, "params", "params_" + args.config_preset + ".npz"
         )
 
     if args.model_device == "cpu" and torch.cuda.is_available():

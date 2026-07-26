@@ -1,10 +1,7 @@
 #!/bin/bash
-# Every site's fully-resolved install config, snapshotted. Run: bash tests/site_config.sh
-# Accept an intended change: bash tests/site_config.sh -u
-#
-# A <site>.json that restates a default and one that omits it must resolve identically, so this runs
-# the real flow -- slurm::discover, <site>.json templating, slurm::run's exports, setup.sh's
-# defaults -- and compares what config::save would write plus the vars that drive the build job.
+# Every site's fully-resolved install config, snapshotted. Run: bash tests/site_config.sh (-u to accept).
+# Runs the real flow -- discover, templating, slurm::run's exports, setup.sh's defaults -- so a
+# <site>.json that restates a default and one that omits it are proven to resolve identically.
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO"
@@ -12,8 +9,7 @@ EXPECTED=tests/site_config.expected
 SANDBOX=${TMPDIR:-/tmp}/vizfold-site-config-$$
 trap 'rm -rf "$SANDBOX"' EXIT
 
-# The one login-specific atom each discover reads off the real cluster, as inline env supplies it.
-# nexus-dev probes absolute paths instead, so it gets the answer and skips discover.
+# The one login-specific atom each discover reads off the cluster; nexus-dev probes paths and skips it.
 site_env() {
     case $1 in
         anvil)          echo 'export PROJECT=/anvil/projects/x-test' ;;
@@ -64,8 +60,7 @@ resolve() {
 mkdir -p "$SANDBOX/home"
 # setup.sh's defaults, taken from setup.sh so they cannot drift; a file, not <(), for bash 3.2.
 sed '/^main() {/,$d' backends/openfold/install/setup.sh > "$SANDBOX/setup-defs.sh"
-# Subshell per site: exported OPENFOLD_* and the site's hooks must not leak into the next.
-# Substitute the quoted value, not the bare path: a $REPO of /w would rewrite every /work path.
+# Subshell per site, so nothing leaks. Substitute the quoted value: a $REPO of /w would rewrite /work.
 actual=$(for f in sites/*.json; do f=${f##*/}; (resolve "${f%.json}" 2>/dev/null); done |
     sed "s#\"$REPO\"#\"{REPO}\"#g; s#\"$SANDBOX/#\"{SANDBOX}/#g")
 
@@ -77,8 +72,7 @@ if [ "$(printf '%s\n' "$shapes" | wc -l)" -ne 1 ]; then
     echo "FAIL config key set differs by site:"; printf '%s\n' "$shapes"; exit 1
 fi
 
-# ...nor on which backend installed last: a second install re-saves the schema from what
-# config::load put back in the environment, so it rewrites the earlier values instead of dropping them.
+# ...nor on which backend installed last: a second install rewrites the earlier values, never drops them.
 cp "$SANDBOX/delta.json" "$SANDBOX/before.json"
 (export VIZFOLD_CONFIG=$SANDBOX/delta.json ESMFOLD_ENV_PREFIX=/envs/vizfold-esmfold
  . "$REPO/lib/config.sh" && config::load && config::save) >/dev/null 2>&1
@@ -92,9 +86,8 @@ if lost or set(after) != set(before):
 print("ok   a second backend's install preserves every settled value")
 PY
 
-# vizfold::settle_site is the one entry point both installers use to pick a cluster and a prefix.
-# The snapshot above walks the same layers by hand, so this pins the two together: the shared
-# function must land a real site on exactly the values the snapshot records for it.
+# The snapshot above walks the layers by hand; settle_site is what both installers actually call.
+# This pins the two together.
 (export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
  export VIZFOLD_CONFIG=$SANDBOX/settle.json OPENFOLD_HOME=$REPO
  unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
@@ -110,10 +103,8 @@ PY
      echo "FAIL settle_site drifted from the snapshot"; echo "  want: $want"; echo "  got:  $got"; exit 1
  fi) || exit 1
 
-# Installing ESMFold first must not decide anything for a later OpenFold install. It used to
-# persist OPENFOLD_PREFIX=$HOME/openfold -- its own private fallback, not a choice anybody made --
-# and because the saved config was loaded before discovery ran, OpenFold then skipped its own
-# discovery entirely: the build landed on a quota'd $HOME and GPU jobs got the CPU account.
+# Installing ESMFold first must decide nothing for a later OpenFold install: it used to persist its
+# own $HOME fallback, and OpenFold then skipped discovery -- build on a quota'd home, CPU account for GPUs.
 (export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
  export VIZFOLD_CONFIG=$SANDBOX/esmfold-first.json OPENFOLD_HOME=$REPO
  unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
@@ -145,9 +136,7 @@ PY
       echo "  want: $want"; echo "  got:  $got"; exit 1
   fi)) || exit 1
 
-# An inline choice must survive the install. Every key setup::config_save writes is a resolution,
-# not an assignment, so a database or data directory the user picked is recorded as picked --
-# overwriting either would move their run history or their staged datasets out from under them.
+# An inline choice must survive: overwriting one moves someone's run history or staged datasets.
 (export VIZFOLD_DB=$SANDBOX/chosen.db OPENFOLD_DATA_DIR=$SANDBOX/chosen-data
  resolve delta >/dev/null 2>&1
  python3 - "$SANDBOX/delta.json" "$SANDBOX" <<'PY' || exit 1

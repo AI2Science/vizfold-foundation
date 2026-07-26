@@ -11,8 +11,7 @@ SLURM_SH=1
 # The site profiles, beside the libs that read them: nothing here is about any one backend.
 SITES=$REPO/sites
 
-# A site overrides this to export the account-specific vars its <site>.json templates reference
-# (OPENFOLD_ALLOCATION, OPENFOLD_ACCOUNT, OPENFOLD_BASE); runs before <site>.json is filled.
+# A site overrides this to export the atoms its <site>.json templates reference, before they are filled.
 slurm::discover() { :; }
 
 # Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
@@ -33,8 +32,7 @@ slurm::allocation() {
     echo "${found[0]}"
 }
 
-# Resolve, prompt for, and memoize (in OPENFOLD_ALLOCATION) the /work/nvme allocation whose accounts (suffixes $@)
-# all exist -- and name those accounts here, off the same suffixes, so they cannot drift from them.
+# The /work/nvme allocation whose accounts (suffixes $@) all exist, naming those accounts off the same suffixes.
 slurm::nvme_alloc() {
     if [ -z "${OPENFOLD_ALLOCATION:-}" ]; then
         OPENFOLD_ALLOCATION=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
@@ -49,8 +47,7 @@ slurm::nvme_alloc() {
 # The user's Slurm default account, overridable inline.
 slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
 
-# No single source works everywhere -- Delta's login nodes cannot always reach slurmctld (scontrol
-# exits 1, empty), so slurm.conf is read directly. Lower-cased to match Slurm accounting and sites/.
+# Three sources: Delta's login nodes cannot always reach slurmctld. Lower-cased to match sites/.
 slurm::cluster() {
     local name=${SLURM_CLUSTER_NAME:-}
     [ -n "$name" ] || name=$(scontrol show config 2>/dev/null | awk '$1 == "ClusterName" { print $3 }')
@@ -68,8 +65,7 @@ slurm::scratch_root() {
     case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
 }
 
-# Build the scheduler argv for setup.sh, one argument per line.
-# $1 account, $2 partition, $3 the literal --pty (or empty when stdout is not a terminal).
+# The scheduler argv for setup.sh, one per line. $1 account, $2 partition, $3 --pty or empty.
 slurm::launch_args() {
     if [ -n "${SLURM_STEP_ID:-}" ]; then
         printf '%s\n' bash                                   # already on the node
@@ -88,8 +84,7 @@ slurm::launch_args() {
     return 0
 }
 
-# Pick the site, run its discover hook, and settle the layers under it -- every backend's installer
-# starts here. Leaves OPENFOLD_SITE and (where anything settled one) OPENFOLD_PREFIX exported.
+# Pick the site and settle the layers under it -- every installer starts here. Exports OPENFOLD_SITE.
 vizfold::settle_site() {
     local cluster site prefix
     cluster=$(slurm::cluster)
@@ -106,8 +101,7 @@ vizfold::settle_site() {
 
     prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" \
         "${OPENFOLD_PREFIX:-$(slurm::default_prefix)}")
-    # Empty is allowed here: a workstation settles no prefix and vizfold::prefix has the default.
-    # Only the OpenFold build, which needs somewhere big to put an env, insists (slurm::run).
+    # Empty is allowed: only the OpenFold build, which needs room for an env, insists (slurm::run).
     [ -n "$prefix" ] && export OPENFOLD_PREFIX=$prefix
     return 0
 }

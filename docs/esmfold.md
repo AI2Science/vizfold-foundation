@@ -37,11 +37,11 @@ pip install ./backends/esmfold          # torch, transformers, numpy, and the es
 ## Run locally
 
 The executor runs the same entrypoint and records the run and its outputs:
-`vizfold fold 6KWC_1 --backend esmfold`, or `vizfold fold ./my.fasta` for a sequence of your own.
-The commands below call it directly, through the environment's own
-`esmfold` (`$ESMFOLD_ENV_PREFIX/bin/esmfold`, from `vizfold status`; `python -m esmfold` is the same) — it needs
-nothing from the checkout. `scripts/esmfold/run_pretrained_esmf.py` runs the same function by path,
-under the same interpreter.
+`vizfold run 6KWC_1 --backend esmfold`, or `vizfold run ./my.fasta` for a sequence of your own.
+The commands below call it directly, through the environment's own `esmfold` — run it the way
+`vizfold install esmfold` prints, `micromamba run -p $ESMFOLD_ENV_PREFIX esmfold` (`python -m
+esmfold` is the same entrypoint). It needs nothing from the checkout.
+`scripts/esmfold/run_pretrained_esmf.py` runs the same function by path.
 
 **Structure only (fast):**
 
@@ -161,7 +161,7 @@ Folds go to a GPU node whenever the site settled a GPU partition:
 
 ```bash
 vizfold install esmfold
-vizfold fold 6KWC_1 --backend esmfold
+vizfold run 6KWC_1 --backend esmfold
 ```
 
 Two things worth knowing:

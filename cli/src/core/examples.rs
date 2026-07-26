@@ -1,8 +1,5 @@
-//! The bundled monomer examples -- the sequences that fold without an MSA search.
-//!
-//! `<OPENFOLD_HOME>/examples/monomer` holds `fasta_dir_<stem>/<stem>.fasta` beside
-//! `alignments/<id>`. Both must exist to offer one: without the alignments the fold falls back to
-//! the full MSA pipeline, which needs the complete databases and runs for hours.
+//! The bundled monomer examples: `fasta_dir_<stem>/<stem>.fasta` beside `alignments/<id>` under
+//! `<OPENFOLD_HOME>/examples/monomer`. Both must exist, or the fold falls back to a full MSA search.
 
 use std::path::{Path, PathBuf};
 
@@ -29,9 +26,7 @@ pub fn find(id: &str) -> Option<Example> {
     scan_default().into_iter().find(|example| example.id == id)
 }
 
-/// The single sequence at `path`, which may be the FASTA itself or a directory holding one.
-/// The id and the sequence come from the file rather than from the caller, so they cannot
-/// contradict what is actually folded.
+/// The single sequence at `path` -- the FASTA or a directory holding one -- read from the file, not passed in.
 pub fn from_path(path: &Path) -> Option<Example> {
     let fasta = if path.is_dir() {
         first_fasta(path)?
@@ -41,8 +36,7 @@ pub fn from_path(path: &Path) -> Option<Example> {
     parse(&std::fs::read_to_string(fasta).ok()?)
 }
 
-/// Every example in `dir` that has both a FASTA and a matching alignment directory, cheapest
-/// first -- residue count is what someone picking an example is actually choosing on.
+/// Every complete example in `dir`, cheapest first: residue count is what someone is choosing on.
 pub fn scan(dir: &Path) -> Vec<Example> {
     let alignments = dir.join("alignments");
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -78,10 +72,8 @@ fn first_fasta(dir: &Path) -> Option<PathBuf> {
     fastas.into_iter().next()
 }
 
-/// `>1UBQ_1|Chain A|UBIQUITIN|Homo sapiens (9606)` yields id `1UBQ_1`, description `UBIQUITIN`;
-/// a bare `>6KWC_1` yields no description.
-/// ponytail: first record only -- these directories hold one monomer each. Loop them if a
-/// multi-chain example ever ships.
+/// `>1UBQ_1|Chain A|UBIQUITIN|...` yields id `1UBQ_1`, description `UBIQUITIN`; a bare `>6KWC_1` neither.
+/// ponytail: first record only -- one monomer per directory. Loop them if a multi-chain example ships.
 fn parse(text: &str) -> Option<Example> {
     let mut lines = text.lines().skip_while(|line| !line.starts_with('>'));
     let header = lines.next()?.trim_start_matches('>');

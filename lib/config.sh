@@ -14,19 +14,18 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 # Progress line, shared so every installer's output reads the same.
 log() { echo "== $* (+$((SECONDS))s)"; }
 
-# The install root and the one env base under it, each env a fixed vizfold-<backend> name.
-# Mirrored by env_base()/env_dir() in cli/src/core/config.rs.
+# The install root, one env base under it, and one state dir per backend. Mirrored in cli/src/core/config.rs.
 vizfold::prefix() { echo "${OPENFOLD_PREFIX:-$HOME/openfold}"; }
 vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-$(vizfold::prefix)/envs}"; }
 vizfold::env() { echo "$(vizfold::env_base)/vizfold-$1"; }
+vizfold::state() { echo "$(vizfold::prefix)/$1"; }
 
 config::file() {
     echo "${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}"
 }
 
-# Fill unset vars from a JSON file, never overwriting -- so inline > user file > site defaults.
-# Values are templates: $VAR/${VAR} resolves against the environment first, then against the file's
-# own keys, recursively and in any key order. No commands run; an unresolved name expands to empty.
+# Fill unset vars from a JSON file, never overwriting. Values are $VAR templates resolved against the
+# environment first, then the file's own keys, in any order. No commands run; an unknown name is empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
     [ -r "$file" ] && command -v python3 >/dev/null || return 0
@@ -57,8 +56,7 @@ for k, v in scope.items():
 # Activate a micromamba env ($2, a name or path) via its binary ($1). set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$("$1" shell hook --shell bash)"; micromamba activate "$2"; set -u; }
 
-# micromamba at <prefix>/bin/micromamba, downloaded once: every backend's environment and the Node
-# one `vizfold serve` builds come from this one copy.
+# One micromamba at <prefix>/bin, downloaded once: every environment comes from this copy.
 mamba::ensure() {
     local prefix=$1 mm=$1/bin/micromamba build
     if ! "$mm" --version >/dev/null 2>&1; then
@@ -75,10 +73,8 @@ mamba::ensure() {
     echo "$mm"
 }
 
-# The previous install's answers. Called explicitly, and deliberately not at source time: loading
-# here would put them in the environment before a caller has run its own discovery, and nothing
-# downstream can then tell a value the user chose from one an earlier install invented. The
-# installers call this after their <site>.json, which fixes the precedence at
+# The previous install's answers. Never at source time: that would land them ahead of live discovery.
+# Called after <site>.json, fixing the precedence at
 #   inline env > slurm::discover > <site>.json > saved vizfold.json > built-in default
 config::load() { config::fill "$(config::file)" "config"; }
 
@@ -92,9 +88,8 @@ OPENFOLD_ACCOUNT OPENFOLD_PARTITION OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION
 OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE
 VIZFOLD_DB"
 
-# Every key, every time -- empty for what this install did not settle. config::load has already put
-# the previous install's values in the environment, so a second backend rewrites them rather than
-# dropping the keys it does not know about.
+# Every key, every time -- empty for what this install did not settle. config::load has already put the
+# earlier values in the environment, so a second backend rewrites them rather than dropping them.
 config::save() {
     local file
     file=$(config::file)

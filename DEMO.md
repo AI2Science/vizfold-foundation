@@ -65,21 +65,10 @@ data directory land under your `/work/nvme` allocation. Everything after this po
 `status` leads with the health of each part rather than only reporting the config; anything wrong
 is listed under `Problems:` with the command that fixes it.
 
-## 1. Seed the executor records
+## 1. Inspect the executor records
 
-Queueing a run seeds these records for you; run this to create the catalog up front — the OpenFold
-backend, the local execution target, and the invocation profile that ties them together. It is
-existence-guarded, so re-running is harmless.
-
-```bash
-vizfold seed
-```
-
-```text
-Seeded default executor records.
-```
-
-You can inspect what it created:
+Queueing a run seeds the catalog for you — the OpenFold backend, the local execution target, and the
+invocation profile that ties them together. Inspect what it created:
 
 ```bash
 vizfold list models
@@ -94,7 +83,7 @@ default off the config and the checkout examples, and the sequence is read from 
 id is the only flag you need:
 
 ```bash
-vizfold queue-run openfold --input-id 6KWC_1
+vizfold queue openfold --input-id 6KWC_1
 ```
 
 Attention maps are dumped by default; pass `--attn=false` to skip them.
@@ -105,10 +94,10 @@ status: submitted
 input_id: 6KWC_1
 
 Next:
-  vizfold fold 1
+  vizfold run 1
 ```
 
-What the omitted flags default to (all overridable — see `vizfold queue-run openfold --help`):
+What the omitted flags default to (all overridable — see `vizfold queue openfold --help`):
 
 | Flag | Default on a cluster install |
 | --- | --- |
@@ -126,7 +115,7 @@ when you queue.
 ## 3. Execute the run
 
 ```bash
-vizfold fold 1
+vizfold run 1
 ```
 
 `fold` prints each preflight check — the `gpu` one warns because the login node has none —
@@ -243,11 +232,11 @@ and records the run. To use the backend on its own instead, run its CLI inside i
 ```
 
 `micromamba run -p` applies the environment's activation hooks — `CUTLASS_PATH`, the library
-paths, and the NVRTC `LD_PRELOAD` where the install pinned one — so the model sees exactly what it
-sees under `vizfold fold`. That is the model's own CLI, so every path is yours to pass: the
-databases, the alignment directory, the output directory. ESMFold's environment needs no
-activation hooks, so `$ESMFOLD_ENV_PREFIX/bin/esmfold --help` is enough there. Nothing about either
-needs the `vizfold` binary on your `PATH`.
+paths, `OPENFOLD_DATA_DIR`, and the NVRTC `LD_PRELOAD` where the install pinned one — so the model
+sees exactly what it sees under `vizfold run`, which runs it the same way. That is the model's own
+CLI, so every path is yours to pass: the databases, the alignment directory, the output directory.
+ESMFold is the same command against its own environment. Neither needs the `vizfold` binary on
+your `PATH`.
 
 ## Common failure modes
 

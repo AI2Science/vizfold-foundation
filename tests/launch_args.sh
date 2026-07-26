@@ -36,8 +36,7 @@ got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part "") | tr 
 want=$(printf "$base" "")
 check "$want" "$got" "no tty means no pty"
 
-# slurm::cluster: each source in turn, because no single one works everywhere. Delta's login nodes
-# cannot reach slurmctld (scontrol exits 1, empty), DeltaAI has no readable slurm.conf.
+# slurm::cluster tries each source: Delta cannot reach slurmctld, DeltaAI has no readable slurm.conf.
 conf=${TMPDIR:-/tmp}/vizfold-slurm-conf.$$
 printf 'ControlMachine=x\nClusterName=Delta\nSelectType=cray\n' > "$conf"
 trap 'rm -f "$conf"' EXIT
@@ -65,11 +64,8 @@ done
 # sbatch must be gone entirely.
 grep -q sbatch "$REPO/lib/slurm.sh" && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
 
-# A saved config must not pin the site. Sourcing the libs no longer loads it, so what an earlier
-# install settled arrives under the site's own defaults instead of ahead of live detection --
-# otherwise an OPENFOLD_SITE written on a login node where scontrol failed ("local") sticks forever.
-# A fresh bash each time: config.sh guards against re-sourcing, so testing this in a subshell of a
-# process that already sourced it would pass no matter what the file does.
+# A saved config must not pin the site, or an OPENFOLD_SITE of "local" written where scontrol failed
+# sticks forever. A fresh bash each time: config.sh's re-source guard would make a subshell pass anyway.
 saved=${TMPDIR:-/tmp}/vizfold-saved-config.$$
 printf '{"OPENFOLD_SITE": "local", "OPENFOLD_PREFIX": "/invented/by/an/earlier/install"}\n' > "$saved"
 trap 'rm -f "$conf" "$saved"' EXIT

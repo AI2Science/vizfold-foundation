@@ -1,6 +1,5 @@
 #!/bin/bash
-# One vocabulary: the binary must not resolve a name the config never carries, and a <site>.json
-# must not set a name nothing consumes. Run: bash tests/vocabulary.sh
+# One vocabulary: no name the config never carries, no site key nothing consumes. Run: bash tests/vocabulary.sh
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO"
@@ -10,8 +9,7 @@ VIZFOLD_CONFIG=/nonexistent/vocabulary-test.json; export VIZFOLD_CONFIG
 fail=0
 schema=$(printf '%s\n' $VIZFOLD_CONFIG_KEYS | sort)
 
-# Names a <site>.json may set that the install consumes and deliberately does not persist: a
-# re-install re-reads the same file, so saving them would record an answer nobody asks for again.
+# Site keys the install consumes but never persists: a re-install re-reads the same file.
 install_only="OPENFOLD_ALLOCATION OPENFOLD_BASE OPENFOLD_BUILD_CPUS OPENFOLD_BUILD_GRES
 OPENFOLD_BUILD_MEM OPENFOLD_BUILD_TIME OPENFOLD_GPU_ACCOUNT_SUFFIX"
 
@@ -37,8 +35,7 @@ report "every site key is persisted or knowingly install-only" \
     "$(comm -23 <(printf '%s\n' $site_keys) <(printf '%s\n' $known))" \
     "add it to VIZFOLD_CONFIG_KEYS, or to install_only here if the install consumes it and stops"
 
-# Every $VAR in a site value must be provided by something, or it expands to empty and the install
-# proceeds with a mangled value -- how "$ALLOC-delta-cpu" once became the account "-delta-cpu".
+# An unprovided $VAR expands to empty: this is how "$ALLOC-delta-cpu" once became the account "-delta-cpu".
 templated=$(grep -ohE '\$\{?[A-Z0-9_]+\}?' sites/*.json | tr -d '${}' | sort -u)
 provided=$(printf '%s\n' $schema $install_only USER HOME \
     $(grep -ohE 'export [A-Z0-9_]+|[A-Z0-9_]+=' sites/*.sh lib/slurm.sh | tr -d '=' | sed 's/export //') |
