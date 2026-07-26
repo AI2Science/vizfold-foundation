@@ -9,6 +9,8 @@ __pycache__/
 # build outputs
 build/
 dist/
+# OpenFold's CUDA extension, built in place by the editable install.
+*.so
 
 # files from script downloads
 backends/openfold/openfold/resources/

@@ -109,7 +109,7 @@ pub fn default_src() -> PathBuf {
 pub fn data_dir() -> PathBuf {
     resolved("OPENFOLD_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| openfold_home().join("data"))
+        .unwrap_or_else(|| prefix().join("data"))
 }
 
 /// The one directory holding every environment the install creates. Mirrors `vizfold::env_base`

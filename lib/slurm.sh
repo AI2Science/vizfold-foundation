@@ -64,7 +64,7 @@ slurm::default_prefix() { echo "${OPENFOLD_BASE:+$OPENFOLD_BASE/vizfold}"; }
 
 # Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
 slurm::scratch_root() {
-    local s; s=$(readlink -f "$HOME/scratch") || return 1
+    local s; [ -d "$HOME/scratch" ] || return 1; s=$(readlink -f "$HOME/scratch")
     case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
 }
 

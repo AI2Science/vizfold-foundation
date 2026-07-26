@@ -36,6 +36,9 @@ setup::config() {
     export CONDA_PKGS_DIRS=$PREFIX/../.openfold-pkgs
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba TMPDIR=$PREFIX/tmp
     export PIP_CACHE_DIR=$PREFIX/../.openfold-pip
+    # setup::verify imports deepspeed, whose autotune cache defaults to a quota'd NFS $HOME.
+    # Node-local, as run_execution.rs gives a fold.
+    export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vizfold-triton-$(id -u)}
     export MAX_JOBS="${MAX_JOBS:-${SLURM_CPUS_PER_TASK:-4}}"
     # Every GPU these sites schedule (7.0 V100 .. 9.0 H100); a missing arch = "no kernel image".
     export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-$ARCH_DEFAULT}"
