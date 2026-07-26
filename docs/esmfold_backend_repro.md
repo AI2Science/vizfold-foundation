@@ -6,12 +6,11 @@ Verifying the ESMFold backend end to end: inference, trace extraction, and the a
 
 ```bash
 vizfold install esmfold
-vizfold status                          # prints OPENFOLD_PREFIX and ESMFOLD_ENV_PREFIX
+vizfold status                          # prints ESMFOLD_ENV_PREFIX
 
-# neither is exported into your shell -- set them from what status printed
-export OPENFOLD_PREFIX=... ESMFOLD_ENV_PREFIX=...
-MM="$OPENFOLD_PREFIX/bin/micromamba"    # drive the backend through its own env
-$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold --help
+# it is not exported into your shell -- set it from what status printed
+export ESMFOLD_ENV_PREFIX=...
+micromamba run -p "$ESMFOLD_ENV_PREFIX" esmfold --help
 ```
 
 The installer brings its own Python 3.11 — a login node's `python3` is routinely too old. For a
@@ -20,7 +19,7 @@ manual pip install instead, see Option B in [esmfold.md](esmfold.md#install).
 ## Structure-Only Inference Test
 
 ```bash
-$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold \
+micromamba run -p "$ESMFOLD_ENV_PREFIX" esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_run \
   --trace_mode none \
@@ -37,7 +36,7 @@ Expected outputs:
 ## Trace Extraction Test (Attention + Activations)
 
 ```bash
-$MM run -p "$ESMFOLD_ENV_PREFIX" esmfold \
+micromamba run -p "$ESMFOLD_ENV_PREFIX" esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/test_trace \
   --trace_mode attention+activations \

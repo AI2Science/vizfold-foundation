@@ -5,7 +5,7 @@ activations and per-layer, per-head attention maps, ready to explore.
 
 The `vizfold` CLI is the platform; a model backend — a pip/conda-installable package under
 `backends/<name>/` with its own environment and installer — plugs in underneath. **OpenFold** is
-the full cluster install (micromamba env, CUDA extension build, AlphaFold2 databases); **ESMFold**
+the full cluster install (conda env, CUDA extension build, AlphaFold2 databases); **ESMFold**
 is lighter, with its own Python, PyTorch and Transformers and weights pulled from HuggingFace at
 run time.
 
@@ -13,15 +13,18 @@ run time.
 
 ## Install
 
-Releases are Linux only, x86_64 or aarch64. Two steps on a cluster. First bootstrap the CLI:
+Releases are Linux only, x86_64 or aarch64. Two steps on a cluster. First bootstrap the core
+dependencies:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 ```
 
 That fetches the prebuilt binary for your architecture from the latest GitHub release into
-`~/.local/bin` (set `VIZFOLD_VERSION=vX.Y.Z` to pin a release). Then a backend — OpenFold below,
-or `vizfold install esmfold` (see [docs/esmfold.md](docs/esmfold.md)):
+`~/.local/bin` (set `VIZFOLD_VERSION=vX.Y.Z` to pin a release), along with `micromamba` beside it:
+every environment is created and run through it, and everything after this point assumes both are
+on your `PATH`. Then a backend — OpenFold below, or `vizfold install esmfold`
+(see [docs/esmfold.md](docs/esmfold.md)):
 
 ```bash
 vizfold install openfold
@@ -71,19 +74,18 @@ droppings its `pip install` left in the checkout:
 vizfold uninstall openfold
 ```
 
-The config, the run database, the checkout, micromamba (shared by every environment) and any other
-backend stay, so `vizfold install openfold` puts it back where it was.
+The config, the run database, the checkout, the shared package cache and any other backend stay,
+so `vizfold install openfold` puts it back where it was.
 
 ```bash
 vizfold uninstall
 ```
 
-With no backend named it takes every backend and, on top, the workbench environment, micromamba
-and its root, `vizfold.db`, `~/.config/vizfold/vizfold.json`, the staged workbench, and the
-checkout vizfold cloned into `$HOME/vizfold-src`. It lists what it will remove and asks first
-(`--yes` skips the prompt). Fold outputs, a checkout you pointed it at yourself with
-`OPENFOLD_HOME`, and the `vizfold` binary are left alone; drop the binary with
-`rm ~/.local/bin/vizfold`.
+With no backend named it takes every backend and, on top, the workbench environment, the package
+cache, `vizfold.db`, `~/.config/vizfold/vizfold.json`, the staged workbench, and the checkout
+vizfold cloned into `$HOME/vizfold-src`. It lists what it will remove and asks first (`--yes` skips
+the prompt). Fold outputs, a checkout you pointed it at yourself with `OPENFOLD_HOME`, and the
+bootstrapped binaries are left alone; drop those with `rm ~/.local/bin/vizfold ~/.local/bin/micromamba`.
 
 ### Supported clusters
 
@@ -286,7 +288,7 @@ For a full end-to-end walkthrough on a cluster, see [DEMO.md](DEMO.md).
 - `docs/` — architecture notes and backlog. `examples/` — inputs, attention-viz utilities, notebooks.
 
 Each backend also installs its own CLI into its environment under its own name, invoked as
-`<prefix>/bin/micromamba run -p <env> <name> --help` — the same form for both, and independent of the
+`micromamba run -p <env> <name> --help` — the same form for both, and independent of the
 `vizfold` binary. Through vizfold, `queue` and `run` fill the model's arguments from the config and
 record the run.
 

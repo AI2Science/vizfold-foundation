@@ -55,8 +55,7 @@ yourself gets no such redirect — set `HF_HOME` first.
 The entrypoint exists only inside the backend env, so run it the way `vizfold install esmfold` prints:
 
 ```bash
-# <prefix> is OPENFOLD_PREFIX (default ~/openfold), <env> is ESMFOLD_ENV_PREFIX -- both from `vizfold status`
-<prefix>/bin/micromamba run -p <env> esmfold \
+micromamba run -p <env> esmfold \
   --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta \
   --out outputs/esmf_6KWC \
   --trace_mode attention+activations \

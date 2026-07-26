@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bootstrap the vizfold platform CLI: download the release binary into ~/.local/bin, then `vizfold install` installs a model backend (OpenFold, ESMFold; each a pip/conda-installable package under backends/<name>/ with its own installer).
+# Bootstrap vizfold's core dependencies into ~/.local/bin -- the release binary and micromamba, which every environment is created and run through. Then `vizfold install` installs a model backend (OpenFold, ESMFold; each a pip/conda-installable package under backends/<name>/ with its own installer).
 set -euo pipefail
 
 die() { echo "FATAL: $*" >&2; exit 1; }
@@ -9,20 +9,22 @@ bootstrap::config() {
     REPO=${VIZFOLD_REPO:-AI2Science/vizfold-foundation}
     VERSION=${VIZFOLD_VERSION:-latest}   # a release tag (e.g. v0.1.0) or "latest"
     BIN=${VIZFOLD_BIN_DIR:-$HOME/.local/bin}
+    mkdir -p "$BIN"
 }
 
-# The release asset for this machine. Linux only: that is what release.yml publishes, and a model
-# backend needs CUDA and a scheduler anyway.
-bootstrap::asset() {
-    local arch
+# One OS/arch detection for every binary this bootstrap installs. Linux only: that is what
+# release.yml publishes, and a model backend needs CUDA and a scheduler anyway.
+bootstrap::arch() {
     [ "$(uname -s)" = Linux ] || die "vizfold releases are Linux-only (this is $(uname -s))"
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64)  arch=x86_64 ;;
-        aarch64|arm64) arch=aarch64 ;;
-        *) die "unsupported architecture: $arch" ;;
+    case "$(uname -m)" in
+        x86_64|amd64)  ARCH=x86_64;  MAMBA_BUILD=linux-64 ;;
+        aarch64|arm64) ARCH=aarch64; MAMBA_BUILD=linux-aarch64 ;;
+        *) die "unsupported architecture: $(uname -m)" ;;
     esac
-    ASSET="vizfold-linux-${arch}"
+}
+
+bootstrap::asset() {
+    ASSET="vizfold-linux-${ARCH}"
     if [ "$VERSION" = latest ]; then
         URL="https://github.com/$REPO/releases/latest/download/$ASSET"
     else
@@ -31,12 +33,22 @@ bootstrap::asset() {
 }
 
 bootstrap::download() {
-    mkdir -p "$BIN"
     echo "downloading $ASSET ($VERSION) from $REPO ..."
     curl -fsSL "$URL" -o "$BIN/vizfold" ||
         die "download failed: $URL -- check that a release with this asset exists (set VIZFOLD_VERSION to pin one)"
     chmod +x "$BIN/vizfold"
     echo "installed vizfold to $BIN/vizfold"
+}
+
+# micromamba creates and runs every environment; everything downstream assumes it is on PATH.
+bootstrap::micromamba() {
+    if [ -x "$BIN/micromamba" ] || command -v micromamba >/dev/null; then return; fi
+    echo "downloading micromamba ($MAMBA_BUILD) ..."
+    # A failed fetch leaves a non-executable file, so the guard above self-heals on the next run.
+    curl -fsSL "https://micro.mamba.pm/api/micromamba/$MAMBA_BUILD/latest" |
+        tar -xj -O bin/micromamba > "$BIN/micromamba" || die "micromamba download failed"
+    chmod +x "$BIN/micromamba"
+    echo "installed micromamba to $BIN/micromamba"
 }
 
 # Put ~/.local/bin on PATH for future shells (idempotent), and note it for this one.
@@ -52,8 +64,10 @@ bootstrap::path() {
 
 main() {
     bootstrap::config
+    bootstrap::arch
     bootstrap::asset
     bootstrap::download
+    bootstrap::micromamba
     bootstrap::path
     echo "vizfold installed at $BIN/vizfold. Run \`vizfold install openfold\` (or \`esmfold\`) to install a model backend."
 }
