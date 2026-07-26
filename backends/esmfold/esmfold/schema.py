@@ -1,14 +1,9 @@
-"""
-Trace schema and metadata helpers for ESMFold outputs.
-
-Ensures VizFold-compatible archive format and publication-grade metadata.
-"""
+"""Trace schema and metadata helpers for ESMFold outputs."""
 import hashlib
 import json
 import os
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -79,7 +74,7 @@ def build_meta(
         meta["seed"] = seed
     if deterministic:
         meta["deterministic"] = True
-    commit = _git_head(repo_path)
+    commit = _git_head()
     if commit:
         meta["repo_commit"] = commit
     return meta

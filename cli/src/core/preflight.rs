@@ -62,12 +62,6 @@ impl PreflightReport {
     }
 }
 
-// --- Checks every local_subprocess backend shares -------------------------------------------
-//
-// These validate the planned command itself and the run's basic inputs, independent of any one
-// model's data. They lived in the OpenFold runner and were imported from there by the ESMFold
-// one, which made shared code read as OpenFold's.
-
 use std::path::Path;
 
 use crate::core::commands::CommandSpec;
@@ -93,9 +87,7 @@ pub fn gpu_check(detected: Option<&str>) -> PreflightCheck {
     }
 }
 
-/// Program/script-argument/working-directory/script-file checks shared by every local_subprocess
-/// backend's preflight (OpenFold, ESMFold): they validate the planned command itself, independent
-/// of a backend's inputs. Callers push these after `gpu_check` and before their own input checks.
+/// Callers push these command checks after `gpu_check` and before their own input checks.
 pub fn base_command_checks(command: &CommandSpec) -> Vec<PreflightCheck> {
     let program = if command.program.trim().is_empty() {
         PreflightCheck::failed("program configured", "command program is empty")

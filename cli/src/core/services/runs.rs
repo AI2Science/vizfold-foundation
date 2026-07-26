@@ -114,11 +114,8 @@ pub async fn submit_run(
         require_json_object("execution_parameters", &input.execution_parameters_json)?;
     reject_unknown_keys("model_parameters", &model_schema, &model_params)?;
 
-    // TODO: Execution parameter validation should eventually distinguish target
-    // available resources/capabilities from concrete per-run execution values and
-    // invocation-profile-specific requirements. For now, submit_run only requires
-    // execution_parameters_json to be a JSON object; model-specific planning performs
-    // additional validation where needed.
+    // Execution parameters are only shape-checked here; the planner validates their values
+    // against the target's available resources.
 
     runs::ActiveModel {
         model_backend_id: Set(input.model_backend_id),

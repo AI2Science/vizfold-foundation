@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use sea_orm::DbErr;
 use serde_json::Value;
 
-use super::plan::{optional_bool, optional_string, parse_object};
+use super::plan::{optional_bool, optional_string};
+use crate::core::services::validation::require_json_object;
 use crate::core::{
     commands::CommandSpec,
     entities::{model_invocation_profiles, runs},
@@ -19,7 +20,7 @@ pub fn preflight_openfold(
     invocation_profile: &model_invocation_profiles::Model,
     run: &runs::Model,
 ) -> Result<PreflightReport, DbErr> {
-    let execution_parameters = parse_object(
+    let execution_parameters = require_json_object(
         "run execution_parameters_json",
         &run.execution_parameters_json,
     )?;

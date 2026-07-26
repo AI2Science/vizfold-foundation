@@ -84,8 +84,7 @@ struct DownloadArgs {
     dataset: String,
 }
 
-/// A model backend `vizfold install` can provision. Each knows the installer script it runs
-/// (relative to the checkout) and the env prefix whose presence means "installed".
+/// A model backend vizfold supports.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum Backend {
     Openfold,
@@ -100,9 +99,8 @@ impl Backend {
         }
     }
 
-    /// Installer script, relative to the vizfold checkout. Each backend owns its installer under
-    /// `backends/<name>/install/`: OpenFold's picks a site and dispatches the cluster install;
-    /// ESMFold's is a self-contained environment install.
+    /// Installer script, relative to the vizfold checkout: each backend owns one under
+    /// `backends/<name>/install/`.
     fn installer(self) -> &'static str {
         match self {
             Self::Openfold => config::INSTALLER,
@@ -110,9 +108,8 @@ impl Backend {
         }
     }
 
-    /// Data-download entrypoint, relative to the checkout, for `vizfold download`. OpenFold ships
-    /// the AlphaFold2 DB/params fetchers under `downloaders/openfold/`; ESMFold has none (it pulls
-    /// its weights from HuggingFace at run time), so its downloader is `None`.
+    /// Data-download entrypoint, relative to the checkout. `None` for ESMFold: it pulls its
+    /// weights from HuggingFace at run time.
     fn downloader_dir(self) -> Option<&'static str> {
         match self {
             Self::Openfold => Some("downloaders/openfold"),
@@ -147,14 +144,12 @@ impl Backend {
             Self::Esmfold => {
                 // The pre-env-base layout, still out there on installs that predate it.
                 paths.push(prefix.join("esmfold-venv"));
-                // Its pip cache, parked beside the prefix by its installer. Its own name, so this
-                // never removes OpenFold's.
+                // Its pip cache, parked beside the prefix by its installer.
                 paths.extend(prefix.parent().map(|dir| dir.join(".esmfold-pip")));
             }
             Self::Openfold => {
                 // `params` is where installs before the data-dir move put the weights; a target
-                // that does not exist is filtered out below, so it costs nothing and still
-                // cleans up those installs.
+                // that does not exist is filtered out below.
                 paths.extend(
                     ["cutlass", "tmp", "data", ".done", "params"].map(|entry| prefix.join(entry)),
                 );
@@ -223,7 +218,7 @@ struct SelfUpdateArgs {
 
 #[derive(Debug, Args)]
 struct ServeArgs {
-    /// Port for the dashboard dev server (defaults to 3000).
+    /// Port for the dashboard dev server. Defaults to 3000.
     #[arg(long)]
     port: Option<u16>,
 }
@@ -243,8 +238,8 @@ struct ExecuteRunArgs {
     /// Ignored for an already-queued run, which carries its own.
     #[arg(long, value_enum)]
     backend: Option<Backend>,
-    /// Dump per-layer, per-head attention maps. Applies when queueing; an already-queued run
-    /// keeps whatever it was queued with.
+    /// Dump per-layer, per-head attention maps (OpenFold). Applies when queueing; an
+    /// already-queued run keeps whatever it was queued with.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     attn: bool,
     /// Print only the run as JSON, for tools driving the CLI.
@@ -302,8 +297,7 @@ enum QueueRunModel {
 
 #[derive(Clone, Debug, Args)]
 struct EsmfoldQueueArgs {
-    /// Name recorded for this run. Defaults to the FASTA's header tag, which is the only value
-    /// the backends accept anyway.
+    /// Name recorded for this run. Defaults to the FASTA's header tag.
     #[arg(long)]
     input_id: Option<String>,
     /// FASTA to fold: the file, or a directory holding exactly one.
@@ -319,7 +313,7 @@ struct EsmfoldQueueArgs {
     /// What to extract: none, attention, activations, or attention+activations.
     #[arg(long, default_value = "attention+activations")]
     trace_mode: String,
-    /// Layers to save: 'all' or a comma/colon list.
+    /// Layers to save: `all` or a comma/colon list.
     #[arg(long, default_value = "all")]
     layers: String,
     /// Model dtype.
@@ -369,8 +363,8 @@ struct OpenfoldQueueArgs {
     /// How many recycling iterations to keep outputs for.
     #[arg(long, default_value_t = 1)]
     num_recycles_save: i64,
-    /// Use the precomputed alignments in <OPENFOLD_HOME>/examples/monomer/alignments
-    /// (the default). Pass `--use-precomputed-alignments=false` for the full MSA pipeline.
+    /// Use the precomputed alignments in `--alignment-dir`. Pass
+    /// `--use-precomputed-alignments=false` for the full MSA pipeline.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     use_precomputed_alignments: bool,
 }
@@ -432,7 +426,7 @@ fn default_cpus() -> i64 {
 
 /// Clamp the requested CPU count to the execution target's `cpus.maximum`, so a host with more
 /// cores than the target allows (a beefy workstation, any HPC login node) still queues a run
-/// that `execute-run` can plan -- rather than failing only once execution is attempted.
+/// that `fold` can plan -- rather than failing only once execution is attempted.
 fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
     let max_cpus = serde_json::from_str::<serde_json::Value>(available_resources_json)
         .ok()
@@ -444,8 +438,8 @@ fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // `install` is the bootstrap, `uninstall` cleans up after a partial one, and `status` reports
-    // where things stand before either has run; everything else requires an initialized config.
+    // These have to work before a config exists: `install` bootstraps it, `uninstall` cleans up
+    // after a partial one, `status` reports where things stand, the updaters fix the checkout.
     if !matches!(
         cli.command,
         Command::Install(_)
@@ -510,10 +504,9 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Install a model backend by running the checkout's installer for it (`backends/<name>/install/install.sh`)
-/// with inherited stdio. The release binary ships
+/// Install a model backend by running the checkout's installer for it. The release binary ships
 /// only itself, so the checkout is cloned on first install. Idempotent: the installers are
-/// sentinel- or import-guarded, so re-running is safe.
+/// sentinel- or import-guarded.
 fn run_install(backend: Backend) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let installer = src.join(backend.installer());
@@ -552,10 +545,7 @@ fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<
         .ok_or_else(|| DbErr::Custom(format!("{what}: {status}")))
 }
 
-/// Download a backend's data by running the checkout's downloader for the requested dataset into
-/// `config::data_dir()`. `all` runs `download_alphafold_dbs.sh`; any other name maps to
-/// `download_<name>.sh`. ESMFold has no downloaders (it pulls weights from HuggingFace at run
-/// time), so it prints a note and succeeds. Mirrors `run_install`: clones the checkout if absent.
+/// Download a backend's data into `config::data_dir()`, cloning the checkout if absent.
 fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     let Some(dir) = backend.downloader_dir() else {
         println!(
@@ -589,9 +579,8 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
         script.display(),
         dest.display()
     );
-    // 14 of the downloaders require aria2c and 3 require aws, and both ship only inside the
-    // OpenFold environment (environment.yml). Run bare, they tell an unprivileged user on a login
-    // node to `sudo apt install aria2`; with the env's bin ahead of PATH they just work.
+    // The downloaders need aria2c and aws, which ship only inside the OpenFold environment
+    // (environment.yml); run bare, they tell an unprivileged user to `sudo apt install aria2`.
     let path = std::env::var("PATH").unwrap_or_default();
     let env_bin = config::openfold_env_prefix().join("bin");
     run_to_completion(
@@ -604,8 +593,7 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     )
 }
 
-/// Lead with the health of every part that can break on its own, then the config it was resolved
-/// from. Runs before any install, and needs no database.
+/// Runs before any install, so it needs no database.
 fn run_status() -> Result<(), DbErr> {
     println!("VizFold status\n");
     let components = health();
@@ -1254,9 +1242,8 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
         }
     }
     match args.backend {
-        Some(backend) => println!(
-            "\nKept: the config, the run database, and every other backend.\nReinstall with: vizfold install {what}",
-            what = backend.slug()
+        Some(_) => println!(
+            "\nKept: the config, the run database, and every other backend.\nReinstall with: vizfold install {what}"
         ),
         None => {
             // Only once emptied: remove_dir refuses otherwise, which is the whole guard.
@@ -1281,8 +1268,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
 /// the fold outputs too.
 fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
     // Named entries, never the env base itself: VIZFOLD_ENV_BASE may point at a directory of the
-    // user's own environments, of which only the `vizfold-` ones are ours. The backends bring
-    // theirs; nothing but a full uninstall takes the one `serve` provisions Node into.
+    // user's own environments, of which only the `vizfold-` ones are ours.
     let mut paths = vec![
         config::env_dir("workbench"),
         prefix.join("vizfold.db"),
@@ -1338,12 +1324,11 @@ fn confirmed() -> Result<bool, DbErr> {
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let workbench = serve_dir()?;
 
-    // Serve run outputs to the browser by linking the seeded output_location under the
-    // dashboard's public/, so Next serves <prefix>/runs/<id>/... at /runs/<id>/... with no
-    // file-serving code of our own.
-    // ponytail: targets the seeded output_location (prefix/runs). A profile with a different
-    // output_location isn't reachable this way -- read it from the run's provenance if that ever
-    // happens.
+    // Link the seeded output_location under the dashboard's public/, so Next serves
+    // <prefix>/runs/<id>/... at /runs/<id>/... with no file-serving code of our own.
+    // ponytail: only the seeded output_location; a profile with a different one isn't reachable
+    // this way -- read it from the run's provenance if that ever happens.
+
     let runs_dir = config::prefix().join("runs");
     std::fs::create_dir_all(&runs_dir).ok();
     // public/ may not exist (a workbench with no static assets); the symlink's parent must.
@@ -1379,10 +1364,8 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
 }
 
 /// Directory the dashboard runs from. A cluster home is inode-quota-capped NFS, so on a real
-/// install (prefix on a separate work fs) run the dashboard from a copy on that work fs — then
-/// npm's node_modules/.next land there, never on home. Dev checkout (prefix == home): run in
-/// place. The copy skips node_modules/.next (build artifacts) and preserves any already staged
-/// in the destination.
+/// install (prefix on a separate work fs) run the dashboard from a copy on that work fs -- then
+/// npm's node_modules/.next land there, never on home. Dev checkout (prefix == home): run in place.
 fn serve_dir() -> Result<PathBuf, DbErr> {
     let src = config::openfold_home().join("workbench");
     if config::prefix() == config::openfold_home() {
@@ -1689,10 +1672,9 @@ fn list_examples(json: bool) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Execute a run -- either one already queued, by id, or a bundled example, which is queued first.
-/// Folding an example *is* executing a run, so it is one verb rather than two. Artifacts are
-/// registered on the way out: a completed run whose outputs were never registered is invisible to
-/// the dashboard, and registration is idempotent and skips directories that do not exist.
+/// Execute a run: one already queued, by id, or a bundled example or FASTA, which is queued first
+/// -- folding *is* executing a run, so it is one verb. Artifacts are re-registered on the way out
+/// (idempotent): a completed run whose outputs were not registered is invisible to the dashboard.
 async fn run_execute(
     database: &sea_orm::DatabaseConnection,
     args: ExecuteRunArgs,
@@ -1787,7 +1769,6 @@ async fn run_execute(
     )))
 }
 
-/// A target that is neither a run id nor a bundled example.
 fn unknown_target(target: &str) -> DbErr {
     let available: Vec<String> = examples::scan_default()
         .into_iter()

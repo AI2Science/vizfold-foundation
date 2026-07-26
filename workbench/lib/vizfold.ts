@@ -41,7 +41,7 @@ export function foldInBackground(runId: number): void {
   const logs = `${PREFIX}/runs`;
   mkdirSync(logs, { recursive: true });
   const log = openSync(`${logs}/${runId}.submit.log`, "a");
-  const child = spawn(BIN, ["execute-run", String(runId)], {
+  const child = spawn(BIN, ["fold", String(runId)], {
     detached: true,
     stdio: ["ignore", log, log],
   });

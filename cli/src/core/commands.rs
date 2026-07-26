@@ -8,7 +8,7 @@ pub struct CommandSpec {
     pub args: Vec<String>,
     pub current_dir: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
-    /// Inherit the parent's stdio instead of capturing it, so a long run reports progress live.
+    /// Relay the child's output to the parent instead of capturing it, so a long run reports progress live.
     pub stream: bool,
 }
 
@@ -46,10 +46,8 @@ impl CommandRunner for LocalCommandRunner {
         };
 
         if spec.stream {
-            // The model's own chatter is progress, not this command's result, so it goes to stderr
-            // and leaves stdout for what the caller asked for -- `execute-run --json` prints one
-            // JSON line there and anything interleaved ahead of it makes the line unparseable.
-            // Copied rather than redirected by fd so it streams live on every platform.
+            // Progress, not this command's result: stdout stays clean so `fold --json`'s one line
+            // parses. Copied rather than redirected by fd so it streams live on every platform.
             command.stdout(std::process::Stdio::piped());
             let mut child = command.spawn().map_err(spawn_error)?;
             let relay = child.stdout.take().map(|mut out| {

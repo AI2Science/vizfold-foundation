@@ -1,8 +1,8 @@
 """ESMFold inference with VizFold-compatible trace export -- the backend's entrypoint.
 
-Installed as `vizfold-esmfold` in the environment, so a fold needs nothing from the checkout.
+Installed as the `esmfold` command in the backend env, so a fold needs nothing from the checkout.
 Writes an archive under --out: meta.json, structure/, trace/attention/, trace/activations/,
-trace/index.json, logs.txt. `--help` lists the flags.
+trace/index.json, logs.txt.
 """
 import argparse
 import os

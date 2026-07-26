@@ -7,8 +7,7 @@ set -euo pipefail
 # walking up. The BASH_SOURCE fallback covers a direct local run (lib/ is three levels up).
 LIB=${OPENFOLD_HOME:+$OPENFOLD_HOME/lib}
 . "${LIB:-$(dirname "${BASH_SOURCE[0]}")/../../../lib}/config.sh"
-# For a direct run of this script. Under `vizfold install` everything install.sh settled is already
-# exported, and config::fill never overwrites a set var, so this fills nothing.
+# For a direct run: under `vizfold install` install.sh already exported these, and config::fill never overwrites.
 config::load
 
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
@@ -51,7 +50,7 @@ setup::preflight() {
     hostname
     nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null || echo "no GPU on this node"
     echo "prefix=$PREFIX repo=$REPO env=$ENV_DIR max_cuda=$MAX_CUDA mirror=$MIRROR${AF2:+ ($AF2)}"
-    test -f "$OF/setup.py" || die "$REPO is not an OpenFold checkout"
+    test -f "$OF/setup.py" || die "no openfold backend at $OF; is $REPO a vizfold checkout?"
 }
 
 setup::micromamba() { mamba::ensure "$PREFIX" >/dev/null; }
@@ -80,7 +79,7 @@ setup::cutlass() {
     git clone -q https://github.com/NVIDIA/cutlass --branch v3.6.0 --depth 1 "$CUTLASS"
 }
 
-# OpenMM JITs via NVRTC; older driver rejects newer PTX. Detect whether the env's NVRTC outruns the driver.
+# OpenMM JITs via NVRTC; older driver rejects newer PTX.
 setup::nvrtc_detect() {
     log nvrtc
     DRIVER_CUDA=${OPENFOLD_DRIVER_CUDA:-$(python3 -c "
@@ -146,8 +145,7 @@ setup::link_mirror() {
         compgen -G "$c/uniclust30_2018_08_*" >/dev/null 2>&1 && { src=$c; break; }
     done
     if [ -n "$src" ]; then
-        # Per-file explicit link name (see the $DATA loop above): robust whether the glob matches
-        # one file or many, unlike a trailing-slash "$UNICLUST/" dest.
+        # Per-file explicit link name, for the reason the $DATA loop above gives.
         for u in "$src"/uniclust30_2018_08_*; do ln -sfn "$u" "$UNICLUST/${u##*/}"; done
     else
         for f in "$AF2"/uniref30/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]*; do
@@ -157,9 +155,8 @@ setup::link_mirror() {
     fi
 }
 
-# No mirror: fetch params (4 GB, into the data dir) and the mmCIFs the examples cite.
-# $DATA, not $PREFIX: `vizfold download openfold alphafold_params` hands the same script the same
-# directory, and the two must land the weights where the other one looks for them.
+# No mirror: fetch params (4 GB, into the data dir) and the mmCIFs the examples cite. $DATA, not
+# $PREFIX: `vizfold download openfold alphafold_params` hands the same script the same directory.
 setup::fetch_params() {
     rm -rf "$DATA/params"   # a half-extracted tar would pass a single-file check
     bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$DATA"
@@ -225,8 +222,7 @@ setup::config_save() {
     export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX VIZFOLD_ENV_BASE=$(vizfold::env_base)
     export OPENFOLD_ENV_PREFIX=$CONDA_PREFIX OPENFOLD_DATA_DIR=$DATA OPENFOLD_MAX_CUDA=$MAX_CUDA
     export OPENFOLD_GPU_RESOURCES=$GPU_RES OPENFOLD_EXAMPLE=$EXAMPLE OPENFOLD_GPU_GRES=$GPU_GRES
-    # Every other key here is a resolution, not an assignment: overwriting a database somebody
-    # chose would move their run history out from under them. Matches esmfold's installer.
+    # VIZFOLD_DB defers to whatever is set, as esmfold's installer does: overwriting it would move someone's run history.
     export OPENFOLD_GPU_TIME=$GPU_TIME VIZFOLD_DB=${VIZFOLD_DB:-$PREFIX/vizfold.db}
     config::save
 }
@@ -235,7 +231,7 @@ setup::ready() {
     cat <<EOF
 == ready (+$((SECONDS))s)
 
-Check it works -- queue and fold the bundled example, onto a GPU node if one is configured:
+Check it works -- fold the bundled example, onto a GPU node if one is configured:
 
   vizfold fold $EXAMPLE
 
@@ -254,7 +250,7 @@ main() {
     step cutlass    setup::cutlass
     if setup::nvrtc_detect; then
         step "nvrtc-$OPENFOLD_DRIVER_CUDA" setup::nvrtc_create
-        setup::nvrtc_preload                          # unconditional: openfold.sh is rewritten every run
+        setup::nvrtc_preload
     fi
     setup::openfold_present || setup::build_openfold
     if [ "$MIRROR" = yes ]; then

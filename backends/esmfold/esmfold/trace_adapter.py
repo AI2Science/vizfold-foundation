@@ -85,8 +85,7 @@ def write_traces(
 
     for key, t in collector.attention.items():
         path = os.path.join(attn_dir, f"{key}.pt")
-        # Head filtering is done in the hook (ESMFoldTraceCollector), so
-        # tensors here are already filtered if head_indices was specified.
+        # Already layer/head filtered: the collector's hooks do it.
         _save_tensor(path, t, save_fp16=save_fp16)
         attention_index[key] = {
             "path": os.path.relpath(path, out_dir),
@@ -113,23 +112,10 @@ def write_attention_txt(
     top_k: int = 50,
 ) -> Optional[str]:
     """
-    Write VizFold-compatible text-file attention maps from collector.
-
-    Converts each [B, H, N, N] attention tensor into the standard
-    msa_row_attn_layer*.txt format used by VizFold visualization tools
-    (PyMOL scripts, arc diagrams, etc.).
-
-    Does not require OpenFold to be installed — uses a self-contained
-    implementation of the top-k writing logic with numpy only.
-
-    Args:
-        out_dir: Root output directory. Files go to out_dir/attention/.
-        collector: ESMFoldTraceCollector with populated .attention dict.
-        top_k: Number of top attention values to save per head.
-
-    Returns:
-        Path to the attention directory, or None if no attention data.
+    Write msa_row_attn_layer*.txt under out_dir/attention/ — the text format the VizFold
+    visualization tools read. Returns that directory, or None if no attention was captured.
     """
+
     import numpy as np
 
     if not collector.attention:
@@ -200,13 +186,11 @@ def write_trace_summary(
             continue
         if a.ndim == 3:
             a = a[np.newaxis, ...]
-        # Per-layer (first dim after batch) stats
         for i in range(a.shape[0]):
             layer_key = f"{key}_slice{i}" if a.shape[0] > 1 else key
             block = a[i]
             if block.ndim >= 3:
                 # block: [heads, N, N] — each row is a distribution over keys
-                # Entropy per row (axis=-1), averaged over all rows and heads
                 ent = -np.sum(block * np.log(block + 1e-12), axis=-1).mean()
                 summary["attention"][layer_key] = {
                     "mean": float(block.mean()),
@@ -247,7 +231,6 @@ def build_and_write_meta(
     save_fp16: bool = False,
     top_k: int = 50,
 ) -> str:
-    # Determine which formats were actually produced
     formats = []
     if os.path.isdir(os.path.join(out_dir, "trace", "attention")):
         formats.append("pt")

@@ -11,23 +11,20 @@ use crate::core::{
         PreflightCheck, PreflightReport, base_command_checks, detect_gpu, gpu_check,
         input_id_check, output_dir_check,
     },
+    services::validation::require_json_object,
 };
 
-/// Preflight for an ESMFold `run_pretrained_esmf.py` command. ESMFold is single-sequence
-/// (HuggingFace `EsmForProteinFolding`, weights fetched at run time) so it needs none of
-/// OpenFold's MSA/template checks: just the command itself, a readable `--fasta` file, and a
-/// writable output workspace. The planned command is built by the shared schema-driven planner.
+/// ESMFold is single-sequence, so it needs none of OpenFold's MSA/template checks: just the
+/// command itself, a readable `--fasta` file, and a writable output workspace.
 pub fn preflight_esmfold(
     command: &CommandSpec,
     invocation_profile: &model_invocation_profiles::Model,
     run: &runs::Model,
 ) -> Result<PreflightReport, DbErr> {
-    let execution_parameters: Value = serde_json::from_str(&run.execution_parameters_json)
-        .map_err(|error| {
-            DbErr::Custom(format!(
-                "run execution_parameters_json must be valid JSON: {error}"
-            ))
-        })?;
+    let execution_parameters = require_json_object(
+        "run execution_parameters_json",
+        &run.execution_parameters_json,
+    )?;
 
     let mut checks = vec![gpu_check(detect_gpu().as_deref())];
     checks.extend(base_command_checks(command));
