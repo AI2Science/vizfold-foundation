@@ -884,16 +884,44 @@ fn missing(what: &str, path: PathBuf) -> Option<String> {
     (!path.is_file()).then(|| format!("no {what} at {}", path.display()))
 }
 
-/// The AlphaFold2 weights, reached through the symlink the install plants in the checkout. An
-/// incomplete database mirror leaves that link dangling, which surfaces only mid-fold otherwise.
+/// The AlphaFold2 weights. A fold reaches them through the checkout, because
+/// `run_pretrained_openfold.py` resolves them relative to the installed `openfold` package and the
+/// install is editable -- so the link the install plants there is what actually has to resolve.
+/// Where they really live is the mirror, or the data directory when there is none, and knowing
+/// which of the two is missing is the difference between "fetch 4 GB" and "replant a symlink".
 fn params_problem() -> Option<String> {
-    let params = config::openfold_home()
-        .join("backends/openfold/openfold/resources/params/params_model_1_ptm.npz");
-    (!params.exists()).then(|| {
-        format!(
+    params_problem_in(
+        &config::openfold_home(),
+        config::af2_root().as_deref(),
+        &config::data_dir(),
+    )
+}
+
+fn params_problem_in(home: &Path, af2_root: Option<&Path>, data_dir: &Path) -> Option<String> {
+    const WEIGHTS: &str = "params/params_model_1_ptm.npz";
+    let reached = home
+        .join("backends/openfold/openfold/resources")
+        .join(WEIGHTS);
+    if reached.exists() {
+        return None;
+    }
+    // The mirror first, then the directory the install downloads into when there is none.
+    let source = [af2_root, Some(data_dir)]
+        .into_iter()
+        .flatten()
+        .map(|root| root.join(WEIGHTS))
+        .find(|path| path.exists());
+    Some(match source {
+        Some(source) => format!(
+            "AlphaFold2 parameters are at {} but the checkout link a fold reads them through is \
+             missing: {}",
+            source.display(),
+            reached.display()
+        ),
+        None => format!(
             "AlphaFold2 parameters missing or a dangling link: {}",
-            params.display()
-        )
+            reached.display()
+        ),
     })
 }
 
@@ -2595,6 +2623,54 @@ mod tests {
 
     /// The checks name config keys as strings; a name outside the schema would report on a value
     /// no install ever writes.
+    /// A fold reads the weights through the checkout, so a missing link there is a real problem
+    /// even when the mirror is intact -- but it is a different problem from having no weights at
+    /// all, and the remedy the user needs differs.
+    #[test]
+    fn params_problem_says_which_half_is_missing() {
+        let base = std::env::temp_dir().join(format!("vizfold-params-{}", std::process::id()));
+        let (home, mirror, data) = (
+            base.join("checkout"),
+            base.join("mirror"),
+            base.join("data"),
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        let reached = home.join("backends/openfold/openfold/resources/params");
+        std::fs::create_dir_all(&reached).unwrap();
+        std::fs::create_dir_all(mirror.join("params")).unwrap();
+
+        // Nowhere at all: the user has 4 GB to fetch.
+        let nothing = params_problem_in(&home, Some(&mirror), &data)
+            .expect("no weights anywhere is a problem");
+        assert!(nothing.contains("missing or a dangling link"), "{nothing}");
+
+        // In the mirror, but the link a fold reads them through is gone: name the mirror.
+        std::fs::write(mirror.join("params/params_model_1_ptm.npz"), "").unwrap();
+        let unlinked =
+            params_problem_in(&home, Some(&mirror), &data).expect("a missing link is a problem");
+        assert!(
+            unlinked.contains(&mirror.display().to_string()),
+            "{unlinked}"
+        );
+        assert!(unlinked.contains("checkout link"), "{unlinked}");
+
+        // No mirror configured, downloaded into the data directory instead.
+        std::fs::create_dir_all(data.join("params")).unwrap();
+        std::fs::write(data.join("params/params_model_1_ptm.npz"), "").unwrap();
+        let downloaded =
+            params_problem_in(&home, None, &data).expect("a missing link is still a problem");
+        assert!(
+            downloaded.contains(&data.display().to_string()),
+            "{downloaded}"
+        );
+
+        // Reachable through the checkout, which is what a fold actually needs.
+        std::fs::write(reached.join("params_model_1_ptm.npz"), "").unwrap();
+        assert!(params_problem_in(&home, Some(&mirror), &data).is_none());
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
     #[test]
     fn checked_keys_are_all_in_the_schema() {
         let checked = super::CHECKED_PATHS
