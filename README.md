@@ -28,8 +28,9 @@ vizfold install openfold
 ```
 
 The binary ships only itself, so `install` clones the matching checkout to `$HOME/vizfold-src` on
-first run for the installer scripts and the dashboard. Cold: ~8 min on NCSA Delta, ~25 min where
-the AlphaFold databases have to be downloaded.
+first run for the installer scripts and the dashboard. A cold install takes ~8 minutes on a cluster
+with an AlphaFold2 mirror (measured on NCSA Delta), ~25 minutes on one where the databases are
+downloaded instead — see the cluster table below for which is which.
 
 It holds your terminal and streams every step. On a cluster it runs as a blocking `srun` job, so a
 queue wait shows as `srun: job N queued and waiting for resources`. Use `tmux` or `screen` for long
@@ -221,7 +222,7 @@ intended change.
 
 ## Commands
 
-Once a backend is installed, one command folds:
+Once a backend is installed, one command folds a sequence:
 
 ```bash
 vizfold run 1UBQ_1          # a bundled example id
@@ -284,9 +285,9 @@ For a full end-to-end walkthrough on a cluster, see [DEMO.md](DEMO.md).
   one `<ClusterName>.sh`/`.json` pair per cluster. `tests/` — install-side test suites.
 - `docs/` — architecture notes and backlog. `examples/` — inputs, attention-viz utilities, notebooks.
 
-Each backend also installs its own CLI into its environment under its own name, drivable without the
-`vizfold` binary — `<prefix>/bin/micromamba run -p <env> <name> --help`, the same form for both.
-Through vizfold, `queue`/`run` are the way in: they fill the model's arguments from the config and
+Each backend also installs its own CLI into its environment under its own name, invoked as
+`<prefix>/bin/micromamba run -p <env> <name> --help` — the same form for both, and independent of the
+`vizfold` binary. Through vizfold, `queue` and `run` fill the model's arguments from the config and
 record the run.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from
@@ -315,7 +316,7 @@ connect, and the queue/run paths seed the default backends, their `local-*` targ
 invocation profiles themselves, existence-guarded. Those local profiles assume the checked-out
 repository layout, so build and run against the checkout.
 
-To install just the CLI binary into `~/.cargo/bin`:
+To install only the CLI binary into `~/.cargo/bin`:
 
 ```bash
 cargo install --path . --bin vizfold --force
