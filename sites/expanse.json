@@ -1,6 +1,0 @@
-{
-  "OPENFOLD_BASE": "/expanse/lustre/projects/$OPENFOLD_ALLOCATION/$USER",
-  "OPENFOLD_GPU_GRES": "gpu:v100:1",
-  "OPENFOLD_GPU_PARTITION": "gpu-shared",
-  "OPENFOLD_PARTITION": "shared"
-}

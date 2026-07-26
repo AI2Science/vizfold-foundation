@@ -1,5 +1,0 @@
-{
-  "OPENFOLD_GPU_ACCOUNT_SUFFIX": "-gpu",
-  "OPENFOLD_GPU_PARTITION": "gpu",
-  "OPENFOLD_PARTITION": "shared"
-}

@@ -98,9 +98,7 @@ fresh install settles on.
 | `delta` (NCSA Delta) | ✅ install + fold | x86-64 | mirror¹ | `cpu` → `gpuA100x4-interactive` (A100) | `/work/nvme/<alloc>/<user>/vizfold` |
 | `delta-gh` (NCSA Delta-AI) | ✅ install + fold³ | aarch64 (GH200) | mirror¹ | `ghx4` → `ghx4-interactive` (GH200) | `/work/nvme/<alloc>/<user>/vizfold-gh`² |
 | `nexus-dev` (Nexus) | ◐ install⁵ | x86-64 | mirror¹ | `gpu` → `gpu` (A100 10 GB vGPU)⁴ | `/projects/<user>/vizfold` |
-| `anvil` (Purdue Anvil) | ◐ install⁵ | x86-64 | downloaded | `shared` → `gpu` (A100) | `$PROJECT/<user>/vizfold` |
 | `bridges2` (PSC Bridges-2) | ◐ install⁵ | x86-64 | mirror¹ | `RM-shared` → `GPU-shared` (V100-32) | `/ocean/projects/<acct>/<user>/vizfold` |
-| `expanse` (SDSC Expanse) | ⚙️ profile | x86-64 | downloaded | `shared` → `gpu-shared` (V100) | `/expanse/lustre/projects/<acct>/<user>/vizfold` |
 | `ice-slurm` (GT PACE ICE) | ⚙️ profile | x86-64 | mirror¹ | `ice-cpu` → `ice-gpu` (A100) | `<scratch>/vizfold` (`/storage/ice1/…`) |
 | `phoenix-slurm` (GT PACE Phoenix) | ⚙️ profile | x86-64 | mirror¹ | `cpu-small` → `gpu-a100` (A100) | `<scratch>/vizfold` (`/storage/scratch1/…`) |
 
@@ -110,7 +108,7 @@ re-confirmed in this pass; ⚙️ site profile written and its paths probed live
 1. AF2 mirrors: Delta & Delta-AI (shared `/work/hdd`) `/work/hdd/data/alphafold2/database`, Phoenix
    `/storage/coda1/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data`, ICE
    `/storage/ice1/shared/d-pace_community/…`, Bridges-2 `/ocean/datasets/community/alphafold/v2.3.2`,
-   Nexus `/media/volume/nexus-staging-slurm-data/database`. Each lays out `uniclust30` differently,
+   Nexus `/media/volume/data/alphafold2/database`. Each lays out `uniclust30` differently,
    so the install stages it into a canonical dir — real set if present, else aliased from uniref30.
    With no mirror the install downloads the ~4 GB parameters + the example's templates.
 2. Delta and Delta-AI share `/work/nvme`, so the aarch64 site uses a `-gh` suffix — otherwise the
@@ -120,8 +118,8 @@ re-confirmed in this pass; ⚙️ site profile written and its paths probed live
 4. Nexus's 535 driver is older than the env's NVRTC, so the install pins a matching NVRTC via
    `LD_PRELOAD`; the 10 GB vGPU gets the smaller `1UBQ_1` example. CUDA is capped at 12.8 on every
    x86 site and 12.9 on aarch64 (the 13.x build won't compile OpenFold's extension).
-5. `◐` installs each needed a site-specific fix: nexus an NVRTC pin, anvil a conda-libcurl mmCIF
-   workaround, bridges2 memory / gcc / CUDA-arch / NVRTC adjustments.
+5. `◐` installs each needed a site-specific fix: nexus an NVRTC pin, bridges2 memory / gcc /
+   CUDA-arch / NVRTC adjustments.
 
 ### Settings
 
