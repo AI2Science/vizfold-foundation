@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type SubmitEventHandler } from "react";
+import { ArtifactViewer, buildMockArtifacts } from "@/components/artifact-viewer";
 
 export type ModelOption = {
   slug: string;
@@ -179,37 +180,34 @@ export function HomePageClient({
             <h2>Output</h2>
             <p>Mock result panel for early architecture and layout testing.</p>
           </div>
-
-          {result ? (
-            <div className="result-card">
-              <div className="result-row">
-                <span>Job</span>
-                <strong>{result.jobName}</strong>
-              </div>
-              <div className="result-row">
-                <span>Model</span>
-                <strong>{result.modelLabel}</strong>
-              </div>
-              <div className="result-row">
-                <span>Execution target</span>
-                <strong>{result.executionTargetLabel}</strong>
-              </div>
-              <div className="result-row">
-                <span>Sequence length</span>
-                <strong>{result.sequenceLength} aa</strong>
-              </div>
-              <div className="result-row">
-                <span>Status</span>
-                <strong>{result.status}</strong>
-              </div>
-              <p className="result-note">{result.note}</p>
-            </div>
-          ) : (
-            <div className="empty-state">
-              <p>No run submitted yet.</p>
-              <p>Your first prototype result will appear here after pressing Run.</p>
-            </div>
-          )}
+{result ? (
+  <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+    <div className="result-card">
+      <div className="result-row">
+        <span>Job</span>
+        <strong>{result.jobName}</strong>
+      </div>
+      <div className="result-row">
+        <span>Model</span>
+        <strong>{result.modelLabel}</strong>
+      </div>
+      <div className="result-row">
+        <span>Status</span>
+        <strong>{result.status}</strong>
+      </div>
+      <p className="result-note">{result.note}</p>
+    </div>
+    <ArtifactViewer
+      artifacts={buildMockArtifacts(result.modelLabel)}
+      proteinName={result.jobName}
+    />
+  </div>
+) : (
+  <div className="empty-state">
+    <p>No run submitted yet.</p>
+    <p>Your first prototype result will appear here after pressing Run.</p>
+  </div>
+)}
         </section>
       </div>
     </main>
