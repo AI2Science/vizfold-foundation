@@ -1418,7 +1418,7 @@ fn ensure_micromamba() -> Result<PathBuf, DbErr> {
     run_to_completion(
         "fetching micromamba",
         std::process::Command::new("sh").arg("-c").arg(format!(
-            "curl -Ls 'https://micro.mamba.pm/api/micromamba/{arch}/latest' | tar -xj -C '{}' bin/micromamba",
+            "curl -fsSL 'https://micro.mamba.pm/api/micromamba/{arch}/latest' | tar -xj -C '{}' bin/micromamba",
             prefix.display()
         )),
     )?;

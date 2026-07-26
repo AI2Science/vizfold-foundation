@@ -1,9 +1,9 @@
 # Folding a protein with the vizfold CLI
 
 The full OpenFold lifecycle through the `vizfold` CLI on a cluster: queue a sequence, fold it on a
-GPU, register the outputs, and view them. The commands below are from a clean run on **NCSA Delta**
-(A100). Every `vizfold` call is the installed binary on your `PATH` — nothing is run from a source
-checkout.
+GPU, register the outputs, and view them. The transcripts below are from a clean run on **NCSA
+Delta** (A100), so the paths, accounts and partitions in them are Delta's — `vizfold status` prints
+yours. Every `vizfold` call is the installed binary on your `PATH`, not a source checkout.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ The `vizfold` binary and an installed OpenFold backend — the two-command boots
 [README](README.md#install):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
 vizfold install openfold
 ```
 
@@ -57,7 +57,7 @@ vizfold run 6KWC_1
 
 `vizfold run` takes a bundled example id, a path to a FASTA, or a queued run's id; given either of
 the first two it queues the run itself. That is the line `vizfold install openfold` prints on
-success. The rest of this page takes that apart.
+success. The rest of this page walks through each stage separately.
 
 ## 1. Queue a run
 
@@ -215,8 +215,8 @@ records the run. To use the backend on its own instead, run its CLI inside its e
 
 `run -p` applies the environment's `activate.d` hook — `CUTLASS_PATH`, `OPENFOLD_DATA_DIR`, the
 library paths, and the NVRTC `LD_PRELOAD` where the install pinned one — which is exactly how
-`vizfold run` invokes it. Every path is then yours to pass. ESMFold is the same command against its
-own environment; neither needs the `vizfold` binary on your `PATH`.
+`vizfold run` invokes it. You then supply every path yourself. ESMFold is the same command against
+its own environment, and neither form needs the `vizfold` binary on your `PATH`.
 
 ## Common failure modes
 
@@ -241,7 +241,7 @@ databases).
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`
 
 The GPU partition and time cap come from the site profile (`sites/<ClusterName>.json`); the account
-is worked out during the install instead (on Delta, `slurm::nvme_alloc` names it from the allocation
-plus a `-delta-gpu` suffix). All three are written to `vizfold.json`. If you override any
-`OPENFOLD_GPU_*` value, keep it within the partition's limits (on Delta, `gpuA100x4-interactive`
-caps at `01:00:00`).
+is worked out during the install instead — on Delta, `slurm::nvme_alloc` names it from the allocation
+plus a `-delta-gpu` suffix, and on Delta-AI a `-dtai-gh` one. All three are written to
+`vizfold.json`. If you override any `OPENFOLD_GPU_*` value, keep it within that partition's limits;
+Delta's `gpuA100x4-interactive` caps at `01:00:00`.

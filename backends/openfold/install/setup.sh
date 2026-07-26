@@ -165,11 +165,12 @@ setup::fetch_params() {
 setup::fetch_templates() {
     log templates
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
-    # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. || true tolerates a 404; assert catches total failure.
+    # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. No -S here:
+    # a 404 is expected per-entry and || true tolerates it; the count assert catches total failure.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
         awk '{ print tolower(substr($2, 1, 4)) }' | sort -u |
         xargs -P 8 -I{} sh -c \
-            '[ -s "$1/{}.cif" ] || env -u LD_LIBRARY_PATH curl -Lsf -o "$1/{}.cif" https://files.rcsb.org/download/{}.cif' _ \
+            '[ -s "$1/{}.cif" ] || env -u LD_LIBRARY_PATH curl -fsL -o "$1/{}.cif" https://files.rcsb.org/download/{}.cif' _ \
             "$DATA/pdb_mmcif/mmcif_files" || true
     local n; n=$(ls "$DATA/pdb_mmcif/mmcif_files" | wc -l)
     echo "fetched $n template mmCIFs"
@@ -177,7 +178,7 @@ setup::fetch_templates() {
 }
 
 setup::stereo() {
-    [ -f "$STEREO" ] || { env -u LD_LIBRARY_PATH curl -Lsf -o "$STEREO.part" \
+    [ -f "$STEREO" ] || { env -u LD_LIBRARY_PATH curl -fsSL -o "$STEREO.part" \
         https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt &&
         mv "$STEREO.part" "$STEREO"; }
     mkdir -p "$OF/tests/test_data/alphafold/common"
