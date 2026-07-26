@@ -884,16 +884,37 @@ fn missing(what: &str, path: PathBuf) -> Option<String> {
     (!path.is_file()).then(|| format!("no {what} at {}", path.display()))
 }
 
-/// The AlphaFold2 weights, reached through the symlink the install plants in the checkout. An
-/// incomplete database mirror leaves that link dangling, which surfaces only mid-fold otherwise.
+/// The checkout link is what has to resolve: run_pretrained_openfold.py finds the weights relative
+/// to the installed `openfold` package, and the install is editable.
 fn params_problem() -> Option<String> {
-    let params = config::openfold_home()
-        .join("backends/openfold/openfold/resources/params/params_model_1_ptm.npz");
-    (!params.exists()).then(|| {
-        format!(
+    let mirror = config::resolved("OPENFOLD_AF2_ROOT").map(PathBuf::from);
+    params_problem_in(
+        &config::openfold_home().join("backends/openfold/openfold/resources"),
+        &mirror
+            .into_iter()
+            .chain([config::data_dir()])
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn params_problem_in(reached: &Path, sources: &[PathBuf]) -> Option<String> {
+    const WEIGHTS: &str = "params/params_model_1_ptm.npz";
+    let reached = reached.join(WEIGHTS);
+    if reached.exists() {
+        return None;
+    }
+    let at = sources.iter().map(|r| r.join(WEIGHTS)).find(|p| p.exists());
+    Some(match at {
+        Some(at) => format!(
+            "AlphaFold2 parameters are at {} but the checkout link a fold reads them through is \
+             missing: {}",
+            at.display(),
+            reached.display()
+        ),
+        None => format!(
             "AlphaFold2 parameters missing or a dangling link: {}",
-            params.display()
-        )
+            reached.display()
+        ),
     })
 }
 
@@ -2595,6 +2616,37 @@ mod tests {
 
     /// The checks name config keys as strings; a name outside the schema would report on a value
     /// no install ever writes.
+    #[test]
+    fn params_problem_names_where_the_weights_are() {
+        let base = std::env::temp_dir().join(format!("vizfold-params-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (reached, mirror, data) = (
+            base.join("checkout"),
+            base.join("mirror"),
+            base.join("data"),
+        );
+        let put = |root: &PathBuf| {
+            std::fs::create_dir_all(root.join("params")).unwrap();
+            std::fs::write(root.join("params/params_model_1_ptm.npz"), "").unwrap();
+        };
+        let sources = [mirror.clone(), data.clone()];
+
+        let nowhere = params_problem_in(&reached, &sources).expect("no weights is a problem");
+        assert!(nowhere.contains("missing or a dangling link"), "{nowhere}");
+
+        put(&data);
+        put(&mirror);
+        let unlinked = params_problem_in(&reached, &sources).expect("a missing link is a problem");
+        assert!(
+            unlinked.contains(&mirror.display().to_string()),
+            "{unlinked}"
+        );
+
+        put(&reached);
+        assert!(params_problem_in(&reached, &sources).is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
     #[test]
     fn checked_keys_are_all_in_the_schema() {
         let checked = super::CHECKED_PATHS
