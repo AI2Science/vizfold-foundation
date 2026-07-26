@@ -2022,11 +2022,16 @@ fn read_fasta(path: &str) -> Result<examples::Example, DbErr> {
     })
 }
 
+/// Seeding runs immediately before every lookup, so a miss here means the database is not one
+/// vizfold wrote -- naming the file is the only thing that helps.
 fn seed_required_error() -> DbErr {
-    DbErr::Custom(
-        "the run's backend, local execution target, or matching profile is missing; run `vizfold seed`"
-            .into(),
-    )
+    DbErr::Custom(format!(
+        "the run's backend, local execution target, or matching profile is missing from {} \
+         even after seeding; point VIZFOLD_DB at a vizfold database, or remove that file",
+        config::database_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(config::database_url)
+    ))
 }
 
 async fn list_models(database: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
