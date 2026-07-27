@@ -15,4 +15,4 @@ jobs:
       - run: bash tests/site_config.sh
       - run: bash tests/vocabulary.sh
       - run: bash tests/link_mirror.sh
-      - run: bash tests/torch_index.sh
+      - run: bash tests/esmfold_env.sh

@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "ESMFold backend for vizfold: HuggingFace EsmForProteinFolding with attention/activation tracing."
 requires-python = ">=3.10"
 license = { text = "Apache License, Version 2.0" }
-# torch is declared but install.sh installs it first from its own wheel index when a CUDA build is
-# wanted: pip then finds the requirement satisfied and leaves that build in place.
+# torch is declared but environment.yml resolves it against the host's GPU driver first: pip then
+# finds the requirement satisfied and leaves that build in place.
 dependencies = [
     "torch>=2.1",
     "transformers>=4.36.0,<5.0.0",
