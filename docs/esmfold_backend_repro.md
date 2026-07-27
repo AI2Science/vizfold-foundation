@@ -5,6 +5,7 @@ Verifying the ESMFold backend end to end: inference, trace extraction, and the a
 ## Environment Setup
 
 ```bash
+vizfold install base                    # the checkout the installer lives in
 vizfold install esmfold
 vizfold status                          # prints ESMFOLD_ENV_PREFIX
 
@@ -69,6 +70,7 @@ checks the GPU, the base command, `input_id`, that `--fasta` is a readable file,
 
 ```bash
 ssh <gt_username>@login-ice.pace.gatech.edu
+vizfold install base
 vizfold install esmfold
 vizfold run 6KWC_1 --backend esmfold
 ```

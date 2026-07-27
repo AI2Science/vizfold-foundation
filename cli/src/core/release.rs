@@ -1,6 +1,6 @@
 //! The published releases this binary comes from. `install.sh` derives the same URLs and asset names.
 
-/// This build's version; the checkout is pinned to the matching tag, so `self-update` moves both.
+/// This build's version; `update base` moves the checkout to the matching tag.
 pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

@@ -7,11 +7,12 @@ yours. Every `vizfold` call is the installed binary on your `PATH`, not a source
 
 ## Prerequisites
 
-The `vizfold` binary and an installed OpenFold backend — the two-command bootstrap from the
-[README](README.md#install):
+The `vizfold` binary, the checkout it installs from, and an installed OpenFold backend — the
+bootstrap from the [README](README.md#install):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
+vizfold install base
 vizfold install openfold
 ```
 
