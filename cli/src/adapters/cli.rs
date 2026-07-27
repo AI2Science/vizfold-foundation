@@ -1182,6 +1182,7 @@ fn reinstall(backend: Backend, yes: bool) -> Result<(), DbErr> {
         backend,
         &config::prefix(),
         &config::openfold_home(),
+        &config::data_dir(),
     ));
     let headline = format!("Reinstalling {} first removes:", backend.slug());
     if !targets.is_empty() && !remove_confirmed(&headline, &targets, yes)? {
@@ -1191,13 +1192,24 @@ fn reinstall(backend: Backend, yes: bool) -> Result<(), DbErr> {
 }
 
 /// Reinstall takes back everything install planted except downloads: params are ~4 GB, or a mirror
-/// symlink tree, and neither is install state.
-fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path) -> Vec<PathBuf> {
-    let data = config::data_dir();
+/// symlink tree, and neither is install state. `data` defaults to a subdirectory of the state dir
+/// install also plants, so a directory holding it is spent entry by entry, never removed whole.
+fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path, data: &Path) -> Vec<PathBuf> {
     backend
         .install_paths(prefix, home)
         .into_iter()
-        .filter(|path| *path != data)
+        .flat_map(|path| {
+            if !data.starts_with(&path) {
+                return vec![path];
+            }
+            std::fs::read_dir(&path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|entry| !data.starts_with(entry))
+                .collect()
+        })
         .collect()
 }
 
@@ -2490,7 +2502,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("vizfold-reinstall-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let full = Backend::Openfold.install_paths(&prefix, &home);
-        let kept = super::reinstall_paths(Backend::Openfold, &prefix, &home);
+        let kept = super::reinstall_paths(Backend::Openfold, &prefix, &home, &config::data_dir());
 
         assert!(
             full.contains(&config::data_dir()),
@@ -2505,6 +2517,34 @@ mod tests {
             "the env is rebuilt"
         );
         assert_eq!(kept.len(), full.len() - 1, "only the data dir is spared");
+    }
+
+    /// The data dir defaults to a subdirectory of the state dir install also plants, so leaving it
+    /// out of the list is not enough: removing the state dir whole takes the databases with it.
+    #[test]
+    fn a_reinstall_removes_no_directory_the_downloads_live_under() {
+        let base = std::env::temp_dir().join(format!("vizfold-nested-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (prefix, home) = (base.join("prefix"), base.join("checkout"));
+        let state = prefix.join("openfold");
+        let data = state.join("data");
+        std::fs::create_dir_all(&data).expect("fixture");
+        std::fs::create_dir_all(state.join("pkgs")).expect("fixture");
+        std::fs::write(state.join(".done"), "").expect("fixture");
+
+        let kept = super::reinstall_paths(Backend::Openfold, &prefix, &home, &data);
+        std::fs::remove_dir_all(&base).ok();
+
+        assert!(
+            !kept.iter().any(|path| data.starts_with(path)),
+            "a removal target holds the downloads: {kept:?}"
+        );
+        // What makes the installer redo its work: without these it short-circuits on the sentinel.
+        assert!(kept.contains(&state.join(".done")), "the sentinel must go");
+        assert!(
+            kept.contains(&state.join("pkgs")),
+            "the rest of the state dir must go"
+        );
     }
 
     /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env.
