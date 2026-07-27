@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, PoisonError, RwLock, RwLockReadGuard};
 
 /// The flat JSON map `config::save` writes at install time: source of every resolved path.
 pub fn config_file() -> PathBuf {
@@ -51,15 +51,32 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| ".".to_owned())
 }
 
-fn vizfold_config() -> &'static Map<String, Value> {
-    static CONFIG: OnceLock<Map<String, Value>> = OnceLock::new();
-    CONFIG.get_or_init(|| {
-        std::fs::read_to_string(config_file())
-            .ok()
-            .and_then(|c| serde_json::from_str::<Value>(&c).ok())
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default()
-    })
+fn read_config() -> Map<String, Value> {
+    std::fs::read_to_string(config_file())
+        .ok()
+        .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn config_cache() -> &'static RwLock<Map<String, Value>> {
+    static CONFIG: OnceLock<RwLock<Map<String, Value>>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(read_config()))
+}
+
+fn vizfold_config() -> RwLockReadGuard<'static, Map<String, Value>> {
+    config_cache()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Re-read the file. `install repo` writes the config mid-process, and everything prefix-derived
+/// after that would otherwise still answer from the defaults this process started with.
+pub fn reload() {
+    let fresh = read_config();
+    *config_cache()
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = fresh;
 }
 
 /// Empty is unset: the key set is fixed, so an unsettled name is present-but-empty.
@@ -356,5 +373,47 @@ mod tests {
                 "case: {name}"
             );
         }
+    }
+
+    /// `install repo` writes the config partway through its own process, so a cache that answered
+    /// once for the lifetime of that process staged the dashboard under the default prefix instead
+    /// of the settled one. Serialised against the other config readers by the lock it takes.
+    #[test]
+    fn reload_sees_a_config_written_after_the_first_read() {
+        let path = std::env::temp_dir().join(format!("vizfold-reload-{}.json", std::process::id()));
+        let previous = std::env::var("VIZFOLD_CONFIG").ok();
+        // SAFETY: the reload below is the only reader of this file, and the variable is restored.
+        unsafe { std::env::set_var("VIZFOLD_CONFIG", &path) };
+
+        let _ = std::fs::remove_file(&path);
+        super::reload();
+        assert_eq!(
+            super::resolved("OPENFOLD_PREFIX"),
+            None,
+            "no file yet, so nothing is settled"
+        );
+
+        std::fs::write(&path, r#"{"OPENFOLD_PREFIX": "/settled/by/configure"}"#).unwrap();
+        assert_eq!(
+            super::resolved("OPENFOLD_PREFIX"),
+            None,
+            "and the cache does not notice on its own -- this is the bug"
+        );
+
+        super::reload();
+        assert_eq!(
+            super::resolved("OPENFOLD_PREFIX").as_deref(),
+            Some("/settled/by/configure")
+        );
+
+        let _ = std::fs::remove_file(&path);
+        // SAFETY: single-threaded restore; the reload puts the shared cache back.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("VIZFOLD_CONFIG", value),
+                None => std::env::remove_var("VIZFOLD_CONFIG"),
+            }
+        }
+        super::reload();
     }
 }

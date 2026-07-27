@@ -562,6 +562,9 @@ fn install_repo() -> Result<(), DbErr> {
             .arg(repo.join(CONFIGURE))
             .env("OPENFOLD_HOME", &repo),
     )?;
+    // configure.sh just wrote the prefix; without this the dashboard would be staged under the
+    // default this process started with, which is a directory the install never settled on.
+    config::reload();
     // The dashboard too, so `serve` starts rather than provisioning: on a cluster that is a Node
     // environment and an npm install, minutes of it, and `serve` is run when someone wants to look.
     ensure_dashboard(&serve_dir()?, "")?;
