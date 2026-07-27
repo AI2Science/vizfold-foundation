@@ -56,16 +56,19 @@ const ARTIFACT_SELECT = `SELECT a.id, a.format, a.storage_uri,
   WHERE a.run_id = ? ORDER BY a.id`;
 
 // Runs from a backend this dashboard does not serve are hidden, not deleted.
-const SERVED = BACKENDS.length ? ` WHERE b.slug IN (${BACKENDS.map(() => "?").join(",")})` : "";
+const SERVED = BACKENDS?.length ? ` WHERE b.slug IN (${BACKENDS.map(() => "?").join(",")})` : "";
 
 export const listRuns = (): RunRow[] =>
-  query(
-    (db) =>
-      db
-        .prepare(`${RUN_SELECT}${SERVED} ORDER BY r.submitted_at DESC`)
-        .all(...BACKENDS) as RunRow[],
-    [],
-  );
+  // Serving nothing lists nothing; `IN ()` is not valid SQL, so this never reaches the database.
+  BACKENDS?.length === 0
+    ? []
+    : query(
+        (db) =>
+          db
+            .prepare(`${RUN_SELECT}${SERVED} ORDER BY r.submitted_at DESC`)
+            .all(...(BACKENDS ?? [])) as RunRow[],
+        [],
+      );
 
 export const getRun = (id: number): RunRow | null =>
   query((db) => (db.prepare(`${RUN_SELECT} WHERE r.id = ?`).get(id) as RunRow) ?? null, null);

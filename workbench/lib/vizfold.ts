@@ -9,7 +9,15 @@ const PREFIX = process.env.OPENFOLD_PREFIX ?? "";
 
 /** What `vizfold serve` was asked to serve. Empty means unset — `next dev` by hand, which filters
  *  nothing and lets the CLI pick the backend, as it did before serve took any. */
-export const BACKENDS = (process.env.VIZFOLD_BACKENDS ?? "").split(",").filter(Boolean);
+// null means the variable is unset -- `next dev` run by hand, where filtering by a set nobody chose
+// would hide every run. Set-but-empty is a real answer: `serve` found no backend installed.
+const served = process.env.VIZFOLD_BACKENDS;
+export const BACKENDS: string[] | null =
+  served === undefined ? null : served.split(",").filter(Boolean);
+
+/** What the Fold card offers. Unset, the dashboard cannot know what is installed, so it offers both
+ *  and lets the CLI's own prereq gate refuse one that is not. */
+export const FOLDABLE = BACKENDS ?? ["openfold", "esmfold"];
 
 const run = promisify(execFile);
 

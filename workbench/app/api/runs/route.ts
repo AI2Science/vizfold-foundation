@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     );
   }
   // Same: only a backend this dashboard serves reaches the CLI's argv.
-  if (backend && !BACKENDS.includes(backend)) {
+  if (backend && BACKENDS && !BACKENDS.includes(backend)) {
     return NextResponse.json(
       { error: `Backend "${backend}" is not being served.` },
       { status: 400 },
