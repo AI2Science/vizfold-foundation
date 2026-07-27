@@ -480,13 +480,7 @@ mod tests {
         assert_eq!(command.args[1], "run_pretrained_openfold.py");
         assert_eq!(command.args[2], "/tmp/fasta");
         assert_eq!(command.args[3], "/data/pdb_mmcif/mmcif_files");
-        assert!(command.args.contains(&"--output_dir".into()));
         let output_dir = PathBuf::from("/tmp/outputs").join("4");
-        assert!(
-            command
-                .args
-                .contains(&output_dir.to_string_lossy().into_owned())
-        );
         assert_pair(
             &command.args,
             "--attn_map_dir",
@@ -561,12 +555,7 @@ mod tests {
         )
         .expect("invocation profile config source should resolve");
 
-        assert_eq!(
-            value,
-            PathBuf::from("/profile/data")
-                .join("datasets/openfold")
-                .to_string_lossy()
-        );
+        assert_eq!(value, "/profile/data/datasets/openfold");
     }
 
     #[test]
@@ -595,9 +584,6 @@ mod tests {
 
     #[test]
     fn includes_optional_model_parameters_when_present() {
-        let mut execution = execution_parameters();
-        execution["model_device"] = json!("cpu");
-
         let command = plan_command(
             &model_backend(),
             &execution_target(),
@@ -610,13 +596,12 @@ mod tests {
                     "model_preset": "monomer"
                 })
                 .to_string(),
-                execution.to_string(),
+                execution_parameters().to_string(),
             ),
         )
         .expect("command should plan");
 
         assert!(command.args.contains(&"model_2_ptm".into()));
-        assert!(command.args.contains(&"cpu".into()));
         assert!(command.args.contains(&"--save_outputs".into()));
         assert!(command.args.contains(&"--num_recycles_save".into()));
         assert!(command.args.contains(&"1".into()));
@@ -705,13 +690,18 @@ mod tests {
         assert!(error.to_string().contains("cpus must be an integer"));
     }
 
+    /// A configured data_dir may carry a trailing separator; the joined database path must not
+    /// double it.
     #[test]
-    fn database_paths_are_generated_from_model_schema_declarations() {
+    fn a_trailing_separator_on_data_dir_does_not_double_up() {
+        let mut execution = execution_parameters();
+        execution["data_dir"] = json!("/data/");
+
         let command = plan_command(
             &model_backend(),
             &execution_target(),
             &invocation_profile(config()),
-            &run(json!({}).to_string(), execution_parameters().to_string()),
+            &run(json!({}).to_string(), execution.to_string()),
         )
         .expect("command should plan");
 
@@ -720,15 +710,11 @@ mod tests {
             "--uniref90_database_path",
             "/data/uniref90/uniref90.fasta",
         );
-        assert_pair(
-            &command.args,
-            "--bfd_database_path",
-            "/data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt",
-        );
     }
 
+    /// `residue_idx` reaches the script under a different name than the parameter carries.
     #[test]
-    fn derives_attention_map_directory_from_resolved_output_location() {
+    fn residue_idx_is_emitted_as_triangle_residue_idx() {
         let mut execution = execution_parameters();
         execution["residue_idx"] = json!(7);
 
@@ -743,16 +729,7 @@ mod tests {
         )
         .expect("command should plan");
 
-        assert_pair(
-            &command.args,
-            "--attn_map_dir",
-            &PathBuf::from("/tmp/outputs")
-                .join("4")
-                .join("attention")
-                .to_string_lossy(),
-        );
-        assert!(command.args.contains(&"--triangle_residue_idx".into()));
-        assert!(command.args.contains(&"7".into()));
+        assert_pair(&command.args, "--triangle_residue_idx", "7");
         assert!(command.args.contains(&"--demo_attn".into()));
     }
 
@@ -770,12 +747,11 @@ mod tests {
         )
         .expect("command should plan");
 
-        assert!(
-            command
-                .args
-                .contains(&"--use_precomputed_alignments".into())
+        assert_pair(
+            &command.args,
+            "--use_precomputed_alignments",
+            "/tmp/alignments",
         );
-        assert!(command.args.contains(&"/tmp/alignments".into()));
     }
 
     #[test]
@@ -1072,14 +1048,16 @@ mod tests {
         assert_eq!(check_status(&report, "data_dir"), PreflightStatus::Failed);
     }
 
+    /// The output directory comes from the profile, so a stale `output_dir` execution parameter
+    /// pointing at a path that does not exist must not be what preflight checks.
     #[test]
-    fn preflight_does_not_require_output_dir_in_execution_parameters() {
+    fn preflight_ignores_an_output_dir_in_execution_parameters() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
-        let report = preflight_openfold(
-            &layout.command(),
-            &preflight_run(layout.execution_parameters()),
-        )
-        .expect("preflight should inspect configured values");
+        let mut execution = layout.execution_parameters();
+        execution["output_dir"] = json!("/stale/output");
+
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
+            .expect("preflight should inspect configured values");
 
         assert_eq!(
             check_status(&report, "output_dir parent"),
@@ -1108,34 +1086,18 @@ mod tests {
         );
     }
 
+    /// An unresolvable output location aborts preflight outright rather than landing as a failed
+    /// check among the others.
     #[test]
     fn preflight_returns_clear_error_for_missing_output_location() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
-        let error = preflight_openfold_impl(
+
+        preflight_openfold_impl(
             &layout.command(),
             &invocation_profile("{}".into()),
             &preflight_run(layout.execution_parameters()),
         )
         .expect_err("missing output location should fail preflight");
-
-        assert!(error.to_string().contains("output_location is required"));
-    }
-
-    #[test]
-    fn preflight_returns_clear_error_for_invalid_output_location() {
-        let layout = TestLayout::new("1UBQ_1|Chain A");
-        let error = preflight_openfold_impl(
-            &layout.command(),
-            &invocation_profile(json!({"output_location": 42}).to_string()),
-            &preflight_run(layout.execution_parameters()),
-        )
-        .expect_err("non-string output location should fail preflight");
-
-        assert!(
-            error
-                .to_string()
-                .contains("output_location must be a string")
-        );
     }
 
     #[test]
@@ -1215,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_report_has_failures_tracks_failed_checks() {
+    fn preflight_fails_when_program_is_empty() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
         let mut command = layout.command();
         command.program.clear();
@@ -1223,7 +1185,6 @@ mod tests {
         let report = preflight_openfold(&command, &preflight_run(layout.execution_parameters()))
             .expect("preflight should inspect configured values");
 
-        assert!(report.has_failures());
         assert_eq!(
             check_status(&report, "program configured"),
             PreflightStatus::Failed

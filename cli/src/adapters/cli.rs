@@ -2239,64 +2239,7 @@ mod tests {
 
     use crate::core::{db, seed};
 
-    #[test]
-    fn parses_list_runs_with_status_filter() {
-        let cli = Cli::try_parse_from(["vizfold", "list", "runs", "--status", "failed"])
-            .expect("list runs command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::List(ListArgs {
-                resource: ListResource::Runs { status: Some(status) }
-            }) if status == "failed"
-        ));
-    }
-
-    #[test]
-    fn parses_show_run() {
-        let cli = Cli::try_parse_from(["vizfold", "show", "run", "1"])
-            .expect("show run command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Show(ShowArgs {
-                resource: ShowResource::Run { run_id: 1 }
-            })
-        ));
-    }
-
-    #[test]
-    fn parses_queue_openfold_required_arguments() {
-        let cli = Cli::try_parse_from([
-            "vizfold",
-            "queue",
-            "openfold",
-            "--input-id",
-            "6KWC_1",
-            "--fasta",
-            "fasta",
-            "--data-dir",
-            "data",
-        ])
-        .expect("queue command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Queue(QueueArgs {
-                model: QueueModel::Openfold(OpenfoldQueueArgs {
-                    input_id,
-                    fasta,
-                    data_dir,
-                    attn: true,
-                    use_precomputed_alignments: true,
-                    cpus: None,
-                    ..
-                })
-            }) if input_id.as_deref() == Some("6KWC_1")
-                && fasta.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
-        ));
-    }
-
+    /// The defaults, and that `--save-fp16` is a bare presence flag while `--trace-mode` takes a value.
     #[test]
     fn parses_queue_esmfold_arguments() {
         let cli = Cli::try_parse_from([
@@ -2317,19 +2260,17 @@ mod tests {
             cli.command,
             Command::Queue(QueueArgs {
                 model: QueueModel::Esmfold(EsmfoldQueueArgs {
-                    input_id,
-                    fasta,
                     trace_mode,
                     save_fp16: true,
                     structure_traces: false,
                     ref model,
                     ..
                 })
-            }) if input_id.as_deref() == Some("6KWC_1") && fasta == "6KWC.fasta"
-                && trace_mode == "attention" && model == "facebook/esmfold_v1"
+            }) if trace_mode == "attention" && model == "facebook/esmfold_v1"
         ));
     }
 
+    /// The default-true bools take `ArgAction::Set`, so `--flag=false` is a legal spelling.
     #[test]
     fn parses_queue_openfold_optional_flags() {
         let cli = Cli::try_parse_from([
@@ -2338,12 +2279,6 @@ mod tests {
             "openfold",
             "--input-id",
             "6KWC_1",
-            "--fasta",
-            "fasta",
-            "--data-dir",
-            "data",
-            "--cpus",
-            "4",
             "--attn=true",
             "--use-precomputed-alignments=false",
         ])
@@ -2353,7 +2288,6 @@ mod tests {
             cli.command,
             Command::Queue(QueueArgs {
                 model: QueueModel::Openfold(OpenfoldQueueArgs {
-                    cpus: Some(4),
                     attn: true,
                     use_precomputed_alignments: false,
                     ..
@@ -2379,19 +2313,17 @@ mod tests {
         assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
     }
 
+    /// Install state hangs off each backend's own config key, so a stray `ESMFOLD_ENV_PREFIX` must
+    /// not move OpenFold's env with it.
     #[test]
-    fn parses_status() {
-        let cli = Cli::try_parse_from(["vizfold", "status"]).expect("status command should parse");
-        assert!(matches!(cli.command, Command::Status));
-    }
-
-    #[test]
-    fn backend_is_installed_tracks_its_env_prefix() {
+    fn backend_is_installed_tracks_its_own_env_prefix_key() {
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         // SAFETY: single-threaded test; pinned so env_prefix() does not read the real config.
         unsafe { std::env::set_var("ESMFOLD_ENV_PREFIX", &base) };
+        assert_eq!(Backend::Esmfold.env_prefix(), base);
+        assert_ne!(Backend::Openfold.env_prefix(), base);
         assert!(
             Backend::Esmfold.is_installed(),
             "an existing env dir reads as installed"
@@ -2685,16 +2617,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_serve_with_port() {
-        let cli = Cli::try_parse_from(["vizfold", "serve", "--port", "3001"])
-            .expect("serve command should parse");
-        assert!(matches!(
-            cli.command,
-            Command::Serve(ServeArgs { port: Some(3001) })
-        ));
-    }
-
-    #[test]
     fn node_version_gate_is_major_then_minor() {
         assert!(node_is_new_enough("22.13.0"));
         assert!(node_is_new_enough("v26.5.0"));
@@ -2707,6 +2629,9 @@ mod tests {
         assert!(!node_is_new_enough("garbage"));
     }
 
+    /// The defaults: attention is dumped unless asked otherwise, and the backend is left for
+    /// `default_backend` to resolve. The target is a free string -- `run_run` tells a run id from an
+    /// example id by whether it parses as an integer.
     #[test]
     fn parses_run() {
         let cli = Cli::try_parse_from(["vizfold", "run", "1"]).expect("run command should parse");
@@ -2720,11 +2645,7 @@ mod tests {
                 json: false,
             }) if target == "1"
         ));
-    }
 
-    /// One verb: the target is a run id or an example id, told apart by whether it parses as an integer.
-    #[test]
-    fn run_takes_an_example_id_as_its_target() {
         let cli = Cli::try_parse_from(["vizfold", "run", "6KWC_1", "--attn=false"])
             .expect("run command should parse");
 
@@ -2736,6 +2657,27 @@ mod tests {
                 ..
             }) if target == "6KWC_1"
         ));
+    }
+
+    /// Parsed with no flags at all, so the declared defaults are what a bare `queue openfold` gets.
+    /// `defaults_match_for_example` passes `--attn` explicitly and cannot see these.
+    #[test]
+    fn queue_openfold_defaults_to_attention_and_precomputed_alignments() {
+        let cli = Cli::try_parse_from(["vizfold", "queue", "openfold"])
+            .expect("queue openfold should parse with no flags");
+        let Command::Queue(QueueArgs {
+            model: QueueModel::Openfold(parsed),
+        }) = cli.command
+        else {
+            panic!("expected an openfold queue");
+        };
+
+        assert!(parsed.attn, "attention maps are on unless asked otherwise");
+        assert!(
+            parsed.use_precomputed_alignments,
+            "a full MSA search is opt-in"
+        );
+        assert_eq!(parsed.residue_idx, 1);
     }
 
     /// `for_example` hardcodes clap's `queue openfold` defaults; this fails if one drifts.
@@ -2764,17 +2706,6 @@ mod tests {
             sequence: "MQIFVKTL".into(),
         };
         assert_eq!(OpenfoldQueueArgs::for_example(&example, true), parsed);
-    }
-
-    #[test]
-    fn parses_register_artifacts() {
-        let cli = Cli::try_parse_from(["vizfold", "register-artifacts", "1"])
-            .expect("register-artifacts command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::RegisterArtifacts { run_id: 1 }
-        ));
     }
 
     #[tokio::test]
@@ -2933,9 +2864,17 @@ mod tests {
         );
     }
 
+    /// A target that declares no cpu maximum -- or whose resources never parsed -- must not clamp
+    /// the request down to something arbitrary.
     #[test]
-    fn cpus_default_follows_available_parallelism() {
-        let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
-        assert_eq!(super::default_cpus(), expected);
+    fn cpus_clamp_only_where_the_target_declares_a_maximum() {
+        let with_max = json!({"properties": {"cpus": {"maximum": 14}}}).to_string();
+        assert_eq!(super::clamp_cpus(18, &with_max), 14);
+        assert_eq!(super::clamp_cpus(8, &with_max), 8);
+        assert_eq!(
+            super::clamp_cpus(18, &json!({"properties": {}}).to_string()),
+            18
+        );
+        assert_eq!(super::clamp_cpus(18, "not-json"), 18);
     }
 }

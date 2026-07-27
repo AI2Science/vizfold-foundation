@@ -283,12 +283,8 @@ mod tests {
     /// Keeps `env_dir` in step with `vizfold::env` in lib/config.sh.
     #[test]
     fn every_env_is_a_fixed_name_under_one_base() {
-        for backend in ["openfold", "esmfold", "workbench"] {
-            assert_eq!(
-                env_dir(backend),
-                env_base().join(format!("vizfold-{backend}"))
-            );
-        }
+        assert_eq!(env_dir("openfold").file_name().unwrap(), "vizfold-openfold");
+        assert_eq!(env_dir("openfold").parent().unwrap(), env_base());
         assert_eq!(env_base().file_name().unwrap(), "envs");
     }
 

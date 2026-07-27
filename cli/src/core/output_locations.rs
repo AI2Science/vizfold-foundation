@@ -100,7 +100,7 @@ mod tests {
         )
         .expect("output location should resolve");
 
-        assert_eq!(output_location, PathBuf::from("/work/outputs").join("42"));
+        assert_eq!(output_location, PathBuf::from("/work/outputs/42"));
     }
 
     #[test]

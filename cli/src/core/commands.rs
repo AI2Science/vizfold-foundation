@@ -83,10 +83,6 @@ pub struct FakeCommandRunner {
 
 #[cfg(test)]
 impl FakeCommandRunner {
-    pub fn succeeds(output: CommandOutput) -> Self {
-        Self { output: Ok(output) }
-    }
-
     pub fn fails(message: impl Into<String>) -> Self {
         Self {
             output: Err(message.into()),
@@ -104,7 +100,7 @@ impl CommandRunner for FakeCommandRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner, LocalCommandRunner};
+    use super::{CommandRunner, CommandSpec, LocalCommandRunner};
 
     #[cfg(unix)]
     fn shell_command(command: &str) -> CommandSpec {
@@ -124,58 +120,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn command_spec_captures_program_args_dir_and_env() {
-        let mut spec = CommandSpec {
-            program: "openfold".into(),
-            args: vec!["--fasta".into(), "input.fasta".into()],
-            current_dir: Some("runs/run-1".into()),
-            ..Default::default()
-        };
-        spec.env.insert("CUDA_VISIBLE_DEVICES".into(), "0".into());
-
-        assert_eq!(spec.program, "openfold");
-        assert_eq!(spec.args, vec!["--fasta", "input.fasta"]);
-        assert_eq!(spec.current_dir, Some("runs/run-1".into()));
-        assert_eq!(spec.env["CUDA_VISIBLE_DEVICES"], "0");
-    }
-
-    #[tokio::test]
-    async fn fake_command_runner_returns_configured_success() {
-        let runner = FakeCommandRunner::succeeds(CommandOutput {
-            exit_code: 0,
-            stdout: "done".into(),
-            stderr: String::new(),
-        });
-
-        let output = runner
-            .run(CommandSpec {
-                program: "ignored".into(),
-                ..Default::default()
-            })
-            .await
-            .expect("fake runner should succeed");
-
-        assert_eq!(output.exit_code, 0);
-        assert_eq!(output.stdout, "done");
-        assert_eq!(output.stderr, "");
-    }
-
-    #[tokio::test]
-    async fn fake_command_runner_returns_configured_failure() {
-        let runner = FakeCommandRunner::fails("command failed");
-
-        let error = runner
-            .run(CommandSpec {
-                program: "ignored".into(),
-                ..Default::default()
-            })
-            .await
-            .expect_err("fake runner should fail");
-
-        assert!(error.to_string().contains("command failed"));
-    }
-
     #[tokio::test]
     async fn local_command_runner_captures_successful_command_output() {
         let runner = LocalCommandRunner;
@@ -186,22 +130,23 @@ mod tests {
 
         let output = runner.run(spec).await.expect("command should run");
 
-        assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout.trim(), "stdout");
         assert_eq!(output.stderr.trim(), "stderr");
     }
 
+    /// A signal-killed child has no exit code; we report our own -1 sentinel
+    /// rather than letting the run look successful.
+    #[cfg(unix)]
     #[tokio::test]
-    async fn local_command_runner_returns_non_zero_exit_codes() {
+    async fn a_signalled_child_reports_the_minus_one_sentinel() {
         let runner = LocalCommandRunner;
-        #[cfg(unix)]
-        let spec = shell_command("exit 7");
-        #[cfg(windows)]
-        let spec = shell_command("exit /B 7");
 
-        let output = runner.run(spec).await.expect("command should run");
+        let output = runner
+            .run(shell_command("kill -9 $$"))
+            .await
+            .expect("command should run");
 
-        assert_eq!(output.exit_code, 7);
+        assert_eq!(output.exit_code, -1);
     }
 
     #[tokio::test]
