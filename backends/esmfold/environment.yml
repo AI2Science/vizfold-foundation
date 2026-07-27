@@ -1,0 +1,23 @@
+# ESMFold environment. No CUDA compilation and no AlphaFold2 databases -- the model and its weights
+# come from HuggingFace at run time, so this is only the interpreter, torch and transformers.
+#
+# The point of solving this with conda rather than pip: conda-forge's CUDA packages declare the
+# driver they need (`__cuda`), so the solver picks a torch this host can actually load. PyPI wheels
+# carry no such metadata, and `pip install torch` therefore takes whatever CUDA is newest.
+#
+#   python=3.11       a cluster login node's python3 is routinely older than transformers needs.
+#
+# Nothing here names CUDA: install.sh adds `pytorch=*=cuda*` and a `cuda-version` cap only where it
+# found a GPU driver, so a host without one resolves to the CPU (or MPS) build instead of failing or
+# dragging in a GPU stack it cannot run. `env create` takes no extra specs, so that needs plain
+# `create`. Versions are otherwise left to the solver so the stack stays internally consistent.
+
+name: vizfold-esmfold
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pytorch
+  - transformers>=4.36,<5
+  - numpy>=1.24

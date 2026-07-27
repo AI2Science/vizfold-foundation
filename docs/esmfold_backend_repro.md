@@ -14,8 +14,9 @@ export ESMFOLD_ENV_PREFIX=...
 micromamba run -p "$ESMFOLD_ENV_PREFIX" esmfold --help
 ```
 
-The installer brings its own Python 3.11 — a login node's `python3` is routinely too old. For a
-manual pip install instead, see Option B in [esmfold.md](esmfold.md#install).
+The installer brings its own Python 3.11 — a login node's `python3` is routinely too old — and
+solves torch against the host's GPU driver. For a manual pip install instead, see Option B in
+[esmfold.md](esmfold.md#install).
 
 ## Structure-Only Inference Test
 
@@ -79,9 +80,9 @@ The site is `ice-slurm`: `ice-cpu` / `ice-gpu` partitions, `gpu:a100:1`. Two got
 
 - `OPENFOLD_GPU_*` governs ESMFold folds too — those settings are what an ESMFold run is `srun`'d
   onto. The names are OpenFold-prefixed for historical reasons only.
-- The installer matches the torch wheel to the GPU driver's CUDA, so a fold on the GPU partition
-  gets a build the driver can load; `ESMFOLD_PIP_INDEX_URL` overrides the index it picks. It prints
-  the driver version and the index, and the verify step prints the torch version it ended up with.
+- The env is solved with micromamba against the GPU driver's CUDA, so a fold on the GPU partition
+  gets a torch the driver can load. The installer prints the driver version it detected, and the
+  verify step prints the torch build it ended up with.
 
 ## Verification Checklist
 
