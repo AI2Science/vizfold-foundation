@@ -1461,9 +1461,8 @@ fn confirmed() -> Result<bool, DbErr> {
     Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
-/// zsh registers a completion through `compdef`, which exists only once compinit has run, and a bare
-/// ~/.zshrc never runs it -- so carry the guard here rather than in every place that evals this.
-/// bash needs no prelude: `complete` is a builtin.
+/// clap_complete's zsh script registers through `compdef`, which exists only once compinit has run,
+/// and a bare ~/.zshrc never runs it. Carried here rather than in each place that evals this.
 fn completion_script(shell: Shell) -> Vec<u8> {
     let mut script = match shell {
         Shell::Zsh => {
@@ -2687,10 +2686,8 @@ mod tests {
         }
     }
 
-    /// The prelude is the whole of what we add to clap_complete's output, and it is load-bearing:
-    /// without it a ~/.zshrc that never ran compinit prints `command not found: compdef` on every
-    /// shell start and registers nothing. bash must not carry it -- `complete` is a builtin there,
-    /// and the zsh syntax would be an error.
+    /// The prelude is the whole of what we add to clap_complete's output. Verified load-bearing: a
+    /// zsh that never ran compinit registers nothing without it, and the syntax is an error in bash.
     #[test]
     fn only_zsh_carries_the_compinit_prelude() {
         let script = |shell| String::from_utf8(completion_script(shell)).expect("utf-8");

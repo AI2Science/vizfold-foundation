@@ -51,8 +51,8 @@ bootstrap::micromamba() {
     echo "installed micromamba to $BIN/micromamba"
 }
 
-# Append a line to one shell's rc, once. .zshrc only if it exists (zsh may not be installed);
-# .bashrc regardless, since bash reads it on every interactive shell even on a fresh account.
+# .zshrc only where it exists -- writing one would invent a config for a shell that may not be
+# installed. .bashrc regardless: bash reads it on every interactive shell, fresh account or not.
 bootstrap::rc() {   # $1 shell, $2 line
     local rc=$HOME/.${1}rc
     [ "$1" = bash ] || [ -f "$rc" ] || return 0
@@ -68,9 +68,9 @@ bootstrap::path() {
     echo "added $BIN to PATH in your shell rc; restart your shell or run: $line"
 }
 
-# Tab completion, eval'd from the binary rather than written out as a file: it then follows whatever
-# vizfold is on PATH, so a self-update cannot leave a stale script behind. After the PATH line, which
-# is what puts vizfold there; the guard keeps an uninstall from erroring on every shell start.
+# Eval'd from the binary rather than written out as a file, so a self-update leaves nothing stale.
+# Must follow bootstrap::path, which is what puts vizfold on the PATH this line then calls it from;
+# the guard keeps an uninstalled binary from erroring on every shell start.
 bootstrap::completions() {
     local shell
     for shell in bash zsh; do
