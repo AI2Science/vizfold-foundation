@@ -34,7 +34,8 @@ vizfold install openfold
 ```
 
 The binary ships only itself, so `install repo` clones the matching checkout to `$HOME/vizfold-repo`
-for the installer scripts, the bundled proteins and the dashboard. It then settles the site and
+for the installer scripts, the bundled proteins and the dashboard, and provisions the dashboard's
+Node environment and dependencies so `serve` starts rather than installs. It then settles the site and
 writes `~/.config/vizfold/vizfold.json` — which cluster, which prefix, which AlphaFold2 mirror holds
 the protein databases, what the scheduler takes — so `status` reads `config ok` before any backend is
 installed, and a backend install only has to build its environment. Nothing clones as a side effect:
