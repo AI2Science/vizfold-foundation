@@ -561,7 +561,25 @@ fn install_repo() -> Result<(), DbErr> {
         std::process::Command::new("bash")
             .arg(repo.join(CONFIGURE))
             .env("OPENFOLD_HOME", &repo),
-    )
+    )?;
+    // The dashboard too, so `serve` starts rather than provisioning: on a cluster that is a Node
+    // environment and an npm install, minutes of it, and `serve` is run when someone wants to look.
+    ensure_dashboard(&serve_dir()?, "")?;
+    Ok(())
+}
+
+/// Stage the dashboard, provision Node, and install its dependencies. Idempotent, and the reason
+/// `serve` still calls it: an install that predates the dashboard, or a cleared prefix, self-heals.
+fn ensure_dashboard(workbench: &Path, backends: &str) -> Result<PathBuf, DbErr> {
+    let node_bin = ensure_node()?;
+    let node_modules = workbench.join("node_modules");
+    let empty =
+        std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
+    if empty {
+        println!("Installing workbench dependencies (npm install)...");
+        run_npm(workbench, &node_bin, &["install"], backends)?;
+    }
+    Ok(node_bin)
 }
 
 /// Settles the site and writes the config; `install repo` owns both.
@@ -1496,17 +1514,8 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
         }
     }
 
-    let node_bin = ensure_node()?;
-
     let backends = args.backends_env();
-
-    let node_modules = workbench.join("node_modules");
-    let empty =
-        std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
-    if empty {
-        println!("Installing workbench dependencies (npm install)...");
-        run_npm(&workbench, &node_bin, &["install"], &backends)?;
-    }
+    let node_bin = ensure_dashboard(&workbench, &backends)?;
 
     let port = args.port.unwrap_or(3000);
     println!(
