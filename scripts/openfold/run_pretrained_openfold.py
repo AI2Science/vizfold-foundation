@@ -322,6 +322,15 @@ def main(args):
             if args.output_postfix is not None:
                 output_name = f'{output_name}_{args.output_postfix}'
 
+            if args.attn_map_dir:
+                # The blocks read self.attn_map_dir at save time, and copied it at __init__, so the
+                # module attribute is the only thing that keeps two targets from overwriting each other.
+                tag_attn_dir = os.path.join(args.attn_map_dir, tag)
+                os.makedirs(tag_attn_dir, exist_ok=True)
+                for module in model.modules():
+                    if hasattr(module, "attn_map_dir"):
+                        module.attn_map_dir = tag_attn_dir
+
             # Does nothing if the alignments have already been computed
             precompute_alignments(tags, seqs, alignment_dir, args)
 

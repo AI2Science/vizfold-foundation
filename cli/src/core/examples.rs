@@ -58,9 +58,11 @@ pub fn scan(dir: &Path) -> Vec<Example> {
     found
 }
 
-fn first_fasta(dir: &Path) -> Option<PathBuf> {
+/// Every FASTA in `dir`, sorted: what a directory target folds.
+pub fn fasta_files(dir: &Path) -> Vec<PathBuf> {
     let mut fastas: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
+        .into_iter()
+        .flatten()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
@@ -69,7 +71,11 @@ fn first_fasta(dir: &Path) -> Option<PathBuf> {
         })
         .collect();
     fastas.sort();
-    fastas.into_iter().next()
+    fastas
+}
+
+pub fn first_fasta(dir: &Path) -> Option<PathBuf> {
+    fasta_files(dir).into_iter().next()
 }
 
 /// `>1UBQ_1|Chain A|UBIQUITIN|...` yields id `1UBQ_1`, description `UBIQUITIN`; a bare `>6KWC_1` neither.

@@ -21,11 +21,11 @@ export async function listExamples(): Promise<Example[]> {
   return JSON.parse(stdout);
 }
 
-/** Record the run and return its id. Queueing only writes the row, so this is near-instant. */
+/** Record the run and return its id. `--no-exec` only writes the row, so this is near-instant. */
 export async function queueRun(example: Example, attn: boolean): Promise<number> {
   // --attn takes a value and defaults to true, so it has to be passed either way; the CLI reads
-  // the sequence out of the example's FASTA itself.
-  const args = ["queue", "openfold", "--input-id", example.id, `--attn=${attn}`];
+  // the id and the sequence out of the example's FASTA itself.
+  const args = ["run", example.id, "--backend", "openfold", `--attn=${attn}`, "--no-exec"];
   const { stdout } = await run(BIN, args);
   const id = stdout.match(/Queued OpenFold run (\d+)/)?.[1];
   if (!id) throw new Error(`no run id in queue output: ${stdout.trim()}`);
