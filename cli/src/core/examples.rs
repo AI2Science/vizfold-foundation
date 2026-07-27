@@ -28,12 +28,16 @@ pub fn find(id: &str) -> Option<Example> {
 
 /// The single sequence at `path` -- the FASTA or a directory holding one -- read from the file, not passed in.
 pub fn from_path(path: &Path) -> Option<Example> {
-    let fasta = if path.is_dir() {
-        first_fasta(path)?
+    parse(&std::fs::read_to_string(fasta_file(path)?).ok()?)
+}
+
+/// The FASTA `path` names: itself, or the first one inside it when it is a directory.
+pub fn fasta_file(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        first_fasta(path)
     } else {
-        path.to_path_buf()
-    };
-    parse(&std::fs::read_to_string(fasta).ok()?)
+        Some(path.to_path_buf())
+    }
 }
 
 /// Every complete example in `dir`, cheapest first: residue count is what someone is choosing on.

@@ -6,20 +6,47 @@ set -euo pipefail
 
 . "${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/lib/slurm.sh"
 
-# Cluster, allocation, prefix, saved config. Without it the prefix defaulted to a quota'd $HOME.
-vizfold::settle_site
-
-ESM=$REPO/backends/esmfold
-PREFIX=$(vizfold::prefix)
-STATE=$(vizfold::state esmfold)
-ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
 # A cluster login node's python3 is routinely older than the package needs, so we bring our own.
 PYTHON_VERSION=3.11
-# Its own state dir: else the 2.5-3 GB torch wheel lands in the ~/.cache/pip quota this install avoids.
-export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$STATE/pip}
-test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
 
-esmfold::present() { "$ENV/bin/python" -c 'import torch, transformers, esmfold' 2>/dev/null; }
+esmfold::config() {
+    # Cluster, allocation, prefix, saved config. Without it the prefix defaulted to a quota'd $HOME.
+    vizfold::settle_site
+    ESM=$REPO/backends/esmfold
+    PREFIX=$(vizfold::prefix)
+    STATE=$(vizfold::state esmfold)
+    ENV=${ESMFOLD_ENV_PREFIX:-$(vizfold::env esmfold)}
+    # Its own state dir: else the 2.5-3 GB torch wheel lands in the ~/.cache/pip quota this install avoids.
+    export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$STATE/pip}
+    test -f "$ESM/pyproject.toml" || die "no esmfold project at $ESM; is $REPO a vizfold checkout?"
+}
+
+# PyPI's torch is built against the newest CUDA, and an older driver refuses that build outright
+# ("the NVIDIA driver on your system is too old"), leaving a GPU fold with no GPU. Pick the newest
+# wheel index the driver accepts -- the pip analogue of the env's `cuda-version<=$MAX_CUDA`. The list
+# is the cu* indexes download.pytorch.org publishes; extend it as more appear.
+esmfold::torch_cuda() {
+    export OPENFOLD_DRIVER_CUDA=${OPENFOLD_DRIVER_CUDA:-$(vizfold::driver_cuda)}
+    local tag
+    TORCH_CUDA=0
+    for tag in 118 121 124 126 128 129 130 132; do
+        if [ -n "$OPENFOLD_DRIVER_CUDA" ] && [ "$tag" -le "${OPENFOLD_DRIVER_CUDA//./}" ]; then
+            TORCH_CUDA=$tag
+        fi
+    done
+    # Assignment, not :-, so ESMFOLD_PIP_INDEX_URL= opts out of the pin entirely.
+    [ "$TORCH_CUDA" = 0 ] ||
+        ESMFOLD_PIP_INDEX_URL=${ESMFOLD_PIP_INDEX_URL-https://download.pytorch.org/whl/cu$TORCH_CUDA}
+    [ -n "${ESMFOLD_PIP_INDEX_URL:-}" ] || TORCH_CUDA=0
+    echo "driver CUDA ${OPENFOLD_DRIVER_CUDA:-unknown}, torch index ${ESMFOLD_PIP_INDEX_URL:-PyPI default}"
+}
+
+# A torch built for a newer CUDA than the driver is not "present": it imports, then cannot reach the GPU.
+esmfold::present() {
+    "$ENV/bin/python" -c "
+import torch, transformers, esmfold
+assert not $TORCH_CUDA or int((torch.version.cuda or '0').replace('.', '')) <= $TORCH_CUDA" 2>/dev/null
+}
 
 esmfold::env() {
     log "env $ENV (python $PYTHON_VERSION)"
@@ -35,7 +62,9 @@ esmfold::install() {
     log torch
     local index=()
     [ -n "${ESMFOLD_PIP_INDEX_URL:-}" ] && index=(--index-url "$ESMFOLD_PIP_INDEX_URL")
-    "$ENV/bin/pip" install ${index[@]+"${index[@]}"} "${ESMFOLD_TORCH_SPEC:-torch}"
+    # --force-reinstall: pip would otherwise call an already-installed torch satisfied and keep the
+    # build the driver rejects, so a re-install could not repair the very thing it exists to fix.
+    "$ENV/bin/pip" install --force-reinstall ${index[@]+"${index[@]}"} "${ESMFOLD_TORCH_SPEC:-torch}"
     # The project declares the rest and installs the `esmfold` package with its entrypoint.
     log package
     "$ENV/bin/pip" install "$ESM"
@@ -65,6 +94,8 @@ esmfold::config_save() {
 }
 
 main() {
+    esmfold::config
+    esmfold::torch_cuda
     if esmfold::present; then
         log "already installed at $ENV"
     else
@@ -88,4 +119,7 @@ To drive the model yourself, use its own CLI:
   micromamba run -p $ENV esmfold --help
 EOF
 }
+
+# Sourced (tests/torch_index.sh) this file is just its definitions; only an execution installs.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 main "$@"

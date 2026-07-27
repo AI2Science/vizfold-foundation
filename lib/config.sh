@@ -55,6 +55,15 @@ for k, v in scope.items():
     return 0
 }
 
+# The GPU driver's CUDA version, e.g. 12.8. Empty where no driver is loaded, so callers pick a floor.
+vizfold::driver_cuda() {
+    python3 -c "
+import ctypes
+v = ctypes.c_int()
+ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
+print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null || true
+}
+
 # Activate a micromamba env ($1, a name or path). set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$(micromamba shell hook --shell bash)"; micromamba activate "$1"; set -u; }
 

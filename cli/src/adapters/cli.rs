@@ -2073,7 +2073,11 @@ async fn submit_esmfold_run(
 ) -> Result<crate::core::entities::runs::Model, DbErr> {
     let catalog = local_catalog(database, Backend::Esmfold).await?;
     let working_dir = &catalog.working_dir;
-    let fasta = canonicalize_local_path("--fasta", &args.fasta, working_dir)?;
+    let path = canonicalize_local_path("--fasta", &args.fasta, working_dir)?;
+    // The backend folds one file, while a bundled example names the directory holding it. Falling
+    // back to `path` leaves read_fasta to report a directory with no FASTA in it.
+    let fasta = examples::fasta_file(Path::new(&path))
+        .map_or(path, |file| file.to_string_lossy().into_owned());
     let example = read_fasta(&fasta)?;
     let model_device = args
         .model_device
@@ -3147,6 +3151,36 @@ mod tests {
         assert_eq!(
             provenance["profile"]["config"]["output_location"],
             json!(config::prefix().join("runs"))
+        );
+        Ok(())
+    }
+
+    /// `vizfold run <example> --backend esmfold` hands over the example's directory; the backend's
+    /// `--fasta` and its preflight both take the file, so the run has to record that instead.
+    #[tokio::test]
+    async fn queue_esmfold_run_records_the_fasta_file_behind_an_example_directory()
+    -> Result<(), DbErr> {
+        let database = Database::connect("sqlite::memory:").await?;
+        db::migrate_database(&database).await?;
+        seed::seed_defaults(&database).await?;
+
+        let fasta_dir = crate::core::examples::monomer_dir().join("fasta_dir_6KWC");
+        queue_esmfold_run(
+            &database,
+            EsmfoldQueueArgs::for_fasta(fasta_dir.display().to_string()),
+        )
+        .await?;
+
+        let runs = runs::list_runs(&database).await?;
+        let recorded =
+            serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
+                .expect("execution parameters should be valid JSON")["fasta"]
+                .as_str()
+                .expect("fasta should be recorded")
+                .to_owned();
+        assert!(
+            Path::new(&recorded).is_file(),
+            "recorded fasta '{recorded}' should be the file, not the directory"
         );
         Ok(())
     }
