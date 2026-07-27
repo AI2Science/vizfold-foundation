@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
+import { BACKENDS } from "@/lib/vizfold";
 
 // The Rust executor owns this file; the dashboard reads it directly, read-only. `vizfold serve`
 // exports VIZFOLD_DB (the plain sqlite path); the fallback covers running `next dev` by hand.
@@ -54,8 +55,20 @@ const ARTIFACT_SELECT = `SELECT a.id, a.format, a.storage_uri,
   JOIN artifact_types at ON at.id = a.artifact_type_id
   WHERE a.run_id = ? ORDER BY a.id`;
 
+// Runs from a backend this dashboard does not serve are hidden, not deleted.
+const SERVED = BACKENDS?.length ? ` WHERE b.slug IN (${BACKENDS.map(() => "?").join(",")})` : "";
+
 export const listRuns = (): RunRow[] =>
-  query((db) => db.prepare(`${RUN_SELECT} ORDER BY r.submitted_at DESC`).all() as RunRow[], []);
+  // Serving nothing lists nothing; `IN ()` is not valid SQL, so this never reaches the database.
+  BACKENDS?.length === 0
+    ? []
+    : query(
+        (db) =>
+          db
+            .prepare(`${RUN_SELECT}${SERVED} ORDER BY r.submitted_at DESC`)
+            .all(...(BACKENDS ?? [])) as RunRow[],
+        [],
+      );
 
 export const getRun = (id: number): RunRow | null =>
   query((db) => (db.prepare(`${RUN_SELECT} WHERE r.id = ?`).get(id) as RunRow) ?? null, null);

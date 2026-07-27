@@ -252,6 +252,15 @@ execution and land in one run directory, keyed by FASTA tag: `<tag>_model_1_ptm_
 `attention/<tag>/`. `--no-exec` records the run and stops, printing the id to hand back to `run`
 later. `serve` opens the dashboard over the outputs. `vizfold <command> --help` details any one.
 
+```bash
+vizfold serve                     # every installed backend
+vizfold serve esmfold             # one, refused if it is not installed
+vizfold serve openfold esmfold    # both, with a model picker on the Fold card
+```
+
+The dashboard folds with, and lists runs from, the backends it was told to serve; runs from the
+others stay in the database, out of sight.
+
 ```text
 install             Install the checkout everything runs from (`base`), or a model backend from it
 download            Download a backend's data (OpenFold AlphaFold2 databases/params)
@@ -259,7 +268,7 @@ status              Show resolved config, which backends are installed, and whet
 uninstall           Remove one part, or everything the install generated
 update              Move the checkout to this binary's release (`base`), or reinstall a backend from it
 self-update         Replace this binary with the latest release. Run `update base` after, for the checkout
-serve               Start the workbench dashboard
+serve               Start the workbench dashboard, over the given backends (default: all installed)
 list                List executor records
 show                Show one executor record
 run                 Fold targets in one execution: bundled examples, FASTAs, directories of FASTAs -- or a queued run by id
@@ -356,7 +365,7 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
-`vizfold serve` exports `VIZFOLD_DB`/`OPENFOLD_PREFIX` and links run outputs under `public/runs` so
+`vizfold serve` exports `VIZFOLD_DB`/`OPENFOLD_PREFIX`/`VIZFOLD_BACKENDS` and links run outputs under `public/runs` so
 the 3D viewer and attention images can load them. The workbench reads `process.env` only, never the
 vizfold config, so `npm run dev` by hand needs both passed in — see
 [workbench/README.md](workbench/README.md).

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listRuns } from "@/lib/db";
-import { listExamples } from "@/lib/vizfold";
+import { FOLDABLE, listExamples } from "@/lib/vizfold";
 import FoldCard from "@/app/FoldCard";
 import Poller from "@/app/Poller";
 
@@ -26,7 +26,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <FoldCard examples={examples} />
+      <FoldCard examples={examples} backends={FOLDABLE} />
 
       <section className="panel">
         <div className="panel-header">

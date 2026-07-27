@@ -7,6 +7,18 @@ import { promisify } from "node:util";
 const BIN = process.env.VIZFOLD_BIN ?? "vizfold";
 const PREFIX = process.env.OPENFOLD_PREFIX ?? "";
 
+/** What `vizfold serve` was asked to serve. Empty means unset — `next dev` by hand, which filters
+ *  nothing and lets the CLI pick the backend, as it did before serve took any. */
+// null means the variable is unset -- `next dev` run by hand, where filtering by a set nobody chose
+// would hide every run. Set-but-empty is a real answer: `serve` found no backend installed.
+const served = process.env.VIZFOLD_BACKENDS;
+export const BACKENDS: string[] | null =
+  served === undefined ? null : served.split(",").filter(Boolean);
+
+/** What the Fold card offers. Unset, the dashboard cannot know what is installed, so it offers both
+ *  and lets the CLI's own prereq gate refuse one that is not. */
+export const FOLDABLE = BACKENDS ?? ["openfold", "esmfold"];
+
 const run = promisify(execFile);
 
 export type Example = {
@@ -22,13 +34,19 @@ export async function listExamples(): Promise<Example[]> {
 }
 
 /** Record the run and return its id. `--no-exec` only writes the row, so this is near-instant. */
-export async function queueRun(example: Example, attn: boolean): Promise<number> {
+export async function queueRun(
+  example: Example,
+  attn: boolean,
+  backend?: string,
+): Promise<number> {
   // --attn takes a value and defaults to true, so it has to be passed either way; the CLI reads
   // the id and the sequence out of the example's FASTA itself.
-  const args = ["run", example.id, "--backend", "openfold", `--attn=${attn}`, "--no-exec"];
+  const args = ["run", example.id, `--attn=${attn}`, "--no-exec"];
+  if (backend) args.push("--backend", backend);
   const { stdout } = await run(BIN, args);
-  const id = stdout.match(/Queued OpenFold run (\d+)/)?.[1];
-  if (!id) throw new Error(`no run id in queue output: ${stdout.trim()}`);
+  // Each backend queues under its own label, so match the shape of the line, not the name in it.
+  const id = stdout.match(/Queued \S+ run (\d+)/)?.[1];
+  if (!id) throw new Error(`no run id in run output: ${stdout.trim()}`);
   return Number(id);
 }
 

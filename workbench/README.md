@@ -6,7 +6,8 @@ and shells out to the `vizfold` binary (`list examples`, `run <id> --no-exec`, `
 ## Running it
 
 ```bash
-vizfold serve                # http://localhost:3000
+vizfold serve                     # every installed backend, http://localhost:3000
+vizfold serve openfold esmfold    # only these two
 vizfold serve --port 4000
 ```
 
@@ -15,7 +16,9 @@ vizfold serve --port 4000
   `OPENFOLD_HOME`); it never clones a missing checkout
 - provisions Node if the host has none (>= 22.13, for `node:sqlite`)
 - runs `npm install` on first use, then `npm run dev`
-- exports `VIZFOLD_BIN`, `OPENFOLD_PREFIX` and `VIZFOLD_DB`
+- exports `VIZFOLD_BIN`, `OPENFOLD_PREFIX`, `VIZFOLD_DB` and `VIZFOLD_BACKENDS` (the served slugs,
+  comma-separated: the run list is filtered to them, and the Fold card picks between them when there
+  is more than one). Unset — `npm run dev` by hand — filters nothing and lets the CLI choose.
 - symlinks `<OPENFOLD_PREFIX>/runs` to `public/runs`, so the 3D viewer and attention images resolve
 
 `npm run dev` by hand needs that env passed in — the workbench reads `process.env` only, never the

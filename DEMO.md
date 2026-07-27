@@ -199,13 +199,15 @@ ID  TYPE ID  FORMAT     STORAGE URI
 ## 5. View it in the dashboard
 
 ```bash
-vizfold serve
+vizfold serve            # every installed backend; name them to serve a subset
 ```
 
 This stages and starts the Next.js workbench (installing its dependencies on first run) at
 `http://localhost:3000`, linking `$OPENFOLD_PREFIX/runs` under the app's `public/` so the browser
 can load each run's outputs. The dashboard renders the predicted structure in an interactive 3D
-viewer and shows the attention maps. From a laptop, forward the port over SSH:
+viewer and shows the attention maps. It folds with, and lists runs from, the backends it serves —
+`vizfold serve openfold` on a host with both installed hides the ESMFold runs. From a laptop,
+forward the port over SSH:
 
 ```bash
 ssh -L 3000:localhost:3000 <you>@delta.ncsa.illinois.edu

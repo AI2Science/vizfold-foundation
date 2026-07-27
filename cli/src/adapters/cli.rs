@@ -51,7 +51,7 @@ enum Command {
     Update(UpdateArgs),
     /// Replace this binary with the latest release. Run `update base` after, for the checkout.
     SelfUpdate(SelfUpdateArgs),
-    /// Start the workbench dashboard.
+    /// Start the workbench dashboard, over the given backends (default: all installed).
     Serve(ServeArgs),
     /// List executor records.
     List(ListArgs),
@@ -245,9 +245,33 @@ struct SelfUpdateArgs {
 
 #[derive(Debug, Args)]
 struct ServeArgs {
+    /// Backends the dashboard folds with and lists runs for. Defaults to every one installed.
+    #[arg(value_enum)]
+    backends: Vec<Backend>,
     /// Port for the dashboard dev server. Defaults to 3000.
     #[arg(long)]
     port: Option<u16>,
+}
+
+impl ServeArgs {
+    /// What the dashboard is handed, comma-joined: the backends named, in the order given, else
+    /// every one installed -- never a Fold option that cannot run.
+    fn backends_env(&self) -> String {
+        let served: Vec<Backend> = if self.backends.is_empty() {
+            Backend::value_variants()
+                .iter()
+                .copied()
+                .filter(|backend| backend.is_installed())
+                .collect()
+        } else {
+            self.backends.clone()
+        };
+        served
+            .iter()
+            .map(|backend| backend.slug())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 }
 
 #[derive(Debug, Args)]
@@ -424,7 +448,11 @@ fn prereqs(command: &Command) -> Vec<Component> {
         Command::List(ListArgs {
             resource: ListResource::Examples { .. },
         }) => vec![repo_health()],
-        Command::Serve(_) => vec![core_deps_health(), repo_health(), config_health()],
+        // Only the backends named: bare `serve` resolves to what is installed, so it can gate on nothing.
+        Command::Serve(args) => [core_deps_health(), repo_health(), config_health()]
+            .into_iter()
+            .chain(args.backends.iter().copied().map(backend_health))
+            .collect(),
         Command::Download(args) => {
             vec![repo_health(), config_health(), backend(Some(args.backend))]
         }
@@ -1441,22 +1469,31 @@ fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
 
     let node_bin = ensure_node()?;
 
+    let backends = args.backends_env();
+
     let node_modules = workbench.join("node_modules");
     let empty =
         std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
     if empty {
         println!("Installing workbench dependencies (npm install)...");
-        run_npm(&workbench, &node_bin, &["install"])?;
+        run_npm(&workbench, &node_bin, &["install"], &backends)?;
     }
 
     let port = args.port.unwrap_or(3000);
-    println!("Starting workbench at http://localhost:{port}");
+    println!(
+        "Starting workbench at http://localhost:{port} ({})",
+        if backends.is_empty() {
+            "no backend installed"
+        } else {
+            &backends
+        }
+    );
     let port_arg = port.to_string();
     let mut npm_args = vec!["run", "dev"];
     if args.port.is_some() {
         npm_args.extend(["--", "--port", &port_arg]);
     }
-    run_npm(&workbench, &node_bin, &npm_args)
+    run_npm(&workbench, &node_bin, &npm_args, &backends)
 }
 
 /// Where the dashboard runs from: a copy on the prefix's filesystem, so node_modules never lands on home.
@@ -1560,7 +1597,7 @@ fn ensure_node() -> Result<PathBuf, DbErr> {
     Ok(bin)
 }
 
-fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
+fn run_npm(dir: &Path, node_bin: &Path, args: &[&str], backends: &str) -> Result<(), DbErr> {
     let mut command = std::process::Command::new(node_bin.join("npm"));
     command.current_dir(dir).args(args);
     // npm's shebang and `next`'s spawn both resolve `node` off PATH, so the env has to lead it.
@@ -1581,6 +1618,8 @@ fn run_npm(dir: &Path, node_bin: &Path, args: &[&str]) -> Result<(), DbErr> {
         config::env_dir("workbench").join(".npm"),
     );
     command.env("OPENFOLD_PREFIX", config::prefix());
+    // The resolved set, always explicit, so the dashboard needs no notion of what "all" means.
+    command.env("VIZFOLD_BACKENDS", backends);
     // node:sqlite cannot open database_url()'s sqlite://...?mode=rwc wrapper; hand it the plain path.
     if let Some(database) = config::database_path() {
         command.env("VIZFOLD_DB", database);
@@ -2555,26 +2594,57 @@ mod tests {
         );
     }
 
-    /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env.
+    /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env
+    /// -- and that reading is exactly what bare `serve` hands the dashboard. Both keys are pinned
+    /// here rather than in a second test, which would race this one over the same variables.
     #[test]
     fn backend_is_installed_tracks_its_own_env_prefix_key() {
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(base.join("openfold")).unwrap();
+        std::fs::create_dir_all(base.join("esmfold")).unwrap();
         // SAFETY: single-threaded test; pinned so env_prefix() does not read the real config.
-        unsafe { std::env::set_var("ESMFOLD_ENV_PREFIX", &base) };
-        assert_eq!(Backend::Esmfold.env_prefix(), base);
-        assert_ne!(Backend::Openfold.env_prefix(), base);
+        unsafe {
+            std::env::set_var("OPENFOLD_ENV_PREFIX", base.join("openfold"));
+            std::env::set_var("ESMFOLD_ENV_PREFIX", base.join("esmfold"));
+        }
+        assert_eq!(Backend::Esmfold.env_prefix(), base.join("esmfold"));
+        assert_ne!(Backend::Openfold.env_prefix(), base.join("esmfold"));
         assert!(
             Backend::Esmfold.is_installed(),
             "an existing env dir reads as installed"
         );
-        std::fs::remove_dir_all(&base).unwrap();
+
+        let served = |argv: &[&str]| match Cli::try_parse_from(argv)
+            .expect("argv should parse")
+            .command
+        {
+            Command::Serve(args) => args.backends_env(),
+            other => panic!("expected serve, got {other:?}"),
+        };
+        assert_eq!(served(&["vizfold", "serve"]), "openfold,esmfold");
+        // Named backends are honoured as given -- order included, since it picks the Fold default.
+        assert_eq!(served(&["vizfold", "serve", "esmfold"]), "esmfold");
+        assert_eq!(
+            served(&["vizfold", "serve", "esmfold", "openfold"]),
+            "esmfold,openfold"
+        );
+
+        std::fs::remove_dir_all(base.join("esmfold")).unwrap();
         assert!(
             !Backend::Esmfold.is_installed(),
             "a missing env dir reads as not installed"
         );
-        unsafe { std::env::remove_var("ESMFOLD_ENV_PREFIX") };
+        assert_eq!(
+            served(&["vizfold", "serve"]),
+            "openfold",
+            "bare serve offers what is installed, not what exists"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+        unsafe {
+            std::env::remove_var("OPENFOLD_ENV_PREFIX");
+            std::env::remove_var("ESMFOLD_ENV_PREFIX");
+        }
     }
 
     /// A bare `uninstall` stays: it is the only thing that removes what no part owns.
@@ -2759,6 +2829,12 @@ mod tests {
             names(&["vizfold", "serve"]),
             ["core deps", "repo", "config"]
         );
+        // Named backends are gated; bare `serve` resolves to the installed ones, so it gates on none.
+        assert_eq!(
+            names(&["vizfold", "serve", "openfold", "esmfold"]),
+            ["core deps", "repo", "config", "openfold", "esmfold"]
+        );
+        assert!(Cli::try_parse_from(["vizfold", "serve", "base"]).is_err());
         assert_eq!(
             names(&["vizfold", "download", "openfold"]),
             ["repo", "config", "openfold"]
