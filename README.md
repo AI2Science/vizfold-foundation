@@ -29,13 +29,13 @@ backend — OpenFold below, or
 `vizfold install esmfold` (see [docs/esmfold.md](docs/esmfold.md)):
 
 ```bash
-vizfold install source
+vizfold install src
 vizfold install openfold
 ```
 
-The binary ships only itself, so `install source` clones the matching checkout to `$HOME/vizfold-src`
+The binary ships only itself, so `install src` clones the matching checkout to `$HOME/vizfold-src`
 for the installer scripts and the dashboard. Nothing clones as a side effect: every command that
-reads the checkout refuses until it is there, naming `vizfold install source`. A cold backend install
+reads the checkout refuses until it is there, naming `vizfold install src`. A cold backend install
 takes ~8 minutes on a cluster with an AlphaFold2 mirror (measured on NCSA Delta), ~25 minutes on one
 where the databases are downloaded instead — see the cluster table below for which is which.
 
@@ -59,15 +59,15 @@ dashboard from, pinned to the binary's own release tag.
 
 ```bash
 vizfold self-update      # the binary only
-vizfold update source      # the checkout only, to this binary's tag
+vizfold update src      # the checkout only, to this binary's tag
 ```
 
 One command each, so run both to move a whole install. Between them the checkout is behind, which
 `status` reports as a broken `repo` — "the scripts are v0.7.1, but this binary is v0.7.2" — and
 which `serve` and `list proteins` refuse on, since both read the checkout.
 
-`vizfold update source --ref <tag-or-branch>` moves the checkout somewhere else; it refuses to touch a
-checkout with uncommitted changes, and it requires a checkout — `vizfold install source` makes one.
+`vizfold update src --ref <tag-or-branch>` moves the checkout somewhere else; it refuses to touch a
+checkout with uncommitted changes, and it requires a checkout — `vizfold install src` makes one.
 
 A moved checkout is scripts, not an installed environment: both backend installers skip work they
 have already done, so re-running `install <backend>` over a stale environment is a no-op.
@@ -91,7 +91,7 @@ vizfold uninstall openfold
 ```
 
 The config, the run database, the checkout, the shared package cache and any other backend stay,
-so `vizfold install openfold` puts it back where it was. `vizfold uninstall source` is the checkout
+so `vizfold install openfold` puts it back where it was. `vizfold uninstall src` is the checkout
 alone, and only the one vizfold cloned itself.
 
 ```bash
@@ -159,7 +159,7 @@ COMPONENT   STATUS  DETAIL
 ----------  ------  ------
 micromamba  ok      /u/you/.local/bin/micromamba
 cli         ok      0.9.0 (latest)
-source      ok      /u/you/vizfold-src at v0.9.0
+src         ok      /u/you/vizfold-src at v0.9.0
 config      ok      19 keys
 openfold    BROKEN  /work/nvme/bbol/you/vizfold/envs/vizfold-openfold
 esmfold     absent  not installed (/work/nvme/bbol/you/vizfold/envs/vizfold-esmfold)
@@ -270,7 +270,7 @@ download            Download a backend's data (OpenFold AlphaFold2 databases/par
 status              Show resolved config, which backends are installed, and whether it all checks out
 uninstall           Remove one part, or everything the install generated
 update              Move the checkout to this binary's release (`base`), or reinstall a backend from it
-self-update         Replace this binary with the latest release. Run `update source` after, for the checkout
+self-update         Replace this binary with the latest release. Run `update src` after, for the checkout
 serve               Start the workbench dashboard, over the given backends (default: all installed)
 list                List executor records
 show                Show one executor record

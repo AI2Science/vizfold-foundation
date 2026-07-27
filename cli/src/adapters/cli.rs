@@ -40,7 +40,7 @@ pub struct Cli {
 // `run` carries every fold flag; one enum is parsed, once, per process.
 #[allow(clippy::large_enum_variant)]
 enum Command {
-    /// Install the checkout everything runs from (`source`), or a model backend from it.
+    /// Install the checkout everything runs from (`src`), or a model backend from it.
     Install(InstallArgs),
     /// Download a backend's data (OpenFold AlphaFold2 databases/params).
     Download(DownloadArgs),
@@ -48,9 +48,9 @@ enum Command {
     Status,
     /// Remove one part, or everything the install generated.
     Uninstall(UninstallArgs),
-    /// Move the checkout to this binary's release (`source`), or reinstall a backend from it.
+    /// Move the checkout to this binary's release (`src`), or reinstall a backend from it.
     Update(UpdateArgs),
-    /// Replace this binary with the latest release. Run `update source` after, for the checkout.
+    /// Replace this binary with the latest release. Run `update src` after, for the checkout.
     SelfUpdate(SelfUpdateArgs),
     /// Start the workbench dashboard, over the given backends (default: all installed).
     Serve(ServeArgs),
@@ -84,7 +84,7 @@ struct InstallArgs {
 /// What a lifecycle verb acts on: the checkout every backend installs from, or one backend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum Part {
-    Source,
+    Src,
     Openfold,
     Esmfold,
 }
@@ -92,27 +92,27 @@ enum Part {
 impl Part {
     fn backend(self) -> Option<Backend> {
         match self {
-            Self::Source => None,
+            Self::Src => None,
             Self::Openfold => Some(Backend::Openfold),
             Self::Esmfold => Some(Backend::Esmfold),
         }
     }
 
     fn slug(self) -> &'static str {
-        self.backend().map_or("source", Backend::slug)
+        self.backend().map_or("src", Backend::slug)
     }
 
     /// Exactly what `install <part>` puts there, so `uninstall <part>` takes back the same set.
     fn install_paths(self, prefix: &Path, home: &Path) -> Vec<PathBuf> {
         self.backend().map_or_else(
-            || source_paths(prefix),
+            || src_paths(prefix),
             |backend| backend.install_paths(prefix, home),
         )
     }
 }
 
 /// The checkout, and only the clone vizfold made itself: never a user-supplied `OPENFOLD_HOME`.
-fn source_paths(prefix: &Path) -> Vec<PathBuf> {
+fn src_paths(prefix: &Path) -> Vec<PathBuf> {
     let src = config::vizfold_src();
     (src == config::default_src() && !prefix.starts_with(&src))
         .then_some(src)
@@ -231,7 +231,7 @@ struct UpdateArgs {
     /// What to bring current: the checkout, or a backend reinstalled from it.
     #[arg(value_enum)]
     part: Part,
-    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag. `source` only.
+    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag. `src` only.
     #[arg(long, value_name = "REF")]
     r#ref: Option<String>,
     /// Reinstall without the confirmation prompt.
@@ -445,7 +445,7 @@ fn prereqs(command: &Command) -> Vec<Component> {
         | Command::Uninstall(_)
         | Command::SelfUpdate(_)
         | Command::Completions(_) => vec![],
-        // A backend installs from the checkout; source's own verbs are what repair it, so they stay off it.
+        // A backend installs from the checkout; src's own verbs are what repair it, so they stay off it.
         Command::Install(InstallArgs { part }) | Command::Update(UpdateArgs { part, .. }) => {
             std::iter::once(core_deps_health())
                 .chain(part.backend().map(|_| repo_health()))
@@ -537,16 +537,16 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Make a part exist. Idempotent: both backend installers short-circuit on presence, as source does.
+/// Make a part exist. Idempotent: both backend installers short-circuit on presence, as src does.
 fn run_install(part: Part) -> Result<(), DbErr> {
     match part.backend() {
         Some(backend) => install_backend(backend),
-        None => install_source(),
+        None => install_src(),
     }
 }
 
 /// Fetch the checkout the binary installs everything from -- it ships only itself. Never moves one.
-fn install_source() -> Result<(), DbErr> {
+fn install_src() -> Result<(), DbErr> {
     let src = config::vizfold_src();
     if src.join(config::INSTALLER).is_file() {
         println!("{} already is a vizfold checkout.", src.display());
@@ -788,10 +788,10 @@ fn repo_health() -> Component {
 fn repo_health_at(src: &Path) -> Component {
     if !src.join(config::INSTALLER).is_file() {
         return Component {
-            name: "source",
+            name: "src",
             state: State::Absent,
             detail: format!("no checkout at {}", src.display()),
-            remedy: "vizfold install source".to_owned(),
+            remedy: "vizfold install src".to_owned(),
             ..Default::default()
         };
     }
@@ -806,13 +806,13 @@ fn repo_health_at(src: &Path) -> Component {
         _ => Vec::new(),
     };
     Component {
-        name: "source",
+        name: "src",
         detail: match &at {
             Some(at) => format!("{} at {at}", src.display()),
             None => src.display().to_string(),
         },
         problems,
-        remedy: "vizfold update source".to_owned(),
+        remedy: "vizfold update src".to_owned(),
         ..Default::default()
     }
 }
@@ -1132,9 +1132,9 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
 
 fn run_update(args: UpdateArgs) -> Result<(), DbErr> {
     match args.part.backend() {
-        None => update_source(args.r#ref.as_deref()),
+        None => update_src(args.r#ref.as_deref()),
         Some(backend) if args.r#ref.is_some() => Err(DbErr::Custom(format!(
-            "--ref moves the checkout, so it belongs to `vizfold update source`, not {}",
+            "--ref moves the checkout, so it belongs to `vizfold update src`, not {}",
             backend.slug()
         ))),
         Some(backend) => reinstall(backend, args.yes),
@@ -1178,12 +1178,12 @@ fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path, data: &Path) ->
 }
 
 /// Move the checkout to a ref, by default this binary's own release tag.
-fn update_source(wanted: Option<&str>) -> Result<(), DbErr> {
+fn update_src(wanted: Option<&str>) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let target = wanted.unwrap_or(&release::tag()).to_owned();
     if !src.join(config::INSTALLER).is_file() {
         return Err(DbErr::Custom(format!(
-            "no vizfold checkout at {}; create one with `vizfold install source`",
+            "no vizfold checkout at {}; create one with `vizfold install src`",
             src.display()
         )));
     }
@@ -1288,7 +1288,7 @@ fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
     })?;
     println!("vizfold {wanted} is installed at {}", exe.display());
     println!(
-        "The checkout still runs {current}'s scripts. Bring it along with: vizfold update source"
+        "The checkout still runs {current}'s scripts. Bring it along with: vizfold update src"
     );
     Ok(())
 }
@@ -1409,7 +1409,7 @@ fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         // The package cache outlives any one backend.
         prefix.join("mamba"),
     ];
-    // The staged copy only; with no prefix settled the two are one path, the source tree.
+    // The staged copy only; with no prefix settled the two are one path, the src tree.
     if prefix != home {
         paths.push(prefix.join("workbench"));
     }
@@ -2309,7 +2309,7 @@ fn canonicalize_at(field: &str, original: &str, attempted: &Path) -> Result<Stri
         })
 }
 
-/// The one sequence at a resolved FASTA path, as the source of a run's id and sequence.
+/// The one sequence at a resolved FASTA path, as the src of a run's id and sequence.
 fn read_fasta(path: &Path) -> Result<examples::Example, DbErr> {
     examples::from_path(path).ok_or_else(|| {
         DbErr::Custom(format!(
@@ -2505,7 +2505,7 @@ mod tests {
 
     fn parses_install_part() {
         for (arg, want) in [
-            ("source", Part::Source),
+            ("src", Part::Src),
             ("openfold", Part::Openfold),
             ("esmfold", Part::Esmfold),
         ] {
@@ -2521,10 +2521,10 @@ mod tests {
     #[test]
     fn parses_update_part() {
         assert!(matches!(
-            Cli::try_parse_from(["vizfold", "update", "source", "--ref", "v0.1.0"])
-                .expect("update source --ref should parse")
+            Cli::try_parse_from(["vizfold", "update", "src", "--ref", "v0.1.0"])
+                .expect("update src --ref should parse")
                 .command,
-            Command::Update(UpdateArgs { part: Part::Source, r#ref: Some(at), yes: false }) if at == "v0.1.0"
+            Command::Update(UpdateArgs { part: Part::Src, r#ref: Some(at), yes: false }) if at == "v0.1.0"
         ));
         assert!(matches!(
             Cli::try_parse_from(["vizfold", "update", "openfold", "--yes"])
@@ -2540,7 +2540,7 @@ mod tests {
         assert!(Cli::try_parse_from(["vizfold", "update", "vizfold"]).is_err());
     }
 
-    /// Only source takes a ref; silently ignoring it on a backend would fake a version move.
+    /// Only src takes a ref; silently ignoring it on a backend would fake a version move.
     #[test]
     fn a_ref_on_a_backend_update_is_refused() {
         let update = |argv: &[&str]| match Cli::try_parse_from(argv).expect("argv").command {
@@ -2549,7 +2549,7 @@ mod tests {
         };
         assert!(
             super::run_update(update(&["vizfold", "update", "esmfold", "--ref", "v0.1.0"]))
-                .is_err_and(|error| format!("{error}").contains("vizfold update source"))
+                .is_err_and(|error| format!("{error}").contains("vizfold update src"))
         );
     }
 
@@ -2712,11 +2712,11 @@ mod tests {
             })
         ));
         assert!(matches!(
-            Cli::try_parse_from(["vizfold", "uninstall", "source"])
-                .expect("uninstall source should parse")
+            Cli::try_parse_from(["vizfold", "uninstall", "src"])
+                .expect("uninstall src should parse")
                 .command,
             Command::Uninstall(UninstallArgs {
-                part: Some(Part::Source),
+                part: Some(Part::Src),
                 yes: false
             })
         ));
@@ -2781,12 +2781,12 @@ mod tests {
             );
         }
         assert!(
-            super::source_paths(&prefix) == vec![config::default_src()]
+            super::src_paths(&prefix) == vec![config::default_src()]
                 || config::vizfold_src() != config::default_src(),
-            "source owns the default checkout and nothing else"
+            "src owns the default checkout and nothing else"
         );
         assert!(
-            super::source_paths(&config::default_src().join("prefix")).is_empty(),
+            super::src_paths(&config::default_src().join("prefix")).is_empty(),
             "a prefix inside the checkout keeps the checkout"
         );
         assert!(shared.contains(&config::config_file()), "config is shared");
@@ -2829,7 +2829,7 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
-    /// The gate table by the names it produces: `status` and source's own verbs stay off `source`.
+    /// The gate table by the names it produces: `status` and src's own verbs stay off `src`.
     #[test]
     fn every_command_gates_on_the_prereqs_it_actually_needs() {
         let names = |argv: &[&str]| {
@@ -2842,33 +2842,33 @@ mod tests {
 
         assert_eq!(names(&["vizfold", "status"]), Vec::<&str>::new());
         assert_eq!(names(&["vizfold", "uninstall"]), Vec::<&str>::new());
-        assert_eq!(names(&["vizfold", "install", "source"]), ["micromamba"]);
-        assert_eq!(names(&["vizfold", "update", "source"]), ["micromamba"]);
+        assert_eq!(names(&["vizfold", "install", "src"]), ["micromamba"]);
+        assert_eq!(names(&["vizfold", "update", "src"]), ["micromamba"]);
         assert_eq!(
             names(&["vizfold", "install", "openfold"]),
-            ["micromamba", "source"]
+            ["micromamba", "src"]
         );
         assert_eq!(
             names(&["vizfold", "update", "openfold"]),
-            ["micromamba", "source"]
+            ["micromamba", "src"]
         );
-        assert_eq!(names(&["vizfold", "list", "proteins"]), ["source"]);
+        assert_eq!(names(&["vizfold", "list", "proteins"]), ["src"]);
         assert_eq!(
             names(&["vizfold", "serve"]),
-            ["micromamba", "source", "config"]
+            ["micromamba", "src", "config"]
         );
         assert_eq!(
             names(&["vizfold", "serve", "openfold", "esmfold"]),
-            ["micromamba", "source", "config", "openfold", "esmfold"]
+            ["micromamba", "src", "config", "openfold", "esmfold"]
         );
-        assert!(Cli::try_parse_from(["vizfold", "serve", "source"]).is_err());
+        assert!(Cli::try_parse_from(["vizfold", "serve", "src"]).is_err());
         assert_eq!(
             names(&["vizfold", "download", "openfold"]),
-            ["source", "config", "openfold"]
+            ["src", "config", "openfold"]
         );
         assert_eq!(
             names(&["vizfold", "run", "1UBQ_1"]),
-            ["micromamba", "source", "config", "openfold"]
+            ["micromamba", "src", "config", "openfold"]
         );
         // `--no-exec` only writes the row, so it must not gate on an installed environment.
         assert_eq!(
@@ -2907,13 +2907,13 @@ mod tests {
             absent.problems.is_empty(),
             "absent is not a list of problems"
         );
-        assert_eq!(absent.remedy, "vizfold install source");
+        assert_eq!(absent.remedy, "vizfold install src");
         assert_ne!(
             present.state,
             State::Absent,
             "a checkout is there to be judged"
         );
-        assert_eq!(present.remedy, "vizfold update source");
+        assert_eq!(present.remedy, "vizfold update src");
     }
 
     #[test]
@@ -2993,10 +2993,10 @@ mod tests {
         assert_eq!(
             super::summary(&[
                 component("cli", super::State::Ok),
-                component("source", super::State::Broken),
+                component("src", super::State::Broken),
                 component("config", super::State::Broken),
             ]),
-            "2 of 3 components need attention: source, config."
+            "2 of 3 components need attention: src, config."
         );
     }
 
@@ -3335,7 +3335,7 @@ mod tests {
             .collect();
         staged_names.sort();
         assert_eq!(staged_names, ["1UBQ_1.fasta", "6KWC_1.fasta"]);
-        // Links, not copies, so the batch directory costs nothing and cannot drift from its source.
+        // Links, not copies, so the batch directory costs nothing and cannot drift from its src.
         assert!(staged.join("1UBQ_1.fasta").is_file());
         std::fs::remove_dir_all(&inputs).ok();
         Ok(())

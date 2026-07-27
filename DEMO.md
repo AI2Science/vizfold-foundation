@@ -12,7 +12,7 @@ bootstrap from the [README](README.md#install):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
-vizfold install source
+vizfold install src
 vizfold install openfold
 ```
 
@@ -26,7 +26,7 @@ VizFold status
 COMPONENT  STATUS  DETAIL
 ---------  ------  ------
 cli        ok      0.9.0 (latest)
-source     ok      /u/yjayawardana/vizfold-src at v0.9.0
+src        ok      /u/yjayawardana/vizfold-src at v0.9.0
 config     ok      19 keys
 openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
