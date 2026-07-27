@@ -83,11 +83,7 @@ setup::cutlass() {
 # OpenMM JITs via NVRTC; older driver rejects newer PTX.
 setup::nvrtc_detect() {
     log nvrtc
-    DRIVER_CUDA=${OPENFOLD_DRIVER_CUDA:-$(python3 -c "
-import ctypes
-v = ctypes.c_int()
-ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
-print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null)} || true
+    DRIVER_CUDA=${OPENFOLD_DRIVER_CUDA:-$(vizfold::driver_cuda)}
     # CPU build node can't probe the GPU driver; assume old (12.2 PTX loads on any >=12.2).
     : "${DRIVER_CUDA:=12.2}"
     ENV_CUDA=$(ls "$CONDA_PREFIX"/lib/libnvrtc.so.*.*.* 2>/dev/null |
