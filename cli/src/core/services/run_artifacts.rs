@@ -7,7 +7,7 @@ use crate::core::{
 
 use super::artifacts::{self as artifact_service, RecordArtifactByTypeSlugInput};
 
-/// The directories a registration considers. `register-artifacts` reports against this, not a second copy.
+/// Single source of truth: `register-artifacts` reports against this, not a second copy.
 pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::path::PathBuf); 2] {
     [
         ("run_output_directory", workspace.to_path_buf()),
@@ -15,7 +15,7 @@ pub fn known_directories(workspace: &std::path::Path) -> [(&'static str, std::pa
     ]
 }
 
-/// Registers a run's existing output directories and returns its full artifact list. Idempotent.
+/// Idempotent; returns the run's whole artifact list, not just what this call registered.
 pub async fn register_known_run_artifacts(
     db: &DatabaseConnection,
     run_id: i32,

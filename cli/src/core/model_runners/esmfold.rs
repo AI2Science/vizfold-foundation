@@ -14,7 +14,7 @@ use crate::core::{
     services::validation::require_json_object,
 };
 
-/// Single-sequence, so none of OpenFold's MSA checks: the command, a readable `--fasta`, a writable output.
+/// Single-sequence, so none of OpenFold's MSA checks: just command, `--fasta`, and output.
 pub fn preflight_esmfold(
     command: &CommandSpec,
     invocation_profile: &model_invocation_profiles::Model,
@@ -37,7 +37,7 @@ pub fn preflight_esmfold(
     Ok(PreflightReport::new(checks))
 }
 
-/// ESMFold folds a single FASTA *file* (`--fasta`), unlike OpenFold's `fasta_dir`.
+/// A single FASTA *file* (`--fasta`), unlike OpenFold's `fasta_dir`.
 fn fasta_file_check(execution_parameters: &Value) -> PreflightCheck {
     let Some(fasta) = execution_parameters
         .get("fasta")
@@ -143,7 +143,7 @@ mod tests {
             status(&report, "output_dir parent"),
             PreflightStatus::Passed
         );
-        // No MSA/template checks exist for ESMFold.
+        // No MSA/template checks for ESMFold.
         assert!(!report.checks.iter().any(|check| check.name == "data_dir"));
     }
 

@@ -24,14 +24,12 @@ check "bash " "$got" "step id means bash"
 got=$(SLURM_JOB_ID=1 slurm::launch_args acct part --pty | tr '\n' ' ')
 check "srun --ntasks=1 " "$got" "job id means plain srun"
 
-# No allocation: full srun with resources.
 base="srun -u %s--job-name=vizfold-install --account=acct --partition=part --nodes=1 --ntasks=1 --cpus-per-task=8 --mem=24G --time=02:00:00 "
 
 got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part --pty) | tr '\n' ' ')
 want=$(printf "$base" "--pty ")
 check "$want" "$got" "no allocation means full srun with pty"
 
-# Not a terminal: identical but without --pty.
 got=$( (unset SLURM_STEP_ID SLURM_JOB_ID; slurm::launch_args acct part "") | tr '\n' ' ')
 want=$(printf "$base" "")
 check "$want" "$got" "no tty means no pty"
@@ -61,7 +59,6 @@ for c in delta delta-gh; do
     [ -f "$SITES/$c.sh" ] && echo "ok   sites/$c.sh exists" || { echo "FAIL no sites/$c.sh"; fail=1; }
 done
 
-# sbatch must be gone entirely.
 grep -q sbatch "$REPO/lib/slurm.sh" && { echo "FAIL sbatch still referenced"; fail=1; } || echo "ok   no sbatch"
 
 # A saved config must not pin the site, or an OPENFOLD_SITE of "local" written where scontrol failed

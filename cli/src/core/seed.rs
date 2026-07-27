@@ -227,7 +227,7 @@ pub async fn seed_defaults(db: &DatabaseConnection) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// ESMFold catalog rows. Single-sequence, so no AlphaFold2 schema -- model/trace flags and a `--device`.
+/// Single-sequence, so no AlphaFold2 database schema -- model/trace flags and a `--device`.
 async fn seed_esmfold(db: &DatabaseConnection) -> Result<(), DbErr> {
     if model_backends::Entity::find()
         .filter(model_backends::Column::Slug.eq("esmfold"))

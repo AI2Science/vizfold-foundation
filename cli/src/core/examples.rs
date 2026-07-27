@@ -26,12 +26,11 @@ pub fn find(id: &str) -> Option<Example> {
     scan_default().into_iter().find(|example| example.id == id)
 }
 
-/// The single sequence at `path` -- the FASTA or a directory holding one -- read from the file, not passed in.
+/// The single sequence at `path`: the FASTA, or a directory holding one.
 pub fn from_path(path: &Path) -> Option<Example> {
     parse(&std::fs::read_to_string(fasta_file(path)?).ok()?)
 }
 
-/// The FASTA `path` names: itself, or the first one inside it when it is a directory.
 pub fn fasta_file(path: &Path) -> Option<PathBuf> {
     if path.is_dir() {
         first_fasta(path)
@@ -40,7 +39,7 @@ pub fn fasta_file(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Every complete example in `dir`, cheapest first: residue count is what someone is choosing on.
+/// Every complete example in `dir`, cheapest first -- residue count is what someone chooses on.
 pub fn scan(dir: &Path) -> Vec<Example> {
     let alignments = dir.join("alignments");
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -160,7 +159,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Without `alignments/<id>` the fold falls back to the full MSA pipeline, so it is not offerable.
     #[test]
     fn excludes_an_example_with_no_alignment_directory() {
         let dir = tree(

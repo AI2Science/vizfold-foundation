@@ -325,8 +325,7 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// The schema declares `ON DELETE RESTRICT`, and `db::connect` turns foreign keys on: together they
-/// stop a backend disappearing out from under the runs that reference it.
+/// `ON DELETE RESTRICT` in the schema plus foreign keys on per connection is what enforces this.
 #[tokio::test]
 async fn a_backend_with_runs_cannot_be_deleted() -> Result<(), DbErr> {
     let db = test_db().await?;

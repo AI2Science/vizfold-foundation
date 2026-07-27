@@ -1,5 +1,4 @@
-//! The schema-driven command planner: a backend declares its CLI in JSON, this turns that plus a
-//! run's parameters into a CommandSpec. Shared by every backend.
+//! Shared planner: turns a backend's JSON-declared CLI plus a run's parameters into a CommandSpec.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -390,8 +389,7 @@ pub(crate) fn data_path(data_dir: &str, suffix: &str) -> String {
 mod tests {
     use serde_json::json;
 
-    /// Positionals are emitted in `position` order, not alphabetically -- the model's argv is
-    /// positional, so ordering by name would hand it the arguments swapped.
+    /// Ordering positionals by name instead of `position` would hand the model swapped arguments.
     #[test]
     fn positionals_order_by_position_and_the_rest_by_name() {
         let schema = json!({"properties": {

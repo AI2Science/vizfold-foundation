@@ -2,8 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { BACKENDS } from "@/lib/vizfold";
 
-// The Rust executor owns this file; the dashboard reads it directly, read-only. `vizfold serve`
-// exports VIZFOLD_DB (the plain sqlite path); the fallback covers running `next dev` by hand.
+// The Rust executor owns this file; the dashboard only reads it. `vizfold serve` exports VIZFOLD_DB
+// as a plain path — node:sqlite cannot open the CLI's `sqlite://...?mode=rwc` form. The fallback
+// covers running `next dev` by hand.
 const dbPath =
   process.env.VIZFOLD_DB ?? `${process.env.OPENFOLD_PREFIX ?? ""}/vizfold.db`;
 
@@ -30,7 +31,7 @@ export type ArtifactRow = {
   display_mode: string;
 };
 
-// A fresh install has no db until the first run; treat "not created yet" as "nothing to show".
+// A fresh install has no db until the first run; not created yet means nothing to show.
 function query<T>(read: (db: DatabaseSync) => T, whenAbsent: T): T {
   if (!existsSync(dbPath)) return whenAbsent;
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -59,7 +60,7 @@ const ARTIFACT_SELECT = `SELECT a.id, a.format, a.storage_uri,
 const SERVED = BACKENDS?.length ? ` WHERE b.slug IN (${BACKENDS.map(() => "?").join(",")})` : "";
 
 export const listRuns = (): RunRow[] =>
-  // Serving nothing lists nothing; `IN ()` is not valid SQL, so this never reaches the database.
+  // `IN ()` is not valid SQL, so serving nothing short-circuits before the database.
   BACKENDS?.length === 0
     ? []
     : query(

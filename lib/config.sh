@@ -1,20 +1,19 @@
 #!/bin/bash
-# ~/.config/vizfold/vizfold.json: what the install resolved, for whatever drives it later. Flat map; sourcing fills unset vars (inline wins).
+# ~/.config/vizfold/vizfold.json: a flat map of what the install resolved. Sourcing fills unset vars (inline wins).
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "config.sh is a library" >&2; exit 1; }
 [ -n "${CONFIG_SH:-}" ] && return 0
 CONFIG_SH=1
 
-# The checkout root every backend shares; OPENFOLD_HOME is exported by `vizfold install`.
+# Checkout root shared by every backend; OPENFOLD_HOME is exported by `vizfold install`.
 REPO=${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-# OpenFold-only subtree (setup.py, environment.yml, install/); shared assets like examples/ stay at the root.
+# OpenFold-only subtree; shared assets like examples/ stay at the root.
 OF=$REPO/backends/openfold
 die() { echo "FATAL: $*" >&2; exit 1; }
 
-# Progress line, shared so every installer's output reads the same.
 log() { echo "== $* (+$((SECONDS))s)"; }
 
-# The install root, one env base under it, and one state dir per backend. Mirrored in cli/src/core/config.rs.
+# Mirrored in cli/src/core/config.rs.
 vizfold::prefix() { echo "${OPENFOLD_PREFIX:-$HOME/openfold}"; }
 vizfold::env_base() { echo "${VIZFOLD_ENV_BASE:-$(vizfold::prefix)/envs}"; }
 vizfold::env() { echo "$(vizfold::env_base)/vizfold-$1"; }
@@ -24,8 +23,7 @@ config::file() {
     echo "${VIZFOLD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/vizfold/vizfold.json}"
 }
 
-# Fill unset vars from a JSON file, never overwriting. Values are $VAR templates resolved against the
-# environment first, then the file's own keys, in any order. No commands run; an unknown name is empty.
+# Fill unset vars from JSON. Values are $VAR templates resolved against the environment, then the file's own keys, in any order. No commands run; an unknown name expands empty.
 config::fill() {
     local file=$1 label=${2:-config} key value
     [ -r "$file" ] || return 0
@@ -34,7 +32,7 @@ config::fill() {
     echo "$label: $file" >&2
     # `if`, not `&&`: a skipped last line would return non-zero and abort a set -e caller.
     while IFS='=' read -r key value; do
-        # An empty value is "not settled", never an answer: it must not mask the layer below it.
+        # Empty is "not settled", never an answer: it must not mask the layer below.
         if [ -n "$key" ] && [ -n "$value" ] && [ -z "${!key:-}" ]; then export "$key=$value"; fi
     done < <(python3 -c '
 import json, os, re, sys
@@ -55,7 +53,7 @@ for k, v in scope.items():
     return 0
 }
 
-# The GPU driver's CUDA version, e.g. 12.8. Empty where no driver is loaded, so callers pick a floor.
+# e.g. 12.8; empty where no driver is loaded, so callers pick a floor.
 vizfold::driver_cuda() {
     python3 -c "
 import ctypes
@@ -64,26 +62,24 @@ ctypes.CDLL('libcuda.so.1').cuDriverGetVersion(ctypes.byref(v))
 print(f'{v.value // 1000}.{v.value % 1000 // 10}')" 2>/dev/null || true
 }
 
-# Activate a micromamba env ($1, a name or path). set +u: the conda gcc hook reads SYS_SYSROOT unset.
+# set +u: the conda gcc hook reads SYS_SYSROOT unset.
 mamba::activate() { set +u; eval "$(micromamba shell hook --shell bash)"; micromamba activate "$1"; set -u; }
 
-# The previous install's answers. Never at source time: that would land them ahead of live discovery.
-# Called after <site>.json, fixing the precedence at
-#   inline env > slurm::discover > <site>.json > saved vizfold.json > built-in default
+# The previous install's answers, loaded after <site>.json, never at source time (that would land them
+# ahead of live discovery): inline env > slurm::discover > <site>.json > saved vizfold.json > default.
 config::load() { config::fill "$(config::file)" "config"; }
 
 # <site>.sh loads its own <site>.json: same basename, beside it.
 config::site_defaults() { config::fill "${1%.sh}.json" "site defaults"; }
 
-# The config's schema: the same binary reads it everywhere, so the key set is fixed -- same on every cluster, whichever backend installed last.
+# Fixed schema: the same binary reads it on every cluster, whichever backend installed last.
 VIZFOLD_CONFIG_KEYS="OPENFOLD_HOME OPENFOLD_PREFIX OPENFOLD_SITE OPENFOLD_DATA_DIR OPENFOLD_AF2_ROOT
 VIZFOLD_ENV_BASE OPENFOLD_ENV_PREFIX ESMFOLD_ENV_PREFIX OPENFOLD_MAX_CUDA OPENFOLD_DRIVER_CUDA
 OPENFOLD_ACCOUNT OPENFOLD_PARTITION OPENFOLD_GPU_ACCOUNT OPENFOLD_GPU_PARTITION
 OPENFOLD_GPU_RESOURCES OPENFOLD_GPU_GRES OPENFOLD_GPU_TIME OPENFOLD_EXAMPLE
 VIZFOLD_DB"
 
-# Every key, every time -- empty for what this install did not settle. config::load has already put the
-# earlier values in the environment, so a second backend rewrites them rather than dropping them.
+# Every key, every time -- empty for what this install did not settle. config::load already restored the earlier values, so a second backend rewrites them rather than dropping them.
 config::save() {
     local file
     file=$(config::file)

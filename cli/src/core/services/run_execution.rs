@@ -37,14 +37,13 @@ impl BackendKind {
     }
 }
 
-/// Outcome of planning, preflighting, and (if preflight passed) executing a run.
+/// `output` is None when preflight failed, so nothing ran.
 #[derive(Debug)]
 pub struct ExecutionOutcome {
     pub report: PreflightReport,
     pub output: Option<CommandOutput>,
 }
 
-/// Plans and executes a run stored in the executor database.
 pub async fn execute_run(
     db: &DatabaseConnection,
     run_id: i32,
@@ -73,7 +72,7 @@ pub async fn execute_run(
                 .await?
                 .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
 
-        // Create the workspace so a fresh install needs no mkdir; OpenFold also seeds its attention/ dir.
+        // Created up front, so a fresh install needs no mkdir; OpenFold also seeds its attention/ dir.
         let workspace = resolve_output_location(&invocation_profile, &run)?;
         let to_create = match kind {
             BackendKind::Openfold => workspace.join("attention"),
@@ -88,8 +87,8 @@ pub async fn execute_run(
 
         let command = plan_command(&model_backend, &execution_target, &invocation_profile, &run)?;
 
-        // Preflight sees the bare command, the runner an env-wrapped one. The CLI's prereq gate
-        // refuses an uninstalled backend before this, so there is no unwrapped fallback to pick.
+        // Preflight sees the bare command, the runner the env-wrapped one; the CLI's prereq gate
+        // already refused an uninstalled backend, so there is no unwrapped fallback to pick.
         let exec_command = match kind {
             BackendKind::Openfold => compose_exec_command(
                 &command,
@@ -166,7 +165,7 @@ pub async fn execute_run(
                     },
                 )
                 .await?;
-                // Inline, so a completed run has its artifacts without a second command. Idempotent.
+                // Inline and idempotent: a completed run has its artifacts without a second command.
                 super::run_artifacts::register_known_run_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
@@ -211,7 +210,7 @@ async fn mark_failed(
 }
 
 /// `micromamba run -p` applies the env's activate.d hook, where every runtime variable a fold needs
-/// is set -- the same one command `setup::ready` hands the user.
+/// is set -- the same command `setup::ready` hands the user.
 fn activate_env_command(command: &CommandSpec, env_prefix: &Path) -> CommandSpec {
     let mut args = vec![
         "run".to_owned(),
@@ -226,8 +225,7 @@ fn activate_env_command(command: &CommandSpec, env_prefix: &Path) -> CommandSpec
         args,
         ..command.clone()
     };
-    // Carried, not left to the env's activate.d hook: that hook is written by whichever installer
-    // built the env, so a fold through an older one runs without them. Triton's default is NFS $HOME.
+    // Carried, not left to activate.d: an older installer's hook sets neither. Triton defaults to NFS $HOME.
     let user = std::env::var("USER").unwrap_or_else(|_| "vizfold".to_owned());
     for (key, value) in [
         (
@@ -243,7 +241,7 @@ fn activate_env_command(command: &CommandSpec, env_prefix: &Path) -> CommandSpec
     wrapped
 }
 
-/// The env inside srun, streaming always on. srun must stay outermost, or the env is entered on the submit host.
+/// srun stays outermost, or the env is entered on the submit host. Streaming always on.
 fn compose_exec_command(
     command: &CommandSpec,
     env_prefix: &Path,
@@ -278,7 +276,6 @@ fn compose_esmfold_command(
     }
 }
 
-/// Prefix a command with the SLURM launcher.
 fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
     let Some((program, prefix)) = launch.split_first() else {
         return command;
@@ -297,7 +294,7 @@ fn srun_command(command: CommandSpec, launch: &[String]) -> CommandSpec {
 
 #[cfg(test)]
 mod tests {
-    /// The var has to be on the command that folds, not merely recorded: HuggingFace writes ~2.6 GB.
+    /// The var has to be on the command that folds, not merely recorded.
     #[test]
     fn an_installed_esmfold_command_caches_its_weights_under_the_env() {
         let env = PathBuf::from("/scratch/me/vizfold/envs/vizfold-esmfold");
@@ -378,7 +375,7 @@ mod tests {
         let wrapped =
             activate_env_command(&command, &PathBuf::from("/work/of/envs/vizfold-openfold"));
 
-        // No shell, so nothing is re-quoted; `run -p` applies the env's activate.d hook.
+        // No shell, so nothing is re-quoted.
         assert_eq!(wrapped.program, "micromamba");
         assert_eq!(
             wrapped.args,
@@ -395,8 +392,7 @@ mod tests {
         assert_eq!(wrapped.current_dir, Some(PathBuf::from("/repo")));
     }
 
-    /// An env's activate.d hook is written by whichever installer built it, so the fold carries its
-    /// own: through an older env it would otherwise run with neither set.
+    /// Through an env built by an older installer, neither would be set.
     #[test]
     fn the_fold_carries_the_data_root_and_a_node_local_cache() {
         let wrapped = activate_env_command(&CommandSpec::default(), &PathBuf::from("/env"));
@@ -422,7 +418,6 @@ mod tests {
             &["srun".to_owned(), "-p".to_owned(), "gpu".to_owned()],
         );
 
-        // srun outermost: the reverse enters the env on the submit host, not the compute node.
         assert_eq!(composed.program, "srun");
         assert_eq!(
             composed.args,
@@ -525,7 +520,7 @@ mod tests {
         .await
     }
 
-    /// An `esmfold` run: the slug routes it through the ESMFold path, one `--fasta` and no data_dir.
+    /// The `esmfold` slug routes the run through the ESMFold path: one `--fasta`, no data_dir.
     async fn create_esmfold_run(
         db: &sea_orm::DatabaseConnection,
         layout: &TestLayout,
@@ -616,7 +611,6 @@ mod tests {
             .expect("command lock")
             .clone()
             .expect("planned command");
-        // The plan is always wrapped: the CLI's gate refuses an uninstalled backend before this.
         assert_eq!(command.program, "micromamba");
         assert_eq!(
             command.args,
@@ -638,11 +632,10 @@ mod tests {
         assert!(updated.started_at.is_some());
         assert!(updated.completed_at.is_some());
         assert_eq!(updated.error_message, None);
-        // The run workspace and its attention/ subdir are created before execution.
         let workspace = layout.output_location.join(run.id.to_string());
         assert!(workspace.is_dir());
         assert!(workspace.join("attention").is_dir());
-        // A completed run registers its output directories inline (no separate command).
+        // Output directories register inline on completion.
         let artifacts =
             crate::core::services::artifacts::list_artifacts_for_run(&db, run.id).await?;
         assert_eq!(artifacts.len(), 2);
@@ -678,7 +671,7 @@ mod tests {
             .await?
             .expect("run exists");
         assert_eq!(updated.status, "completed");
-        // ESMFold seeds no attention/ dir, so only the run output directory registers.
+        // ESMFold seeds no attention/ dir, so only the output directory registers.
         let workspace = layout.output_location.join(run.id.to_string());
         assert!(workspace.is_dir());
         assert!(!workspace.join("attention").exists());

@@ -55,7 +55,7 @@ want .bashrc "command -v vizfold"          0 "and never resolves it through PATH
 # bash sources .bashrc for non-interactive shells too, under ssh -- where there is no completion to
 # register and forking the binary is pure latency on every scp, rsync and `ssh host cmd`.
 want .bashrc 'case $- in *i*)' 1 "the eval runs only in an interactive shell"
-# A binary older than this subcommand answers on stderr; unsilenced, that lands on the user's prompt.
+# An older binary answers on stderr, which unsilenced lands on the user's prompt.
 want .bashrc '2>/dev/null'     1 "and says nothing when the binary is too old to know it"
 
 # An rc whose last byte is not a newline: ours would fuse onto the user's last statement, and since

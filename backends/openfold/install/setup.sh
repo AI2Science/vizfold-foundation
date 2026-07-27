@@ -4,21 +4,21 @@
 set -euo pipefail
 
 . "${OPENFOLD_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/lib/config.sh"
-# For a direct run: under `vizfold install` install.sh already exported these, and config::fill never overwrites.
+# For a direct run; under `vizfold install` these are already exported and config::fill never overwrites.
 config::load
 
 have()   { test -e "$1" || compgen -G "${1}_*.ffindex" >/dev/null; }   # ffindex sets are prefixes
 sealed() { [ -e "$sentinel/$1" ]; }
 seal()   { mkdir -p "$sentinel"; touch "$sentinel/$1"; }
 older()  { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ] && [ "$1" != "$2" ]; }
-# A step seals only after finishing, so an interrupted create/clone/download is redone next run, not skipped.
+# Sealed only after the step finishes, so an interrupted one is redone next run, not skipped.
 step()   { log "$1"; sealed "$1" && { echo "  cached"; return; }; "$2"; seal "$1"; }
 
 setup::config() {
     PREFIX=$(vizfold::prefix)
-    STATE=$(vizfold::state openfold)                 # everything this backend plants under the prefix
+    STATE=$(vizfold::state openfold)
     AF2=${OPENFOLD_AF2_ROOT:-}                       # set by a site with a database mirror
-    # aarch64 (Grace-Hopper) needs its own env: py3.13, GH200-only sm_90, cuda<=12.9 -- the 13.x aarch64 pytorch build won't compile OpenFold's extension.
+    # aarch64 (Grace-Hopper) needs its own env -- py3.13, sm_90 only, cuda<=12.9: the 13.x aarch64 pytorch build won't compile OpenFold's extension.
     case $(uname -m) in
         aarch64|arm64) ENV_YML=$OF/environment-aarch64.yml; ARCH_DEFAULT=9.0; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.9} ;;
         *)             ENV_YML=$OF/environment.yml; ARCH_DEFAULT="7.0;8.0;8.6;9.0"; MAX_CUDA=${OPENFOLD_MAX_CUDA:-12.8} ;;
@@ -103,7 +103,7 @@ setup::nvrtc_create() {
     micromamba create -y --no-rc -p "$nvrtc" -c conda-forge "cuda-nvrtc<=$DRIVER_CUDA"
 }
 
-# Append every run: setup::activate rewrites openfold.sh from scratch, so this must not sit behind the create's sentinel.
+# Appended every run: setup::activate rewrites openfold.sh from scratch, so this can't sit behind the create's sentinel.
 setup::nvrtc_preload() {
     local lib; lib=$(ls "$STATE/nvrtc-$DRIVER_CUDA"/lib/libnvrtc.so.* 2>/dev/null | sort -V | tail -1)
     test -n "$lib" || die "no libnvrtc in $STATE/nvrtc-$DRIVER_CUDA"
@@ -133,14 +133,14 @@ setup::link_mirror() {
         # Explicit link name: GNU ln -sfn onto a real dir errors instead of linking inside it.
         ln -sfn "$d" "$DATA/${d##*/}"
     done
-    # uniclust30_2018_08 goes in a writable canonical dir (not the read-only mirror symlink): the mirror's real set if present (single- or double-nested), else aliased from uniref30.
+    # uniclust30_2018_08 needs a writable canonical dir, not a read-only mirror symlink: the mirror's real set if present (single- or double-nested), else aliased from uniref30.
     mkdir -p "$UNICLUST"
     local src="" c
     for c in "$AF2/uniclust30/uniclust30_2018_08" "$AF2/uniclust30"; do
         compgen -G "$c/uniclust30_2018_08_*" >/dev/null 2>&1 && { src=$c; break; }
     done
     if [ -n "$src" ]; then
-        # Per-file explicit link name, for the reason the $DATA loop above gives.
+        # Explicit link name per file, same reason as above.
         for u in "$src"/uniclust30_2018_08_*; do ln -sfn "$u" "$UNICLUST/${u##*/}"; done
     else
         for f in "$AF2"/uniref30/UniRef30_[0-9][0-9][0-9][0-9]_[0-9][0-9]*; do
@@ -150,7 +150,7 @@ setup::link_mirror() {
     fi
 }
 
-# No mirror: fetch params (4 GB) into the one data root, where `vizfold download` also puts them.
+# No mirror: fetch the 4 GB params into $DATA, where `vizfold download` also puts them.
 setup::fetch_params() {
     rm -rf "$DATA/params"   # a half-extracted tar would pass a single-file check
     bash "$REPO/downloaders/openfold/download_alphafold_params.sh" "$DATA"
@@ -159,8 +159,8 @@ setup::fetch_params() {
 setup::fetch_templates() {
     log templates
     mkdir -p "$DATA/pdb_mmcif/mmcif_files"
-    # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. No -S here:
-    # a 404 is expected per-entry and || true tolerates it; the count assert catches total failure.
+    # env -u LD_LIBRARY_PATH: else system curl binds conda's feature-poor libcurl and fails. No -S:
+    # per-entry 404s are expected and || true tolerates them; the count assert catches total failure.
     grep -ohE "^ *[0-9]+ [0-9A-Za-z]{4}_" "$REPO"/examples/monomer/alignments/*/*.hhr |
         awk '{ print tolower(substr($2, 1, 4)) }' | sort -u |
         xargs -P 8 -I{} sh -c \
@@ -216,7 +216,7 @@ setup::config_save() {
     export OPENFOLD_HOME=$REPO OPENFOLD_PREFIX=$PREFIX VIZFOLD_ENV_BASE=$(vizfold::env_base)
     export OPENFOLD_ENV_PREFIX=$CONDA_PREFIX OPENFOLD_DATA_DIR=$DATA OPENFOLD_MAX_CUDA=$MAX_CUDA
     export OPENFOLD_GPU_RESOURCES=$GPU_RES OPENFOLD_EXAMPLE=$EXAMPLE OPENFOLD_GPU_GRES=$GPU_GRES
-    # VIZFOLD_DB defers to whatever is set, as esmfold's installer does: overwriting it would move someone's run history.
+    # VIZFOLD_DB defers to whatever is set (as esmfold does): overwriting it would move someone's run history.
     export OPENFOLD_GPU_TIME=$GPU_TIME VIZFOLD_DB=${VIZFOLD_DB:-$PREFIX/vizfold.db}
     config::save
 }
@@ -262,6 +262,6 @@ main() {
 # Sourced (tests/link_mirror.sh) this file is just its definitions; only an execution installs.
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
-# A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
+# A site's hooks are pure function defs; sourcing them here lets it override any setup:: step.
 [ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/sites/$OPENFOLD_SITE.sh"
 main "$@"

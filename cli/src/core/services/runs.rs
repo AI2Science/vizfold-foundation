@@ -44,7 +44,6 @@ pub async fn list_runs(db: &DatabaseConnection) -> Result<Vec<runs::Model>, DbEr
 }
 
 /// Immutable record of what produced a run; catalog rows can be edited later, this cannot.
-/// Takes resolved paths as parameters, as `gpu_launch` does.
 #[allow(clippy::too_many_arguments)]
 pub fn provenance_snapshot(
     backend_slug: &str,
@@ -263,8 +262,7 @@ mod tests {
         .await
     }
 
-    /// `Option<Option<T>>`: outer `None` leaves the column alone, `Some(None)` writes NULL. Conflating
-    /// them would silently NULL these columns rather than fail, so this asserts the values survive.
+    /// `Option<Option<T>>`: outer `None` leaves the column alone, `Some(None)` writes NULL.
     #[tokio::test]
     async fn update_run_status_leaves_untouched_columns_alone() -> Result<(), DbErr> {
         let db = test_db().await?;
@@ -283,7 +281,6 @@ mod tests {
         )
         .await?;
 
-        // Outer `None` for started_at and error_message: neither column should be touched.
         let updated = update_run_status(
             &db,
             run.id,
@@ -316,8 +313,7 @@ mod tests {
         )
     }
 
-    /// The profile config is embedded parsed, not stringified, so the reader can find it at
-    /// `profile.config.output_location`.
+    /// The profile config is embedded parsed, not stringified, so it reads back as JSON.
     #[test]
     fn the_snapshot_reads_back_through_output_location_from() {
         let snapshot = snapshot_of(r#"{"output_location":"/work/runs"}"#);
@@ -327,8 +323,6 @@ mod tests {
         assert_eq!(resolved, "/work/runs");
     }
 
-    /// A profile whose config never parsed still yields a usable snapshot, with a null config
-    /// rather than a panic or a raw string.
     #[test]
     fn an_unparseable_profile_config_becomes_null() {
         let value: serde_json::Value =

@@ -19,14 +19,12 @@ report() { # $1 label, $2 newline-separated offenders, $3 remedy
     fi
 }
 
-# Every resolved("X") in the CLI must be a schema key, or the binary expects what no install writes.
 cli=$(grep -oE 'resolved\("[A-Z0-9_]+"\)' "$REPO/cli/src/core/config.rs" |
     sed 's/resolved("//; s/")//' | sort -u)
 report "every name the CLI resolves is in the config schema" \
     "$(comm -23 <(printf '%s\n' $cli) <(printf '%s\n' $schema))" \
     "add it to VIZFOLD_CONFIG_KEYS, or read a name the install already settles"
 
-# Every <site>.json key must be persisted or knowingly install-only -- nothing set and forgotten.
 known=$(printf '%s\n' $schema $install_only | sort -u)
 site_keys=$(python3 -c '
 import json, pathlib

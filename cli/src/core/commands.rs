@@ -8,7 +8,7 @@ pub struct CommandSpec {
     pub args: Vec<String>,
     pub current_dir: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
-    /// Relay the child's output to the parent instead of capturing it, so a long run reports progress live.
+    /// Relay the child's output instead of capturing it, so a long run reports progress live.
     pub stream: bool,
 }
 

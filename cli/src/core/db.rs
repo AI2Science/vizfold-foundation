@@ -32,7 +32,7 @@ pub async fn migrate_database(db: &DatabaseConnection) -> Result<(), DbErr> {
         .map_err(name_pre_baseline_database)
 }
 
-/// The migrator's "Migration file of version ... is missing" names no remedy; point at the actual fix.
+/// The migrator's "Migration file of version ..." error names no remedy; point at the fix.
 fn name_pre_baseline_database(error: DbErr) -> DbErr {
     match &error {
         DbErr::Custom(message) if message.contains("Migration file of version") => {
@@ -60,7 +60,7 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await?;
         migrate_database(&db).await?;
 
-        // A version recorded as applied that this binary no longer has a migration file for.
+        // A version recorded as applied that no migration file backs.
         seaql_migrations::ActiveModel {
             version: Set("m20200101_000001_stale".to_owned()),
             applied_at: Set(0),
