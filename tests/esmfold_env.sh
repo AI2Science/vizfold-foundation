@@ -45,4 +45,16 @@ check 12.8 ""   no  "a CPU-only torch under a real driver is rebuilt"
 check ""   13.0 yes "an unknown driver gates nothing: any importable env counts as installed"
 check ""   ""   yes "nor does it force CUDA where there is no driver at all"
 
+specs() { # $1 driver, $2 want, $3 name
+    local got
+    got=$(OPENFOLD_DRIVER_CUDA=$1 esmfold::cuda_specs)
+    if [ "$got" = "$2" ]; then echo "ok   $3"; else
+        echo "FAIL $3"; echo "  want: $2"; echo "  got:  $got"; fail=1
+    fi
+}
+
+specs 12.8 "pytorch=*=cuda* cuda-version<=12.8" "a driver asks for a GPU build capped at it"
+specs 13.0 "pytorch=*=cuda* cuda-version<=13.0" "and follows the driver, whatever it reports"
+specs ""   ""                                   "no driver asks for nothing: the solver picks CPU"
+
 exit $fail

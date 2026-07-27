@@ -5,13 +5,12 @@
 # driver they need (`__cuda`), so the solver picks a torch this host can actually load. PyPI wheels
 # carry no such metadata, and `pip install torch` therefore takes whatever CUDA is newest.
 #
-#   pytorch=*=cuda*   the unqualified spec can resolve to a CPU-only build. There is no cuda build
-#                     for osx-arm64; install.sh's own `pip install ./backends/esmfold` covers a Mac.
 #   python=3.11       a cluster login node's python3 is routinely older than transformers needs.
 #
-# Versions are otherwise left to the solver so the stack stays internally consistent. install.sh
-# caps `cuda-version` at the detected driver on top of this; `env create` takes no extra specs, so
-# that needs plain `create`.
+# Nothing here names CUDA: install.sh adds `pytorch=*=cuda*` and a `cuda-version` cap only where it
+# found a GPU driver, so a host without one resolves to the CPU (or MPS) build instead of failing or
+# dragging in a GPU stack it cannot run. `env create` takes no extra specs, so that needs plain
+# `create`. Versions are otherwise left to the solver so the stack stays internally consistent.
 
 name: vizfold-esmfold
 channels:
@@ -19,6 +18,6 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  - pytorch=*=cuda*
+  - pytorch
   - transformers>=4.36,<5
   - numpy>=1.24

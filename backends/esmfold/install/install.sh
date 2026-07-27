@@ -30,18 +30,26 @@ import torch, transformers, esmfold
 assert not ${driver:-0} or 0 < int((torch.version.cuda or '0').split('.')[0]) <= ${driver:-0}" 2>/dev/null
 }
 
+# What a GPU driver justifies asking for, and nothing where there is none: the solver then picks the
+# CPU (or on a Mac, MPS) build the host can run. Two specs the driver alone does not get us -- the
+# unqualified pytorch resolves to a CPU build even where a GPU is present, and __cuda bounds only the
+# CUDA major while the driver is the real ceiling.
+esmfold::cuda_specs() {
+    [ -n "${OPENFOLD_DRIVER_CUDA:-}" ] || return 0
+    echo "pytorch=*=cuda* cuda-version<=$OPENFOLD_DRIVER_CUDA"
+}
+
 esmfold::env() {
     log "env $ENV"
     rm -rf "$ENV"   # clear a partial env; create fails on a non-empty dir
     export MAMBA_ROOT_PREFIX=$PREFIX/mamba
     mkdir -p "$(dirname "$ENV")"
-    # conda reads the driver to choose between a CPU and a CUDA torch, so a login node carrying none
-    # would take the CPU build. 12.0 is the floor every CUDA 12 package declares.
-    export CONDA_OVERRIDE_CUDA=${OPENFOLD_DRIVER_CUDA:-12.0}
-    # __cuda alone only bounds the major, and the driver is the real ceiling. --no-rc so a user
-    # ~/.condarc envs_dirs/channels cannot redirect it.
-    micromamba create -y --no-rc -p "$ENV" -f "$ESM/environment.yml" \
-        ${OPENFOLD_DRIVER_CUDA:+"cuda-version<=$OPENFOLD_DRIVER_CUDA"}
+    # A driver the config knows but this node cannot see (detected on a compute node) still has to
+    # reach the solver, or the CUDA specs below have no __cuda to satisfy them.
+    [ -z "${OPENFOLD_DRIVER_CUDA:-}" ] || export CONDA_OVERRIDE_CUDA=$OPENFOLD_DRIVER_CUDA
+    # Unquoted on purpose: cuda_specs emits two specs or none. --no-rc so a user ~/.condarc
+    # envs_dirs/channels cannot redirect it.
+    micromamba create -y --no-rc -p "$ENV" -f "$ESM/environment.yml" $(esmfold::cuda_specs)
 }
 
 # The env resolved torch and transformers already; this adds the `esmfold` package and its entrypoint.

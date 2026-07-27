@@ -16,15 +16,18 @@ vizfold install esmfold
 vizfold status          # resolved config + which backends are installed
 ```
 
-**torch is matched to the GPU driver.** The env is solved from
+**torch is matched to the machine it lands on.** The env is solved from
 [`backends/esmfold/environment.yml`](../backends/esmfold/environment.yml) with micromamba, because
 conda-forge's CUDA packages declare the driver they need and the solver honours it. PyPI wheels carry
 no such metadata: `pip install torch` takes whatever CUDA is newest, and on a cluster whose driver
 lags that, the fold reaches a GPU node and dies with "the NVIDIA driver on your system is too old".
 
-The installer prints the driver version it detected and caps `cuda-version` at it. An env already
-holding a torch that driver cannot load is rebuilt rather than kept. `OPENFOLD_DRIVER_CUDA` in
-`~/.config/vizfold/vizfold.json` overrides the detection.
+The installer prints the driver version it detected, asks for a CUDA build and caps `cuda-version` at
+that driver. Where it finds no driver it asks for neither, so a CPU node or a laptop resolves to the
+build it can actually run rather than failing or dragging in a GPU stack. An env already holding a
+torch this machine cannot use is rebuilt rather than kept. `OPENFOLD_DRIVER_CUDA` in
+`~/.config/vizfold/vizfold.json` overrides the detection — set it on a GPU cluster whose login node
+carries no driver.
 
 **Option B – pip**, into a Python ≥3.10 environment. Install PyTorch first if you need a specific
 CUDA build — pip then leaves it alone.
