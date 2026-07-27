@@ -34,8 +34,8 @@ want() { # $1 rc, $2 fragment, $3 expected count, $4 what it means
 }
 
 PATH_LINE='export PATH='
-BASH_EVAL='vizfold completions bash'
-ZSH_EVAL='vizfold completions zsh'
+BASH_EVAL='completions bash'
+ZSH_EVAL='completions zsh'
 
 run_case fresh
 want .bashrc "$PATH_LINE" 1 "a fresh account gets the PATH line in .bashrc"
@@ -46,13 +46,29 @@ else
     echo "ok   no .zshrc is invented where none existed"
 fi
 
-# Against main, not against a file this test wrote: that would only check the order this test chose.
-CASE=ordering
-if [ "$(grep -n '^ *bootstrap::path$' "$REPO/install.sh" | cut -d: -f1)" -lt \
-     "$(grep -n '^ *bootstrap::completions$' "$REPO/install.sh" | cut -d: -f1)" ]; then
-    echo "ok   main writes the PATH line before the eval that depends on it"
+# Ubuntu's and RHEL's stock profiles source .bashrc before prepending ~/.local/bin, so a line that
+# looked vizfold up on PATH would find nothing exactly when it runs, on the machines this targets.
+run_case absolute
+want .bashrc "$SANDBOX/.local/bin/vizfold" 1 "the eval names the binary by absolute path"
+want .bashrc "command -v vizfold"          0 "and never resolves it through PATH"
+
+# bash sources .bashrc for non-interactive shells too, under ssh -- where there is no completion to
+# register and forking the binary is pure latency on every scp, rsync and `ssh host cmd`.
+want .bashrc 'case $- in *i*)' 1 "the eval runs only in an interactive shell"
+# A binary older than this subcommand answers on stderr; unsilenced, that lands on the user's prompt.
+want .bashrc '2>/dev/null'     1 "and says nothing when the binary is too old to know it"
+
+# An rc whose last byte is not a newline: ours would fuse onto the user's last statement, and since
+# grep -F matches a fragment anywhere in a line the idempotency guard would then hide it forever.
+CASE=no-trailing-newline
+rm -rf "$SANDBOX"; mkdir -p "$SANDBOX"; HOME=$SANDBOX BIN=$SANDBOX/.local/bin
+printf 'export EDITOR=vim' > "$SANDBOX/.bashrc"
+bootstrap::path >/dev/null; bootstrap::completions >/dev/null
+got=$(HOME=$SANDBOX bash -c '. "$HOME/.bashrc" 2>/dev/null; echo "$EDITOR"')
+if [ "$got" = vim ]; then
+    echo "ok   an rc with no trailing newline keeps its last statement intact"
 else
-    echo "FAIL [ordering] main appends the completion eval above the PATH line it needs"; fail=1
+    echo "FAIL [no-trailing-newline] EDITOR became '$got'; the appended line fused onto it"; fail=1
 fi
 
 run_case rerun .zshrc

@@ -2703,13 +2703,16 @@ mod tests {
                 "{shell} has no compdef to arrange for"
             );
         }
-        // Proves generation ran at all, rather than the prelude standing in for a script.
-        for shell in [Shell::Zsh, Shell::Bash] {
-            assert!(
-                script(shell).contains("completions"),
-                "{shell} names our subcommands"
-            );
-        }
+        // The name bound here is what the user's TAB has to match; nothing else in the script
+        // fails visibly if it is wrong -- completion would simply do nothing, for everyone.
+        assert!(
+            zsh.contains("compdef _vizfold vizfold\n"),
+            "zsh binds `vizfold`"
+        );
+        assert!(
+            script(Shell::Bash).contains("-F _vizfold -o bashdefault -o default vizfold\n"),
+            "bash binds `vizfold`"
+        );
     }
 
     /// A bare `uninstall` stays: it is the only thing that removes what no part owns.

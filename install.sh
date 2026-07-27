@@ -56,7 +56,10 @@ bootstrap::micromamba() {
 bootstrap::rc() {   # $1 shell, $2 line
     local rc=$HOME/.${1}rc
     [ "$1" = bash ] || [ -f "$rc" ] || return 0
-    grep -qsF "$2" "$rc" || echo "$2" >> "$rc"
+    grep -qsF "$2" "$rc" && return 0
+    # An rc whose last line has no newline would otherwise take ours fused onto the end of it.
+    [ ! -s "$rc" ] || [ -z "$(tail -c1 "$rc")" ] || echo >> "$rc"
+    echo "$2" >> "$rc"
 }
 
 # Put ~/.local/bin on PATH for future shells (idempotent), and note it for this one.
@@ -69,12 +72,14 @@ bootstrap::path() {
 }
 
 # Eval'd from the binary rather than written out as a file, so a self-update leaves nothing stale.
-# Must follow bootstrap::path, which is what puts vizfold on the PATH this line then calls it from;
-# the guard keeps an uninstalled binary from erroring on every shell start.
+# By absolute path, never PATH: Ubuntu's and RHEL's stock profiles source .bashrc *before* they
+# prepend ~/.local/bin, so a PATH lookup is false exactly when this line runs. `-x` keeps an
+# uninstalled binary quiet; 2>/dev/null keeps one too old to know the subcommand quiet too. Only
+# interactive shells have completion to register, and bash sources .bashrc under ssh as well.
 bootstrap::completions() {
     local shell
     for shell in bash zsh; do
-        bootstrap::rc "$shell" "command -v vizfold >/dev/null && eval \"\$(vizfold completions $shell)\""
+        bootstrap::rc "$shell" "case \$- in *i*) [ -x \"$BIN/vizfold\" ] && eval \"\$(\"$BIN/vizfold\" completions $shell 2>/dev/null)\" ;; esac"
     done
     echo "enabled tab completion in your shell rc"
 }
