@@ -57,7 +57,9 @@ esmfold::verify() {
 import shutil, sys, torch, transformers
 from esmfold.cli import main
 print("python", sys.version.split()[0])
-print("torch", torch.__version__, "cuda", torch.cuda.is_available())
+# torch.version.cuda, not just is_available(): a login node carries the driver but no GPU, so the
+# build it resolved to is the only thing this can actually check.
+print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
 print("transformers", transformers.__version__)
 entrypoint = shutil.which("esmfold", path=f"{sys.prefix}/bin")
 assert entrypoint, "the esmfold entrypoint is not in the environment"
