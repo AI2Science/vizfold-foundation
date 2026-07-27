@@ -19,3 +19,4 @@ jobs:
       - run: bash tests/install_rc.sh
       - run: bash tests/configure_repo.sh
       - run: bash tests/libcuda_stub.sh
+      - run: bash tests/slurm_account.sh
