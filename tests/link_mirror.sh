@@ -69,6 +69,14 @@ assert_link "$UNICLUST/uniclust30_2018_08_cs219.ffindex"
     { echo "FAIL [uniref30-only] the alias does not point at the uniref30 file"; exit 1; }
 echo "ok   with no uniclust30, uniref30 is aliased under the uniclust30 names"
 
+# An unreadable or empty mirror globs to nothing, and `ln` would make a dangling link named `*` --
+# succeeding, so the install marches on and dies at verify naming a path nobody can act on.
+populate_nothing() { :; }
+run_case "empty-mirror" populate_nothing
+dangling=$(find "$DATA" -maxdepth 1 -type l | while read -r l; do [ -e "$l" ] || echo "$l"; done)
+[ -z "$dangling" ] || { echo "FAIL [empty-mirror] dangling link: $dangling"; exit 1; }
+echo "ok   an empty mirror links nothing, not a dangling '*'"
+
 # The mirror is read-only in practice.
 run_case "mirror-untouched" populate_flat
 [ -z "$(find "$AF2" -type l)" ] || { echo "FAIL [mirror-untouched] a link was created inside the mirror"; exit 1; }
