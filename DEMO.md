@@ -1,6 +1,6 @@
 # Folding a protein with the vizfold CLI
 
-The full OpenFold lifecycle through the `vizfold` CLI on a cluster: queue a sequence, fold it on a
+The full OpenFold lifecycle through the `vizfold` CLI on a cluster: record a sequence, fold it on a
 GPU, register the outputs, and view them. The transcripts below are from a clean run on **NCSA
 Delta** (A100), so the paths, accounts and partitions in them are Delta's — `vizfold status` prints
 yours. Every `vizfold` call is the installed binary on your `PATH`, not a source checkout.
@@ -56,45 +56,52 @@ vizfold list examples
 vizfold run 6KWC_1
 ```
 
-`vizfold run` takes a bundled example id, a path to a FASTA, or a queued run's id; given either of
-the first two it queues the run itself. That is the line `vizfold install openfold` prints on
-success. The rest of this page walks through each stage separately.
+`vizfold run` takes bundled example ids, paths to FASTAs, directories of FASTAs — several at once,
+folded in one execution with the model loaded once — or a queued run's id. Given anything but an
+id it records the run itself. That is the line `vizfold install openfold` prints on success. The
+rest of this page walks through each stage separately.
 
-## 1. Queue a run
+## 1. Record a run
 
-Queue the bundled example, 6KWC (a 191-residue monomer). On a cluster install every input path
-defaults off the config and the checkout examples, so the id is the only flag you need:
+Record the bundled example, 6KWC (a 191-residue monomer), without folding it yet. On a cluster
+install every input path defaults off the config and the checkout examples, so the target is the
+only argument you need:
 
 ```bash
-vizfold queue openfold --input-id 6KWC_1
+vizfold run 6KWC_1 --no-exec
 ```
 
 Attention maps are dumped by default; pass `--attn=false` to skip them.
 
 ```text
-Queued OpenFold run 1
-status: submitted
-input_id: 6KWC_1
-
-Next:
-  vizfold run 1
+Queued OpenFold run 1 (6KWC_1, 191 residues)
 ```
 
-What the omitted flags default to (all overridable — see `vizfold queue openfold --help`):
+What the omitted flags default to (all overridable — see `vizfold run --help`):
 
 | Flag | Default on a cluster install |
 | --- | --- |
-| `--fasta` | `$OPENFOLD_HOME/examples/monomer/fasta_dir_6KWC` |
+| `<TARGET>` | the bundled `$OPENFOLD_HOME/examples/monomer/fasta_dir_6KWC/6KWC.fasta` |
 | `--alignment-dir` | `$OPENFOLD_HOME/examples/monomer/alignments` |
 | `--data-dir` | `$OPENFOLD_DATA_DIR` (the staged AlphaFold2 databases) |
 | `--model-device` | `cuda:0` — a GPU partition is configured, so the fold will `srun` onto a GPU node |
-| `--use-precomputed-alignments` | `true` — reuse `alignment-dir/6KWC_1`, skipping the MSA search |
+| `--use-precomputed-alignments` | `true` — every target is a bundled example, so `alignment-dir/6KWC_1` is reused and the MSA search skipped |
 
 The sequence is always read from the FASTA; `--input-id` only names the run, and preflight rejects
-it when it does not match the FASTA's header tag. Pass `--fasta <path>` to fold one of your own.
-Queue canonicalizes and stores absolute paths, so every input must exist at queue time.
+it when it does not match the FASTA's header tags. Recording canonicalizes and stores absolute
+paths, so every input must exist at that point.
 
-Queueing also seeds the catalog — the OpenFold backend, the local execution target, and the
+Several targets record as one run whose `input_id` is their tags joined with `+`:
+
+```bash
+vizfold run 1UBQ_1 6KWC_1 --no-exec
+```
+
+```text
+Queued OpenFold run 2 (1UBQ_1+6KWC_1, 267 residues)
+```
+
+Recording also seeds the catalog — the OpenFold backend, the local execution target, and the
 invocation profile tying them together. Inspect what it created with `vizfold list models`,
 `vizfold list targets`, and `vizfold list profiles`.
 
@@ -126,7 +133,7 @@ Preflight: passed
 [passed] working directory: '/u/yjayawardana/vizfold-src' exists
 [passed] script file: '/u/yjayawardana/vizfold-src/scripts/openfold/run_pretrained_openfold.py' exists
 [passed] input_id: run input_id '6KWC_1' is configured
-[passed] fasta_dir: '/u/yjayawardana/vizfold-src/examples/monomer/fasta_dir_6KWC' contains one FASTA file with tag '6KWC_1' matching run input_id
+[passed] fasta_dir: '/u/yjayawardana/vizfold-src/examples/monomer/fasta_dir_6KWC/6KWC.fasta' holds 1 FASTA file(s), tagged '6KWC_1' as run input_id says
 ...
 
 Command exit_code: 0
@@ -142,13 +149,14 @@ text trace per layer/head:
 ```bash
 $ grep -c '^ATOM' /work/nvme/bbol/yjayawardana/vizfold/runs/1/predictions/6KWC_1_model_1_ptm_relaxed.pdb
 2839
-$ ls /work/nvme/bbol/yjayawardana/vizfold/runs/1/attention | wc -l
+$ ls /work/nvme/bbol/yjayawardana/vizfold/runs/1/attention/6KWC_1 | wc -l
 96
 ```
 
 Outputs land in the run workspace `$OPENFOLD_PREFIX/runs/<run-id>`: `predictions/` (relaxed and
-unrelaxed PDBs, `timings.json`) and `attention/`. An OpenFold run always creates `attention/`;
-`--attn=false` only leaves it empty.
+unrelaxed PDBs, `timings.json`) and `attention/<tag>/`. Every output is keyed by FASTA tag, so a
+batch of targets shares the one workspace without colliding. An OpenFold run always creates
+`attention/`; `--attn=false` only leaves it empty.
 
 ## 3. Register artifacts
 
@@ -228,14 +236,16 @@ install did complete, wait a few seconds and retry.
 
 ### FASTA / input-id mismatch
 
-The executor checks that the FASTA header-derived tag matches the run `input_id`. With
-`--input-id 6KWC_1`, the header in the FASTA must resolve to `6KWC_1`.
+The executor checks that the FASTA header-derived tags are exactly the `+`-joined tags in the run
+`input_id`. With `--input-id 6KWC_1`, the header in the FASTA must resolve to `6KWC_1`. A
+multi-record FASTA is refused here rather than silently skipped by OpenFold's monomer mode.
 
 ### Missing precomputed alignment
 
-With `--use-precomputed-alignments=true` (the default), the directory `alignment-dir/<input-id>`
-must exist — for the example, `examples/monomer/alignments/6KWC_1`. Pass
-`--use-precomputed-alignments=false` to run the full MSA search instead (much slower; needs the full
+With `--use-precomputed-alignments=true`, `alignment-dir/<tag>` must exist for every tag in the
+batch — for the example, `examples/monomer/alignments/6KWC_1`. It defaults on only when every
+target is a bundled example, so a FASTA of your own runs the full search unless you say
+otherwise. Pass `--use-precomputed-alignments=false` to run the full MSA search instead (much slower; needs the full
 databases).
 
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`

@@ -47,12 +47,16 @@ vizfold run ./my.fasta --backend esmfold    # your own sequence
 ```
 
 `--backend` defaults to the only backend installed, else openfold — so pass `--backend esmfold`
-whenever OpenFold is installed too. To queue with non-default trace settings and run later:
+whenever OpenFold is installed too. Trace settings are flags on `run`; add `--no-exec` to record
+the run now and fold it later:
 
 ```bash
-vizfold queue esmfold --fasta ./my.fasta --trace-mode attention --layers 0,1,2
+vizfold run ./my.fasta --backend esmfold --trace-mode attention --layers 0,1,2 --no-exec
 vizfold run <run-id>
 ```
+
+ESMFold folds one target at a time — it reads a single file and loads its model inside the fold —
+so more than one target is refused. Batches are OpenFold's.
 
 The first fold downloads `facebook/esmfold_v1` (~2.6 GB). `vizfold run` points `HF_HOME` at
 `<env>/hf` when it is unset, keeping the weights out of a quota'd `$HOME`. Driving the model
@@ -74,11 +78,11 @@ micromamba run -p <env> esmfold \
 
 (`python -m esmfold` and `scripts/esmfold/run_pretrained_esmf.py` are the same function.)
 
-Flags, and their spelling on `vizfold queue esmfold`:
+Flags, and their spelling on `vizfold run`:
 
-| raw CLI | queue esmfold | notes |
+| raw CLI | vizfold run | notes |
 |---|---|---|
-| `--fasta` | `--fasta` | required on both |
+| `--fasta` | `<TARGET>` | the positional; required on both |
 | `--out` | — | the run's output workspace |
 | `--model` | `--model` | default `facebook/esmfold_v1` |
 | `--device` | `--model-device` | default: cuda if visible, else cpu |

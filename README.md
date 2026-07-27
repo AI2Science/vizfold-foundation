@@ -240,14 +240,17 @@ intended change.
 Once a backend is installed, one command folds a sequence:
 
 ```bash
-vizfold run 1UBQ_1          # a bundled example id
-vizfold run ./my.fasta      # a sequence of your own
-vizfold run 42              # a queued run, by id
+vizfold run 1UBQ_1              # a bundled example id
+vizfold run ./my.fasta          # a sequence of your own
+vizfold run ./my_fastas/        # every FASTA in a directory
+vizfold run 1UBQ_1 6KWC_1       # several targets, one execution, model loaded once
+vizfold run 42                  # a queued run, by id (never mixed with other targets)
 ```
 
-`run` queues the target, executes it, and registers its outputs. `queue openfold|esmfold` records a
-run without executing it and prints the id to hand back to `run`. `serve` opens the dashboard over
-the outputs. `vizfold <command> --help` details any one.
+`run` records the run, executes it, and registers its outputs. Several targets fold in one
+execution and land in one run directory, keyed by FASTA tag: `<tag>_model_1_ptm_relaxed.pdb` and
+`attention/<tag>/`. `--no-exec` records the run and stops, printing the id to hand back to `run`
+later. `serve` opens the dashboard over the outputs. `vizfold <command> --help` details any one.
 
 ```text
 install             Install the checkout everything runs from (`base`), or a model backend from it
@@ -259,8 +262,7 @@ self-update         Replace this binary with the latest release. Run `update bas
 serve               Start the workbench dashboard
 list                List executor records
 show                Show one executor record
-queue               Queue a run for a supported model backend, without executing it
-run                 Run a fold: a bundled example, a FASTA, or a queued run by id
+run                 Fold targets in one execution: bundled examples, FASTAs, directories of FASTAs -- or a queued run by id
 register-artifacts  Register known artifacts for a completed run
 ```
 
@@ -277,8 +279,8 @@ ID      RESIDUES  DESCRIPTION
 2OMF_1  340       MATRIX PORIN OUTER MEMBRANE PROTEIN F
 ```
 
-The dashboard drives the same path: pick one of these in **Fold a protein** and it queues,
-executes, and registers the run for you.
+The dashboard drives the same path: pick one of these in **Fold a protein** and it records,
+executes, and registers the run for you. Batches come from the CLI.
 
 For a full end-to-end walkthrough on a cluster, see [DEMO.md](DEMO.md).
 
@@ -302,8 +304,8 @@ For a full end-to-end walkthrough on a cluster, see [DEMO.md](DEMO.md).
 
 Each backend also installs its own CLI into its environment under its own name, invoked as
 `micromamba run -p <env> <name> --help` — the same form for both, and independent of the
-`vizfold` binary. Through vizfold, `queue` and `run` fill the model's arguments from the config and
-record the run.
+`vizfold` binary. Through vizfold, `run` fills the model's arguments from the config and records
+the run.
 
 End users install the prebuilt release binary (see [Install](#install)); the steps below build from
 source.
@@ -327,7 +329,7 @@ cargo run -- list models
 Every command except `install`, `uninstall`, `status`, `update` and `self-update` is gated on a
 config existing at `~/.config/vizfold/vizfold.json` (`VIZFOLD_CONFIG` selects a different file), and
 exits telling you to install a backend first. There is no seed step: migrations run on every
-connect, and the queue/run paths seed the default backends, their `local-*` targets and matching
+connect, and the run path seeds the default backends, their `local-*` targets and matching
 invocation profiles themselves, existence-guarded. Those local profiles assume the checked-out
 repository layout, so build and run against the checkout.
 

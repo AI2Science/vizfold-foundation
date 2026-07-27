@@ -53,18 +53,18 @@ importable, and otherwise reproduces the same format.
 
 ## Through the Executor
 
-The same run, recorded in the run database. `queue` prints the run id and the `run` line to follow
-it with; note the queue surface spells its flags with dashes (`--trace-mode`, `--structure-traces`)
-where the script uses underscores.
+The same run, recorded in the run database. `--no-exec` prints the run id to follow with `run`;
+note that vizfold spells its flags with dashes (`--trace-mode`, `--structure-traces`) where the
+script uses underscores.
 
 ```bash
-vizfold queue esmfold --fasta examples/monomer/fasta_dir_6KWC/6KWC.fasta --structure-traces
+vizfold run examples/monomer/fasta_dir_6KWC/6KWC.fasta --backend esmfold --structure-traces --no-exec
 vizfold run <RUN_ID>
 vizfold show run <RUN_ID>          # the run and its registered artifacts
 ```
 
-`vizfold run 6KWC_1 --backend esmfold` queues and folds the bundled example in one step. Preflight
-checks the GPU, the base command, `input_id`, that `--fasta` is a readable file, and the output dir.
+`vizfold run 6KWC_1 --backend esmfold` records and folds the bundled example in one step. Preflight
+checks the GPU, the base command, `input_id`, that the FASTA is a readable file, and the output dir.
 
 ## Running on ICE Cluster (PACE)
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use sea_orm::DbErr;
@@ -69,24 +70,24 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
     };
 
     let fasta_dir = Path::new(&fasta_dir);
-    if !fasta_dir.is_dir() {
+    // A file or a directory: the script takes either, and a one-target run passes the file itself.
+    let fasta_files = if fasta_dir.is_file() {
+        vec![fasta_dir.to_path_buf()]
+    } else if fasta_dir.is_dir() {
+        match fasta_files_in_directory(fasta_dir) {
+            Ok(files) => files,
+            Err(error) => {
+                return PreflightCheck::failed(
+                    "fasta_dir",
+                    format!("could not inspect '{}': {error}", fasta_dir.display()),
+                );
+            }
+        }
+    } else {
         return PreflightCheck::failed(
             "fasta_dir",
-            format!(
-                "'{}' does not exist or is not a directory",
-                fasta_dir.display()
-            ),
+            format!("'{}' does not exist", fasta_dir.display()),
         );
-    }
-
-    let fasta_files = match fasta_files_in_directory(fasta_dir) {
-        Ok(files) => files,
-        Err(error) => {
-            return PreflightCheck::failed(
-                "fasta_dir",
-                format!("could not inspect '{}': {error}", fasta_dir.display()),
-            );
-        }
     };
 
     if fasta_files.is_empty() {
@@ -96,30 +97,36 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
         );
     }
 
-    if fasta_files.len() != 1 {
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for fasta_path in &fasta_files {
+        // Monomer mode SKIPS a multi-record file with only a print, so the target would vanish.
+        match parse_single_fasta_tag(fasta_path) {
+            Ok(tag) => {
+                found.insert(tag);
+            }
+            Err(error) => {
+                return PreflightCheck::failed(
+                    "fasta_dir",
+                    format!(
+                        "'{}' is not a valid single-record FASTA: {error}",
+                        fasta_path.display()
+                    ),
+                );
+            }
+        }
+    }
+
+    if found.len() != fasta_files.len() {
         return PreflightCheck::failed(
             "fasta_dir",
             format!(
-                "'{}' must contain exactly one .fasta or .fa file, found {}",
+                "'{}' holds {} FASTA files but only {} distinct tags; every output is keyed by tag",
                 fasta_dir.display(),
-                fasta_files.len()
+                fasta_files.len(),
+                found.len()
             ),
         );
     }
-
-    let fasta_path = &fasta_files[0];
-    let tag = match parse_single_fasta_tag(fasta_path) {
-        Ok(tag) => tag,
-        Err(error) => {
-            return PreflightCheck::failed(
-                "fasta_dir",
-                format!(
-                    "'{}' is not a valid single-record FASTA: {error}",
-                    fasta_path.display()
-                ),
-            );
-        }
-    };
 
     if input_id.trim().is_empty() {
         return PreflightCheck::failed(
@@ -128,18 +135,29 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
         );
     }
 
-    if tag != input_id {
+    // The batch is exactly what input_id names: `+`-joined tags, one target or many.
+    let expected: BTreeSet<&str> = input_id.split('+').collect();
+    let found: BTreeSet<&str> = found.iter().map(String::as_str).collect();
+    if found != expected {
+        let difference = |from: &BTreeSet<&str>, to: &BTreeSet<&str>| {
+            from.difference(to).copied().collect::<Vec<_>>().join(", ")
+        };
         return PreflightCheck::failed(
             "fasta_dir",
-            format!("FASTA tag '{tag}' does not match run input_id '{input_id}'"),
+            format!(
+                "FASTA tag set '{}' does not match run input_id '{input_id}' (missing: '{}')",
+                difference(&found, &expected),
+                difference(&expected, &found)
+            ),
         );
     }
 
     PreflightCheck::passed(
         "fasta_dir",
         format!(
-            "'{}' contains one FASTA file with tag '{tag}' matching run input_id",
-            fasta_dir.display()
+            "'{}' holds {} FASTA file(s), tagged '{input_id}' as run input_id says",
+            fasta_dir.display(),
+            fasta_files.len()
         ),
     )
 }
@@ -205,18 +223,28 @@ fn precomputed_alignment_key_check(parameters: &Value, input_id: &str) -> Prefli
         );
     }
 
-    let key_directory = alignment_dir.join(input_id);
-    if key_directory.is_dir() {
+    // One key per tag in the batch, so a target with no alignments fails before the GPU is touched.
+    let missing: Vec<String> = input_id
+        .split('+')
+        .map(|tag| alignment_dir.join(tag))
+        .filter(|key_directory| !key_directory.is_dir())
+        .map(|key_directory| format!("'{}'", key_directory.display()))
+        .collect();
+    if missing.is_empty() {
         PreflightCheck::passed(
             "precomputed alignment key",
-            format!("'{}' exists", key_directory.display()),
+            format!(
+                "'{}' holds every tag in '{input_id}'",
+                alignment_dir.display()
+            ),
         )
     } else {
         PreflightCheck::failed(
             "precomputed alignment key",
             format!(
-                "expected alignment directory '{}' is missing",
-                key_directory.display()
+                "missing alignment director{}: {}",
+                if missing.len() == 1 { "y" } else { "ies" },
+                missing.join(", ")
             ),
         )
     }
@@ -978,8 +1006,59 @@ mod tests {
         assert!(check_message(&report, "fasta_dir").contains("contains no .fasta or .fa files"));
     }
 
+    /// A batch: several FASTAs in one directory, named by the `+`-joined input_id.
     #[test]
-    fn preflight_fails_when_fasta_dir_contains_multiple_fasta_files() {
+    fn preflight_passes_when_every_fasta_in_the_directory_is_named_by_input_id() {
+        let layout = TestLayout::new("1UBQ_1|Chain A");
+        fs::write(
+            layout.fasta_dir.join("second.fa"),
+            ">2OMF_1\nMSTNPKPQRITF\n",
+        )
+        .expect("second FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run_with_input_id("1UBQ_1+2OMF_1", layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA directory");
+
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Passed);
+
+        // A tag the batch does not hold is named, rather than folding a smaller batch than asked for.
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run_with_input_id("1UBQ_1+2OMF_1+6KWC_1", layout.execution_parameters()),
+        )
+        .expect("preflight should inspect the FASTA directory");
+
+        assert!(report.has_failures());
+        assert!(check_message(&report, "fasta_dir").contains("missing: '6KWC_1'"));
+    }
+
+    /// Monomer mode skips a multi-record file wherever it sits, so every file is checked, not the
+    /// first: the batch would otherwise fold one target short with only a print to say so.
+    #[test]
+    fn preflight_fails_when_a_later_fasta_holds_multiple_records() {
+        let layout = TestLayout::new("1UBQ_1|Chain A");
+        fs::write(
+            layout.fasta_dir.join("second.fa"),
+            ">2OMF_1\nMSTNPKPQRITF\n>6KWC_1\nMSTNPKPQRITF\n",
+        )
+        .expect("second FASTA should be written");
+
+        let report = preflight_openfold(
+            &layout.command(),
+            &preflight_run_with_input_id("1UBQ_1+2OMF_1", layout.execution_parameters()),
+        )
+        .expect("preflight should inspect every FASTA in the directory");
+
+        assert!(report.has_failures());
+        assert!(check_message(&report, "fasta_dir").contains("multiple FASTA records"));
+    }
+
+    /// The staged directory names its links by tag, but a user's own directory need not.
+    #[test]
+    fn preflight_fails_when_two_fastas_share_a_tag() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
         fs::write(
             layout.fasta_dir.join("second.fa"),
@@ -994,8 +1073,21 @@ mod tests {
         .expect("preflight should inspect the FASTA directory");
 
         assert!(report.has_failures());
-        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Failed);
-        assert!(check_message(&report, "fasta_dir").contains("exactly one .fasta or .fa file"));
+        assert!(check_message(&report, "fasta_dir").contains("distinct tags"));
+    }
+
+    /// One target passes its FASTA straight through, so preflight must take a file as well.
+    #[test]
+    fn preflight_passes_when_fasta_dir_is_a_single_file() {
+        let layout = TestLayout::new("1UBQ_1|Chain A");
+        let mut execution = layout.execution_parameters();
+        execution["fasta_dir"] = json!(layout.fasta_dir.join("input.fasta"));
+
+        let report = preflight_openfold(&layout.command(), &preflight_run(execution))
+            .expect("preflight should inspect the FASTA file");
+
+        assert!(!report.has_failures());
+        assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Passed);
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+// `run` carries every fold flag, so its variant dwarfs the rest. One is parsed, once, per process.
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Install the checkout everything runs from (`base`), or a model backend from it.
     Install(InstallArgs),
@@ -55,9 +57,8 @@ enum Command {
     List(ListArgs),
     /// Show one executor record.
     Show(ShowArgs),
-    /// Queue a run for a supported model backend, without executing it.
-    Queue(QueueArgs),
-    /// Run a fold: a bundled example, a FASTA, or a queued run by id.
+    /// Fold targets in one execution: bundled examples, FASTAs, directories of FASTAs -- or a
+    /// queued run by id.
     Run(RunArgs),
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
@@ -257,18 +258,70 @@ struct ListArgs {
 
 #[derive(Debug, Args)]
 struct RunArgs {
-    /// What to fold: a bundled example id (`vizfold list examples`), a path to a FASTA, or a
-    /// queued run's id.
-    target: String,
+    /// What to fold: bundled example ids (`vizfold list examples`), FASTA files, or directories of
+    /// FASTAs -- several fold in one execution. A lone run id replays that queued run instead.
+    #[arg(required = true)]
+    targets: Vec<String>,
     /// Backend. Defaults to the only one installed, else openfold. A queued run carries its own.
     #[arg(long, value_enum)]
     backend: Option<Backend>,
-    /// Dump per-layer, per-head attention maps (OpenFold). A queued run keeps what it was queued with.
-    #[arg(long, default_value_t = true, action = ArgAction::Set)]
-    attn: bool,
+    /// Record the run and stop, without folding it. `vizfold run <id>` folds it later.
+    #[arg(long)]
+    no_exec: bool,
+    /// Name recorded for this run. Defaults to the folded tags joined with `+`, the only value
+    /// preflight takes.
+    #[arg(long)]
+    input_id: Option<String>,
     /// Print only the run as JSON, for tools driving the CLI.
     #[arg(long)]
     json: bool,
+    /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
+    #[arg(long)]
+    data_dir: Option<String>,
+    /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
+    #[arg(long)]
+    alignment_dir: Option<String>,
+    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
+    /// HPC flow) or a GPU is visible locally, otherwise cpu.
+    #[arg(long)]
+    model_device: Option<String>,
+    /// CPU threads. Defaults to this machine's core count, clamped to the execution target's maximum.
+    #[arg(long)]
+    cpus: Option<i64>,
+    /// Residue index offset passed through to the model (OpenFold).
+    #[arg(long, default_value_t = 1)]
+    residue_idx: i64,
+    /// Dump per-layer, per-head attention maps, under `attention/<tag>/` (OpenFold).
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    attn: bool,
+    /// Write the model's raw output tensors alongside the structure (OpenFold).
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    save_outputs: bool,
+    /// How many recycling iterations to keep outputs for (OpenFold).
+    #[arg(long, default_value_t = 1)]
+    num_recycles_save: i64,
+    /// Use the precomputed alignments in `--alignment-dir`. On by default only when every target is
+    /// a bundled example; `--use-precomputed-alignments=false` forces the full MSA pipeline.
+    #[arg(long, action = ArgAction::Set)]
+    use_precomputed_alignments: Option<bool>,
+    /// HuggingFace model id (ESMFold).
+    #[arg(long, default_value = "facebook/esmfold_v1")]
+    model: String,
+    /// What to extract: none, attention, activations, or attention+activations (ESMFold).
+    #[arg(long, default_value = "attention+activations")]
+    trace_mode: String,
+    /// Layers to save: `all` or a comma/colon list (ESMFold).
+    #[arg(long, default_value = "all")]
+    layers: String,
+    /// Model dtype (ESMFold).
+    #[arg(long, default_value = "float32")]
+    dtype: String,
+    /// Save trace tensors in fp16 to reduce size (ESMFold).
+    #[arg(long)]
+    save_fp16: bool,
+    /// Capture IPA attention and per-recycle backbone from the structure module (ESMFold).
+    #[arg(long)]
+    structure_traces: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -303,111 +356,6 @@ struct ShowArgs {
 enum ShowResource {
     /// Show a run and its artifacts.
     Run { run_id: i32 },
-}
-
-#[derive(Clone, Debug, Args)]
-struct QueueArgs {
-    #[command(subcommand)]
-    model: QueueModel,
-}
-
-#[derive(Clone, Debug, Subcommand)]
-enum QueueModel {
-    /// Queue an OpenFold run.
-    Openfold(OpenfoldQueueArgs),
-    /// Queue an ESMFold run.
-    Esmfold(EsmfoldQueueArgs),
-}
-
-#[derive(Clone, Debug, Args)]
-struct EsmfoldQueueArgs {
-    /// Name recorded for this run. Defaults to the FASTA's header tag.
-    #[arg(long)]
-    input_id: Option<String>,
-    /// FASTA to fold: the file, or a directory holding exactly one.
-    #[arg(long)]
-    fasta: String,
-    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
-    /// HPC flow) or a GPU is visible locally, otherwise cpu.
-    #[arg(long)]
-    model_device: Option<String>,
-    /// HuggingFace model id.
-    #[arg(long, default_value = "facebook/esmfold_v1")]
-    model: String,
-    /// What to extract: none, attention, activations, or attention+activations.
-    #[arg(long, default_value = "attention+activations")]
-    trace_mode: String,
-    /// Layers to save: `all` or a comma/colon list.
-    #[arg(long, default_value = "all")]
-    layers: String,
-    /// Model dtype.
-    #[arg(long, default_value = "float32")]
-    dtype: String,
-    /// Save trace tensors in fp16 to reduce size.
-    #[arg(long)]
-    save_fp16: bool,
-    /// Capture IPA attention and per-recycle backbone from the structure module.
-    #[arg(long)]
-    structure_traces: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Args)]
-struct OpenfoldQueueArgs {
-    /// Name recorded for this run. Defaults to the FASTA's header tag, the only value preflight takes.
-    #[arg(long)]
-    input_id: Option<String>,
-    /// FASTA to fold: the file, or a directory holding exactly one.
-    /// Defaults to <OPENFOLD_HOME>/examples/monomer/fasta_dir_<id>.
-    #[arg(long)]
-    fasta: Option<String>,
-    /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
-    #[arg(long)]
-    data_dir: Option<String>,
-    /// Precomputed alignments directory. Defaults to <OPENFOLD_HOME>/examples/monomer/alignments.
-    #[arg(long)]
-    alignment_dir: Option<String>,
-    /// Torch device. Defaults to cuda:0 when a GPU partition is configured to srun onto (the
-    /// HPC flow) or a GPU is visible locally, otherwise cpu.
-    #[arg(long)]
-    model_device: Option<String>,
-    /// CPU threads. Defaults to this machine's core count, clamped to the execution target's maximum.
-    #[arg(long)]
-    cpus: Option<i64>,
-    /// Residue index offset passed through to the model.
-    #[arg(long, default_value_t = 1)]
-    residue_idx: i64,
-    /// Dump per-layer, per-head attention maps.
-    #[arg(long, default_value_t = true, action = ArgAction::Set)]
-    attn: bool,
-    /// Write the model's raw output tensors alongside the structure.
-    #[arg(long, default_value_t = true, action = ArgAction::Set)]
-    save_outputs: bool,
-    /// How many recycling iterations to keep outputs for.
-    #[arg(long, default_value_t = 1)]
-    num_recycles_save: i64,
-    /// Use the precomputed alignments in `--alignment-dir`. Pass
-    /// `--use-precomputed-alignments=false` for the full MSA pipeline.
-    #[arg(long, default_value_t = true, action = ArgAction::Set)]
-    use_precomputed_alignments: bool,
-}
-
-impl OpenfoldQueueArgs {
-    /// The same defaults clap gives `queue openfold`; a test pins the two together.
-    fn for_example(example: &examples::Example, attn: bool) -> Self {
-        Self {
-            input_id: Some(example.id.clone()),
-            attn,
-            fasta: None,
-            data_dir: None,
-            alignment_dir: None,
-            model_device: None,
-            cpus: None,
-            residue_idx: 1,
-            save_outputs: true,
-            num_recycles_save: 1,
-            use_precomputed_alignments: true,
-        }
-    }
 }
 
 /// A GPU partition with no allocation held means the fold is srun'd onto a GPU node regardless of this host.
@@ -480,13 +428,8 @@ fn prereqs(command: &Command) -> Vec<Component> {
         Command::Download(args) => {
             vec![repo_health(), config_health(), backend(Some(args.backend))]
         }
-        Command::Queue(args) => vec![
-            config_health(),
-            backend(Some(match args.model {
-                QueueModel::Openfold(_) => Backend::Openfold,
-                QueueModel::Esmfold(_) => Backend::Esmfold,
-            })),
-        ],
+        // Recording a run touches no environment, so a submit host with no micromamba still can.
+        Command::Run(args) if args.no_exec => vec![config_health(), backend(args.backend)],
         Command::Run(args) => vec![
             core_deps_health(),
             repo_health(),
@@ -542,10 +485,6 @@ pub async fn run() -> Result<(), DbErr> {
         },
         Command::Show(show) => match show.resource {
             ShowResource::Run { run_id } => show_run(&database, run_id).await?,
-        },
-        Command::Queue(queue) => match queue.model {
-            QueueModel::Openfold(args) => queue_openfold_run(&database, args).await?,
-            QueueModel::Esmfold(args) => queue_esmfold_run(&database, args).await?,
         },
         Command::Run(args) => run_run(&database, args).await?,
         Command::RegisterArtifacts { run_id } => register_artifacts(&database, run_id).await?,
@@ -1789,50 +1728,37 @@ fn list_examples(json: bool) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Fold a queued run by id, or an example/FASTA queued first -- one verb. Re-registers artifacts (idempotent).
+/// Fold every target in one execution, or replay a queued run by id -- one verb. Re-registers
+/// artifacts (idempotent).
 async fn run_run(database: &sea_orm::DatabaseConnection, args: RunArgs) -> Result<(), DbErr> {
-    let run_id = match args.target.parse::<i32>() {
-        Ok(run_id) => run_id,
-        Err(_) => {
-            // A bundled example id, else a path to a FASTA of the user's own.
-            let (example, fasta) = match examples::find(&args.target) {
-                Some(example) => (example, None),
-                None => {
-                    let path = Path::new(&args.target);
-                    let example = (path.extension().is_some() || path.exists())
-                        .then(|| examples::from_path(path))
-                        .flatten()
-                        .ok_or_else(|| unknown_target(&args.target))?;
-                    (example, Some(args.target.clone()))
-                }
-            };
+    let run_id = match queued_run_id(&args.targets)? {
+        Some(run_id) => run_id,
+        None => {
+            let resolved = resolve_targets(&args.targets)?;
             let backend = args.backend.map_or_else(default_backend, Ok)?;
             let run = match backend {
                 Backend::Openfold => {
-                    submit_openfold_run(
-                        database,
-                        OpenfoldQueueArgs {
-                            // A user's own FASTA has no alignments, and must not borrow the examples'.
-                            use_precomputed_alignments: fasta.is_none(),
-                            fasta: fasta.clone(),
-                            ..OpenfoldQueueArgs::for_example(&example, args.attn)
-                        },
-                    )
-                    .await?
+                    submit_openfold_run(database, &args, &resolved, &batch_inputs_dir()).await?
                 }
-                Backend::Esmfold => {
-                    let fasta = fasta.unwrap_or_else(|| default_fasta_dir(&example.id));
-                    submit_esmfold_run(database, EsmfoldQueueArgs::for_fasta(fasta)).await?
-                }
+                Backend::Esmfold => submit_esmfold_run(database, &args, &resolved).await?,
             };
             if !args.json {
                 println!(
                     "Queued {} run {} ({}, {} residues)\n",
                     backend.label(),
                     run.id,
-                    example.id,
-                    example.residues
+                    run.input_id,
+                    resolved
+                        .iter()
+                        .map(|target| target.example.residues)
+                        .sum::<usize>()
                 );
+            }
+            if args.no_exec {
+                if args.json {
+                    println!("{}", json!({ "run_id": run.id, "status": run.status }));
+                }
+                return Ok(());
             }
             run.id
         }
@@ -1900,16 +1826,154 @@ fn unknown_target(target: &str) -> DbErr {
     })
 }
 
-async fn queue_openfold_run(
-    database: &sea_orm::DatabaseConnection,
-    args: OpenfoldQueueArgs,
-) -> Result<(), DbErr> {
-    let run = submit_openfold_run(database, args).await?;
-    report_queued("OpenFold", &run);
-    Ok(())
+/// A lone integer target replays that run. Mixed with anything else it is ambiguous, not a batch.
+fn queued_run_id(targets: &[String]) -> Result<Option<i32>, DbErr> {
+    let ids: Vec<i32> = targets
+        .iter()
+        .filter_map(|target| target.parse().ok())
+        .collect();
+    match (ids.first(), targets.len()) {
+        (None, _) => Ok(None),
+        (Some(&run_id), 1) => Ok(Some(run_id)),
+        (Some(_), _) => Err(DbErr::Custom(
+            "a queued run id folds on its own; it cannot be mixed with other targets".to_owned(),
+        )),
+    }
 }
 
-/// The seeded records a local run is built from. Both queue paths differ only in the backend.
+/// One FASTA to fold: where it is, what it holds, and whether it came from the bundled examples.
+#[derive(Debug)]
+struct Target {
+    fasta: PathBuf,
+    example: examples::Example,
+    bundled: bool,
+}
+
+fn tags(resolved: &[Target]) -> Vec<&str> {
+    resolved
+        .iter()
+        .map(|target| target.example.id.as_str())
+        .collect()
+}
+
+/// Every FASTA the targets name, in the order given: an example id resolves to its bundled FASTA,
+/// a path to itself, and a directory to every FASTA in it.
+fn resolve_targets(targets: &[String]) -> Result<Vec<Target>, DbErr> {
+    let mut resolved: Vec<Target> = Vec::new();
+    for target in targets {
+        let path = local_path(target);
+        let (fastas, bundled) = match examples::find(target) {
+            // The example's file, not its directory: a stray sibling FASTA cannot join the fold.
+            Some(example) => (
+                examples::first_fasta(Path::new(&default_fasta_dir(&example.id)))
+                    .into_iter()
+                    .collect(),
+                true,
+            ),
+            None if path.is_dir() => (examples::fasta_files(&path), false),
+            // Anything path-shaped falls through to `read_fasta`, which names what it could not read.
+            None if path.extension().is_some() || path.exists() => (vec![path], false),
+            None => return Err(unknown_target(target)),
+        };
+        if fastas.is_empty() {
+            return Err(DbErr::Custom(format!(
+                "'{target}' holds no .fasta or .fa files"
+            )));
+        }
+        for fasta in fastas {
+            let example = read_fasta(&fasta)?;
+            // The tag becomes a directory and a link name here; preflight takes nothing else either.
+            if !example
+                .id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(DbErr::Custom(format!(
+                    "'{}' is tagged '{}'; an OpenFold tag is letters, digits and underscores",
+                    fasta.display(),
+                    example.id
+                )));
+            }
+            // Every OpenFold output is keyed by tag, so a repeat would overwrite the first.
+            if resolved.iter().any(|other| other.example.id == example.id) {
+                return Err(DbErr::Custom(format!(
+                    "'{}' is folded twice by these targets",
+                    example.id
+                )));
+            }
+            let fasta = std::fs::canonicalize(&fasta).map_err(|error| {
+                DbErr::Custom(format!("cannot resolve '{}': {error}", fasta.display()))
+            })?;
+            resolved.push(Target {
+                fasta,
+                example,
+                bundled,
+            });
+        }
+    }
+    Ok(resolved)
+}
+
+/// Where staged batches live: outside the checkout, beside the run outputs the workbench serves.
+fn batch_inputs_dir() -> PathBuf {
+    config::prefix().join("runs/inputs")
+}
+
+/// cwd first, then the checkout -- a relative target means what the shell means by it, as
+/// `canonicalize_local_path` does for the flags.
+fn local_path(target: &str) -> PathBuf {
+    let path = Path::new(target);
+    std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join(path))
+        .filter(|candidate| candidate.exists())
+        .unwrap_or_else(|| config::openfold_home().join(path))
+}
+
+/// One directory of symlinks, so OpenFold's single `fasta_dir` can name a whole batch. Each link
+/// is replaced in place rather than the directory wiped, which would empty a concurrent run of it.
+fn stage_batch(inputs_dir: &Path, resolved: &[Target]) -> Result<PathBuf, DbErr> {
+    let dir = inputs_dir.join(batch_name(resolved));
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        DbErr::Custom(format!(
+            "cannot stage the batch at {}: {error}",
+            dir.display()
+        ))
+    })?;
+    for target in resolved {
+        let link = dir.join(format!("{}.fasta", target.example.id));
+        std::fs::remove_file(&link).ok();
+        std::os::unix::fs::symlink(&target.fasta, &link).map_err(|error| {
+            DbErr::Custom(format!(
+                "cannot link {} into {}: {error}",
+                target.fasta.display(),
+                dir.display()
+            ))
+        })?;
+    }
+    Ok(dir)
+}
+
+/// `<tags>-<hash of the files behind them>`: the same batch always stages into the same directory,
+/// and two batches sharing a tag set but not their sources never share one -- otherwise a second
+/// submit would relink the inputs of a batch already recorded and waiting to fold. The tag list is
+/// dropped for a first tag and a count once it outgrows a directory name.
+fn batch_name(resolved: &[Target]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for target in resolved {
+        target.fasta.hash(&mut hasher);
+    }
+    let joined = tags(resolved).join("+");
+    let head = if joined.len() <= 80 {
+        joined
+    } else {
+        format!("{}+{}more", resolved[0].example.id, resolved.len() - 1)
+    };
+    format!("{head}-{:x}", hasher.finish())
+}
+
+/// The seeded records a local run is built from. Both backends differ only in which they name.
 struct LocalCatalog {
     backend_id: i32,
     target_id: i32,
@@ -1963,35 +2027,29 @@ async fn local_catalog(
     })
 }
 
-/// What every queue path prints once the run exists.
-fn report_queued(label: &str, run: &crate::core::entities::runs::Model) {
-    println!("Queued {label} run {}", run.id);
-    println!("status: {}", run.status);
-    println!("input_id: {}", run.input_id);
-    println!("\nNext:");
-    println!("  vizfold run {}", run.id);
-}
-
 async fn submit_openfold_run(
     database: &sea_orm::DatabaseConnection,
-    args: OpenfoldQueueArgs,
+    args: &RunArgs,
+    resolved: &[Target],
+    inputs_dir: &Path,
 ) -> Result<crate::core::entities::runs::Model, DbErr> {
     let catalog = local_catalog(database, Backend::Openfold).await?;
     let working_dir = &catalog.working_dir;
-    let fasta_input = match (&args.fasta, &args.input_id) {
-        (Some(fasta), _) => fasta.clone(),
-        (None, Some(id)) => default_fasta_dir(id),
-        (None, None) => return Err(DbErr::Custom("pass --fasta or --input-id".to_owned())),
+    // One target is its own `fasta_dir`; more than one needs a directory that names them all.
+    let fasta_dir = match resolved {
+        [only] => only.fasta.clone(),
+        many => stage_batch(inputs_dir, many)?,
     };
     let data_dir_input = args
         .data_dir
         .clone()
         .unwrap_or_else(|| config::data_dir().to_string_lossy().into_owned());
-    let fasta_dir = canonicalize_local_path("--fasta", &fasta_input, working_dir)?;
-    // Read from the FASTA, so they cannot contradict what is folded -- preflight allows nothing else.
-    let example = read_fasta(&fasta_dir)?;
     let data_dir = canonicalize_local_path("--data-dir", &data_dir_input, working_dir)?;
-    let alignment_dir = if args.use_precomputed_alignments {
+    // A user's own FASTA has no alignments, and must not borrow the examples'.
+    let use_precomputed_alignments = args
+        .use_precomputed_alignments
+        .unwrap_or_else(|| resolved.iter().all(|target| target.bundled));
+    let alignment_dir = if use_precomputed_alignments {
         let input = args
             .alignment_dir
             .clone()
@@ -2007,6 +2065,7 @@ async fn submit_openfold_run(
             .map(|path| canonicalize_local_path("--alignment-dir", path, working_dir))
             .transpose()?
     };
+
     let model_device = args
         .model_device
         .clone()
@@ -2018,7 +2077,7 @@ async fn submit_openfold_run(
         ("residue_idx".into(), json!(args.residue_idx)),
         (
             "use_precomputed_alignments".into(),
-            json!(args.use_precomputed_alignments),
+            json!(use_precomputed_alignments),
         ),
         ("model_device".into(), json!(model_device)),
         (
@@ -2040,8 +2099,16 @@ async fn submit_openfold_run(
             execution_target_id: catalog.target_id,
             invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
-            input_id: args.input_id.unwrap_or(example.id),
-            input_sequence: example.sequence,
+            // ponytail: `input_id.split('+')` is how preflight learns what the batch must hold.
+            input_id: args
+                .input_id
+                .clone()
+                .unwrap_or_else(|| tags(resolved).join("+")),
+            input_sequence: resolved
+                .iter()
+                .map(|target| target.example.sequence.as_str())
+                .collect::<Vec<_>>()
+                .join(":"),
             // demo_attn on the wire: the Python argument name and the seed schema key.
             model_parameters_json: json!({
                 "save_outputs": args.save_outputs,
@@ -2058,27 +2125,18 @@ async fn submit_openfold_run(
     Ok(run)
 }
 
-async fn queue_esmfold_run(
-    database: &sea_orm::DatabaseConnection,
-    args: EsmfoldQueueArgs,
-) -> Result<(), DbErr> {
-    let run = submit_esmfold_run(database, args).await?;
-    report_queued("ESMFold", &run);
-    Ok(())
-}
-
+/// ESMFold reads one file and loads its model inside the fold, so a batch has nowhere to go.
 async fn submit_esmfold_run(
     database: &sea_orm::DatabaseConnection,
-    args: EsmfoldQueueArgs,
+    args: &RunArgs,
+    resolved: &[Target],
 ) -> Result<crate::core::entities::runs::Model, DbErr> {
+    let [target] = resolved else {
+        return Err(DbErr::Custom(
+            "ESMFold folds one target at a time; pass a single FASTA.".to_owned(),
+        ));
+    };
     let catalog = local_catalog(database, Backend::Esmfold).await?;
-    let working_dir = &catalog.working_dir;
-    let path = canonicalize_local_path("--fasta", &args.fasta, working_dir)?;
-    // The backend folds one file, while a bundled example names the directory holding it. Falling
-    // back to `path` leaves read_fasta to report a directory with no FASTA in it.
-    let fasta = examples::fasta_file(Path::new(&path))
-        .map_or(path, |file| file.to_string_lossy().into_owned());
-    let example = read_fasta(&fasta)?;
     let model_device = args
         .model_device
         .clone()
@@ -2091,8 +2149,11 @@ async fn submit_esmfold_run(
             execution_target_id: catalog.target_id,
             invocation_profile_id: catalog.profile_id,
             status: "submitted".into(),
-            input_id: args.input_id.unwrap_or(example.id),
-            input_sequence: example.sequence,
+            input_id: args
+                .input_id
+                .clone()
+                .unwrap_or_else(|| target.example.id.clone()),
+            input_sequence: target.example.sequence.clone(),
             model_parameters_json: json!({
                 "model": args.model,
                 "trace_mode": args.trace_mode,
@@ -2103,7 +2164,7 @@ async fn submit_esmfold_run(
             })
             .to_string(),
             execution_parameters_json: json!({
-                "fasta": fasta,
+                "fasta": target.fasta,
                 "model_device": model_device,
             })
             .to_string(),
@@ -2113,23 +2174,6 @@ async fn submit_esmfold_run(
     .await?;
 
     Ok(run)
-}
-
-impl EsmfoldQueueArgs {
-    /// The one-command path's defaults, matching what clap applies to `queue esmfold`.
-    fn for_fasta(fasta: String) -> Self {
-        Self {
-            input_id: None,
-            fasta,
-            model_device: None,
-            model: "facebook/esmfold_v1".to_owned(),
-            trace_mode: "attention+activations".to_owned(),
-            layers: "all".to_owned(),
-            dtype: "float32".to_owned(),
-            save_fp16: false,
-            structure_traces: false,
-        }
-    }
 }
 
 /// The backend a bare `vizfold run` uses: the only one installed, else OpenFold. `--backend` always wins.
@@ -2213,11 +2257,11 @@ fn canonicalize_at(field: &str, original: &str, attempted: &Path) -> Result<Stri
 }
 
 /// The one sequence at a resolved FASTA path, as the source of a run's id and sequence.
-fn read_fasta(path: &str) -> Result<examples::Example, DbErr> {
-    examples::from_path(Path::new(path)).ok_or_else(|| {
+fn read_fasta(path: &Path) -> Result<examples::Example, DbErr> {
+    examples::from_path(path).ok_or_else(|| {
         DbErr::Custom(format!(
-            "no FASTA record at '{path}': expected a .fasta/.fa file, or a directory holding one, \
-             with a '>' header and a sequence"
+            "no FASTA record at '{}': expected a .fasta/.fa file with a '>' header and a sequence",
+            path.display()
         ))
     })
 }
@@ -2391,64 +2435,24 @@ mod tests {
 
     use crate::core::{db, seed};
 
-    /// The defaults, and that `--save-fp16` is a bare presence flag while `--trace-mode` takes a value.
-    #[test]
-    fn parses_queue_esmfold_arguments() {
-        let cli = Cli::try_parse_from([
-            "vizfold",
-            "queue",
-            "esmfold",
-            "--input-id",
-            "6KWC_1",
-            "--fasta",
-            "6KWC.fasta",
-            "--trace-mode",
-            "attention",
-            "--save-fp16",
-        ])
-        .expect("queue esmfold command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Queue(QueueArgs {
-                model: QueueModel::Esmfold(EsmfoldQueueArgs {
-                    trace_mode,
-                    save_fp16: true,
-                    structure_traces: false,
-                    ref model,
-                    ..
-                })
-            }) if trace_mode == "attention" && model == "facebook/esmfold_v1"
-        ));
-    }
-
-    /// The default-true bools take `ArgAction::Set`, so `--flag=false` is a legal spelling.
-    #[test]
-    fn parses_queue_openfold_optional_flags() {
-        let cli = Cli::try_parse_from([
-            "vizfold",
-            "queue",
-            "openfold",
-            "--input-id",
-            "6KWC_1",
-            "--attn=true",
-            "--use-precomputed-alignments=false",
-        ])
-        .expect("queue command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Queue(QueueArgs {
-                model: QueueModel::Openfold(OpenfoldQueueArgs {
-                    attn: true,
-                    use_precomputed_alignments: false,
-                    ..
-                })
-            })
-        ));
+    /// Everything the three old argument surfaces carried now hangs off `run`, and the clap
+    /// defaults it applies are the only defaults there are.
+    fn run_args(argv: &[&str]) -> RunArgs {
+        let full: Vec<&str> = ["vizfold", "run"]
+            .into_iter()
+            .chain(argv.iter().copied())
+            .collect();
+        match Cli::try_parse_from(full)
+            .expect("run argv should parse")
+            .command
+        {
+            Command::Run(args) => args,
+            other => panic!("not a run: {other:?}"),
+        }
     }
 
     #[test]
+
     fn parses_install_part() {
         for (arg, want) in [
             ("base", Part::Base),
@@ -2763,8 +2767,16 @@ mod tests {
             names(&["vizfold", "run", "1UBQ_1"]),
             ["core deps", "repo", "config", "openfold"]
         );
+        // `--no-exec` only writes the row, so it must not gate on an installed environment.
         assert_eq!(
-            names(&["vizfold", "queue", "esmfold", "--fasta", "x.fasta"]),
+            names(&[
+                "vizfold",
+                "run",
+                "x.fasta",
+                "--no-exec",
+                "--backend",
+                "esmfold"
+            ]),
             ["config", "esmfold"]
         );
 
@@ -2999,89 +3011,97 @@ mod tests {
         assert!(!node_is_new_enough("garbage"));
     }
 
-    /// The target is a free string: `run_run` tells a run id from an example id by whether it
-    /// parses as an integer.
+    /// One positional list, both backends' flags on it, and the default-true bools taking
+    /// `--flag=false`. A lone integer is still how `run_run` spots a queued run.
     #[test]
     fn parses_run() {
-        let cli = Cli::try_parse_from(["vizfold", "run", "1"]).expect("run command should parse");
+        let one = run_args(&["1"]);
+        assert_eq!(one.targets, ["1"]);
+        assert!(one.backend.is_none());
+        assert!(!one.no_exec && !one.json);
+        // Unless asked otherwise: attention maps on, raw outputs kept, one recycle saved.
+        assert!(one.attn && one.save_outputs);
+        assert_eq!((one.residue_idx, one.num_recycles_save), (1, 1));
+        // Unset, not false: whether alignments are precomputed depends on what the targets are.
+        assert_eq!(one.use_precomputed_alignments, None);
+        assert_eq!(one.model, "facebook/esmfold_v1");
+        assert_eq!(one.trace_mode, "attention+activations");
+        assert_eq!(one.layers, "all");
 
-        assert!(matches!(
-            cli.command,
-            Command::Run(RunArgs {
-                ref target,
-                backend: None,
-                attn: true,
-                json: false,
-            }) if target == "1"
-        ));
-
-        let cli = Cli::try_parse_from(["vizfold", "run", "6KWC_1", "--attn=false"])
-            .expect("run command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Run(RunArgs {
-                ref target,
-                attn: false,
-                ..
-            }) if target == "6KWC_1"
-        ));
-    }
-
-    /// No flags at all: `defaults_match_for_example` passes `--attn`, so it cannot see these.
-    #[test]
-    fn queue_openfold_defaults_to_attention_and_precomputed_alignments() {
-        let cli = Cli::try_parse_from(["vizfold", "queue", "openfold"])
-            .expect("queue openfold should parse with no flags");
-        let Command::Queue(QueueArgs {
-            model: QueueModel::Openfold(parsed),
-        }) = cli.command
-        else {
-            panic!("expected an openfold queue");
-        };
-
-        assert!(parsed.attn, "attention maps are on unless asked otherwise");
-        assert!(
-            parsed.use_precomputed_alignments,
-            "a full MSA search is opt-in"
-        );
-        assert_eq!(parsed.residue_idx, 1);
-    }
-
-    /// `for_example` hardcodes clap's `queue openfold` defaults; this fails if one drifts.
-    #[test]
-    fn queue_openfold_defaults_match_for_example() {
-        let cli = Cli::try_parse_from([
-            "vizfold",
-            "queue",
-            "openfold",
-            "--input-id",
+        let batch = run_args(&[
             "1UBQ_1",
-            "--attn=true",
-        ])
-        .expect("queue command should parse");
-        let Command::Queue(QueueArgs {
-            model: QueueModel::Openfold(parsed),
-        }) = cli.command
-        else {
-            panic!("expected an openfold queue");
-        };
+            "./some/dir",
+            "--attn=false",
+            "--use-precomputed-alignments=false",
+            "--no-exec",
+            "--trace-mode",
+            "attention",
+            "--save-fp16",
+        ]);
+        assert_eq!(batch.targets, ["1UBQ_1", "./some/dir"]);
+        assert!(!batch.attn && batch.no_exec && batch.save_fp16);
+        assert_eq!(batch.use_precomputed_alignments, Some(false));
+        assert_eq!(batch.trace_mode, "attention");
 
-        let example = examples::Example {
-            id: "1UBQ_1".into(),
-            residues: 8,
-            description: "UBIQUITIN".into(),
-            sequence: "MQIFVKTL".into(),
-        };
-        assert_eq!(OpenfoldQueueArgs::for_example(&example, true), parsed);
+        // The positional is required: a bare `run` is a parse error, not an empty batch.
+        assert!(Cli::try_parse_from(["vizfold", "run"]).is_err());
     }
 
-    #[tokio::test]
-    async fn queue_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
-        let local_path = std::fs::canonicalize(crate::core::config::openfold_home())
-            .expect("OpenFold home should be canonicalizable")
-            .display()
-            .to_string();
+    /// A run id names one queued execution; mixing it with a target would be two different asks.
+    #[test]
+    fn a_run_id_refuses_to_share_the_command_line() {
+        let ids = |argv: &[&str]| super::queued_run_id(&run_args(argv).targets);
+        assert_eq!(ids(&["42"]).expect("a lone id replays"), Some(42));
+        assert_eq!(ids(&["1UBQ_1"]).expect("no id here"), None);
+        assert_eq!(ids(&["1UBQ_1", "6KWC_1"]).expect("no id here"), None);
+        assert!(ids(&["42", "6KWC_1"]).is_err());
+    }
+
+    fn fake_target(id: &str, fasta: &str) -> Target {
+        Target {
+            fasta: PathBuf::from(fasta),
+            example: examples::Example {
+                id: id.to_owned(),
+                residues: 1,
+                description: String::new(),
+                sequence: "M".to_owned(),
+            },
+            bundled: false,
+        }
+    }
+
+    /// A batch of two names itself; a batch of twenty cannot, so it keeps a stable short name. The
+    /// same batch always lands in the same directory, and two batches never share one by tag alone.
+    #[test]
+    fn a_batch_directory_is_named_after_its_tags_and_its_files() {
+        let pair = [
+            fake_target("1UBQ_1", "/a/1UBQ.fasta"),
+            fake_target("6KWC_1", "/a/6KWC.fasta"),
+        ];
+        let name = super::batch_name(&pair);
+        assert!(name.starts_with("1UBQ_1+6KWC_1-"), "{name}");
+        assert_eq!(
+            name,
+            super::batch_name(&pair),
+            "the same batch, the same directory"
+        );
+
+        // Same tags, other files: a recorded batch cannot be relinked by a later submit.
+        let elsewhere = [
+            fake_target("1UBQ_1", "/b/1UBQ.fasta"),
+            fake_target("6KWC_1", "/a/6KWC.fasta"),
+        ];
+        assert_ne!(name, super::batch_name(&elsewhere));
+
+        let many: Vec<Target> = (0..20)
+            .map(|index| fake_target("1UBQ_1", &format!("/a/{index}.fasta")))
+            .collect();
+        let long = super::batch_name(&many);
+        assert!(long.len() < 40, "{long} is too long for a directory name");
+        assert!(long.starts_with("1UBQ_1+19more-"), "{long}");
+    }
+
+    async fn seeded_database() -> Result<sea_orm::DatabaseConnection, DbErr> {
         let database = Database::connect("sqlite::memory:").await?;
         database
             .execute(Statement::from_string(
@@ -3091,30 +3111,43 @@ mod tests {
             .await?;
         db::migrate_database(&database).await?;
         seed::seed_defaults(&database).await?;
+        Ok(database)
+    }
+
+    #[tokio::test]
+    async fn submit_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
+        let local_path = std::fs::canonicalize(crate::core::config::openfold_home())
+            .expect("OpenFold home should be canonicalizable")
+            .display()
+            .to_string();
+        let database = seeded_database().await?;
 
         // A real FASTA, so this pins the id and sequence derivation too.
-        let fasta_dir =
-            std::fs::canonicalize(crate::core::examples::monomer_dir().join("fasta_dir_6KWC"))
-                .expect("the bundled 6KWC example should exist")
-                .display()
-                .to_string();
+        let fasta = std::fs::canonicalize(
+            crate::core::examples::monomer_dir().join("fasta_dir_6KWC/6KWC.fasta"),
+        )
+        .expect("the bundled 6KWC example should exist")
+        .display()
+        .to_string();
 
-        queue_openfold_run(
+        let args = run_args(&[
+            &fasta,
+            "--data-dir",
+            &local_path,
+            "--alignment-dir",
+            &local_path,
+            "--model-device",
+            "cpu",
+            // Over the seeded target's cpus.maximum of 14, so the run must record the clamped value.
+            "--cpus",
+            "18",
+            "--use-precomputed-alignments=true",
+        ]);
+        submit_openfold_run(
             &database,
-            OpenfoldQueueArgs {
-                input_id: None,
-                fasta: Some(fasta_dir.clone()),
-                data_dir: Some(local_path.clone()),
-                alignment_dir: Some(local_path.clone()),
-                model_device: Some("cpu".into()),
-                // Over the seeded target's cpus.maximum of 14, so the run must record the clamped value.
-                cpus: Some(18),
-                residue_idx: 1,
-                attn: true,
-                save_outputs: true,
-                num_recycles_save: 1,
-                use_precomputed_alignments: true,
-            },
+            &args,
+            &super::resolve_targets(&args.targets)?,
+            &super::batch_inputs_dir(),
         )
         .await?;
 
@@ -3138,7 +3171,8 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
                 .expect("execution parameters should be valid JSON"),
-            json!({"fasta_dir": fasta_dir, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
+            // The file itself, not the directory holding it.
+            json!({"fasta_dir": fasta, "data_dir": local_path, "alignment_dir": local_path, "residue_idx": 1, "use_precomputed_alignments": true, "model_device": "cpu", "cpus": 14})
         );
 
         let provenance: serde_json::Value = serde_json::from_str(
@@ -3155,70 +3189,138 @@ mod tests {
         Ok(())
     }
 
-    /// `vizfold run <example> --backend esmfold` hands over the example's directory; the backend's
-    /// `--fasta` and its preflight both take the file, so the run has to record that instead.
-    #[tokio::test]
-    async fn queue_esmfold_run_records_the_fasta_file_behind_an_example_directory()
-    -> Result<(), DbErr> {
-        let database = Database::connect("sqlite::memory:").await?;
-        db::migrate_database(&database).await?;
-        seed::seed_defaults(&database).await?;
+    /// ESMFold's `--fasta` and its preflight both take a file, and a bundled example names the
+    /// directory holding one. Regression: it used to record the directory and could never fold.
+    #[test]
+    fn an_example_resolves_to_its_fasta_file_not_its_directory() {
+        let resolved = super::resolve_targets(&["6KWC_1".to_owned()]).expect("6KWC_1 resolves");
+        let [target] = resolved.as_slice() else {
+            panic!("one target, got {}", resolved.len());
+        };
+        assert!(
+            std::path::Path::new(&target.fasta).is_file(),
+            "resolved '{}' should be the file, not the directory",
+            target.fasta.display()
+        );
+    }
 
-        let fasta_dir = crate::core::examples::monomer_dir().join("fasta_dir_6KWC");
-        queue_esmfold_run(
-            &database,
-            EsmfoldQueueArgs::for_fasta(fasta_dir.display().to_string()),
-        )
-        .await?;
+    /// Two targets, one execution: one row naming both, and one directory OpenFold can be pointed at.
+    #[tokio::test]
+    async fn two_targets_submit_one_run_over_a_staged_directory() -> Result<(), DbErr> {
+        let database = seeded_database().await?;
+        let home = config::openfold_home().display().to_string();
+        let args = run_args(&["1UBQ_1", "6KWC_1", "--data-dir", &home]);
+        let resolved = super::resolve_targets(&args.targets)?;
+
+        assert!(
+            resolved.iter().all(|target| target.bundled),
+            "bundled examples default to their precomputed alignments"
+        );
+        // Not the real prefix: a submit host may have it read-only, and this test writes there.
+        let inputs = std::env::temp_dir().join(format!("vizfold-batch-{}", std::process::id()));
+
+        submit_openfold_run(&database, &args, &resolved, &inputs).await?;
 
         let runs = runs::list_runs(&database).await?;
-        let recorded =
-            serde_json::from_str::<serde_json::Value>(&runs[0].execution_parameters_json)
-                .expect("execution parameters should be valid JSON")["fasta"]
-                .as_str()
-                .expect("fasta should be recorded")
-                .to_owned();
+        assert_eq!(runs.len(), 1, "one row per invocation");
+        assert_eq!(runs[0].input_id, "1UBQ_1+6KWC_1");
+        let execution: serde_json::Value =
+            serde_json::from_str(&runs[0].execution_parameters_json).expect("valid JSON");
+        assert_eq!(execution["use_precomputed_alignments"], json!(true));
+
+        let staged = PathBuf::from(execution["fasta_dir"].as_str().expect("a fasta_dir"));
+        assert_eq!(staged.parent(), Some(inputs.as_path()));
         assert!(
-            Path::new(&recorded).is_file(),
-            "recorded fasta '{recorded}' should be the file, not the directory"
+            staged
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("1UBQ_1+6KWC_1-")),
+            "{}",
+            staged.display()
         );
+        let mut staged_names: Vec<String> = std::fs::read_dir(&staged)
+            .expect("the batch should be staged")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        staged_names.sort();
+        assert_eq!(staged_names, ["1UBQ_1.fasta", "6KWC_1.fasta"]);
+        // Links, not copies, so the batch directory costs nothing and cannot drift from its source.
+        assert!(staged.join("1UBQ_1.fasta").is_file());
+        std::fs::remove_dir_all(&inputs).ok();
         Ok(())
     }
 
+    /// ESMFold loads its model inside the fold and reads one file, so a batch has nowhere to go.
     #[tokio::test]
-    async fn queue_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
-        let database = Database::connect("sqlite::memory:").await?;
-        database
-            .execute(Statement::from_string(
-                database.get_database_backend(),
-                "PRAGMA foreign_keys = ON".to_owned(),
-            ))
-            .await?;
-        db::migrate_database(&database).await?;
-        seed::seed_defaults(&database).await?;
-        let missing_path = "definitely-missing-vizfold-local-path";
+    async fn esmfold_refuses_more_than_one_target() -> Result<(), DbErr> {
+        let database = seeded_database().await?;
+        let args = run_args(&["1UBQ_1", "6KWC_1", "--backend", "esmfold"]);
+        let resolved = super::resolve_targets(&args.targets)?;
 
-        let error = queue_openfold_run(
+        let error = submit_esmfold_run(&database, &args, &resolved)
+            .await
+            .expect_err("a batch should be refused");
+
+        assert!(error.to_string().contains("one target at a time"));
+        Ok(())
+    }
+
+    /// A directory target folds everything in it, and a repeat is refused rather than overwritten.
+    #[test]
+    fn a_directory_target_resolves_to_every_fasta_in_it() {
+        let dir = crate::core::examples::monomer_dir().join("fasta_dir_6KWC");
+        let resolved = super::resolve_targets(&[dir.display().to_string()]).expect("6KWC exists");
+        assert_eq!(super::tags(&resolved), ["6KWC_1"]);
+        assert!(
+            !resolved[0].bundled,
+            "a path is the user's own, so it borrows no alignments"
+        );
+
+        let twice = super::resolve_targets(&["6KWC_1".into(), dir.display().to_string()]);
+        assert!(
+            twice.is_err_and(|error| error.to_string().contains("folded twice")),
+            "one tag cannot appear twice in a batch"
+        );
+    }
+
+    /// A tag names a staged directory and a link, so a path inside a FASTA header must not reach
+    /// the filesystem. It is also the only shape preflight accepts.
+    #[test]
+    fn a_header_that_is_not_a_tag_is_refused() {
+        let dir = std::env::temp_dir().join(format!("vizfold-tag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("fixture");
+        let fasta = dir.join("evil.fasta");
+        std::fs::write(&fasta, ">../../../etc/passwd\nMQIFVKTL\n").expect("fixture");
+
+        let error = super::resolve_targets(&[fasta.display().to_string()])
+            .expect_err("a traversal tag should be refused");
+
+        assert!(
+            error
+                .to_string()
+                .contains("letters, digits and underscores"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn submit_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
+        let database = seeded_database().await?;
+        let missing_path = "definitely-missing-vizfold-local-path";
+        let args = run_args(&["6KWC_1", "--data-dir", missing_path]);
+
+        let error = submit_openfold_run(
             &database,
-            OpenfoldQueueArgs {
-                input_id: Some("6KWC_1".into()),
-                fasta: Some(missing_path.into()),
-                data_dir: Some(".".into()),
-                alignment_dir: None,
-                model_device: Some("cpu".into()),
-                cpus: Some(1),
-                residue_idx: 1,
-                attn: false,
-                save_outputs: true,
-                num_recycles_save: 1,
-                use_precomputed_alignments: false,
-            },
+            &args,
+            &super::resolve_targets(&args.targets)?,
+            &super::batch_inputs_dir(),
         )
         .await
         .expect_err("missing local path should fail");
 
         assert!(error.to_string().contains(
-            "--fasta original path 'definitely-missing-vizfold-local-path' could not be resolved"
+            "--data-dir original path 'definitely-missing-vizfold-local-path' could not be resolved"
         ));
         assert!(
             error
@@ -3226,6 +3328,17 @@ mod tests {
                 .contains(&crate::core::config::openfold_home().display().to_string())
         );
         Ok(())
+    }
+
+    /// A target that is neither a run id, a bundled example, nor a path names what is on offer.
+    #[test]
+    fn an_unknown_target_is_refused_before_anything_is_submitted() {
+        assert!(super::resolve_targets(&["not-a-thing".into()]).is_err());
+        assert!(
+            super::resolve_targets(&["./typo.fasta".into()])
+                .is_err_and(|error| error.to_string().contains("no FASTA record at")),
+            "a path-shaped target is reported as a path"
+        );
     }
 
     #[test]
