@@ -88,7 +88,7 @@ main() {
     bootstrap::micromamba
     bootstrap::path
     bootstrap::completions
-    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install src\` for the checkout, then \`vizfold install openfold\` (or \`esmfold\`)."
+    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install repo\` for the checkout, then \`vizfold install openfold\` (or \`esmfold\`)."
 }
 
 # Not the backend installers' `BASH_SOURCE = $0` guard: under `curl | bash` there is no BASH_SOURCE at

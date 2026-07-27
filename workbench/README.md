@@ -1,7 +1,7 @@
 # VizFold Workbench
 
 Next.js dashboard for the vizfold executor. Reads the executor's SQLite read-only via `node:sqlite`
-and shells out to the `vizfold` binary (`list proteins`, `run <id> --no-exec`, `run <id>`).
+and shells out to the `vizfold` binary (`list proteins`, `run <proteins…> --no-exec`, `run <id>`).
 
 ## Running it
 

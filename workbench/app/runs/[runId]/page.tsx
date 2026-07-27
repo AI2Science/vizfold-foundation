@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import path from "node:path";
 import { readdirSync } from "node:fs";
 import { getRun, listArtifacts, type ArtifactRow } from "@/lib/db";
+import { RUNS_DIR } from "@/lib/vizfold";
 import StructureViewer from "@/app/StructureViewer";
 import Poller from "@/app/Poller";
 
@@ -57,8 +58,26 @@ export default async function RunPage({
   if (!run) notFound();
 
   const artifacts = listArtifacts(id);
-  const own = runRoot(artifacts, id);
-  const runsRoot = own ? path.dirname(own) : null;
+  // Artifacts register only once the run lands, so fall back to where the executor is writing —
+  // structures show up per protein while the fold is still going.
+  const own = runRoot(artifacts, id) ?? path.join(RUNS_DIR, String(id));
+  const runsRoot = path.dirname(own);
+  const structures = browse(own, runsRoot).filter((file) => file.isStructure);
+
+  // A batch writes one structure per FASTA tag, and the run records those tags joined with `+`.
+  // The tag ends at `_model_`: a bare prefix test would give 1G1J_1 every 1G1J_10 file too.
+  const tagOf = (name: string) => name.split("_model_")[0];
+
+  const tags = run.input_id.split("+");
+  const folds = tags.map((tag) => {
+    // A lone target owns every file: ESMFold writes `structure/predicted.pdb`, without the tag.
+    const landed =
+      tags.length === 1
+        ? structures
+        : structures.filter((file) => tagOf(path.basename(file.name)) === tag);
+    // The relaxed structure is the one to look at; the rest stay linked under Artifacts.
+    return { tag, file: landed.find((file) => !file.name.includes("unrelaxed")) ?? landed[0] };
+  });
 
   return (
     <main className="page-shell">
@@ -69,7 +88,7 @@ export default async function RunPage({
             <Link href="/">← All runs</Link>
           </p>
           <h1 className="brand-title">Run {run.id}</h1>
-          <p className="subtitle">{run.input_id}</p>
+          <p className="subtitle">{tags.join(", ")}</p>
         </div>
       </section>
 
@@ -92,6 +111,31 @@ export default async function RunPage({
 
       <section className="panel">
         <div className="panel-header">
+          <h2>Structures</h2>
+          <p>
+            {folds.filter((fold) => fold.file).length} of {tags.length} landed.
+          </p>
+        </div>
+
+        {folds.map((fold) => (
+          <div key={fold.tag} className="artifact-block">
+            <h3>
+              {fold.tag}{" "}
+              <span className="field-note">
+                {fold.file
+                  ? fold.file.name
+                  : run.status === "failed"
+                    ? "no structure written"
+                    : "folding…"}
+              </span>
+            </h3>
+            {fold.file ? <StructureViewer url={fold.file.url} name={fold.file.name} /> : null}
+          </div>
+        ))}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
           <h2>Artifacts</h2>
           <p>
             {artifacts.length} registered.
@@ -101,13 +145,13 @@ export default async function RunPage({
         {artifacts.length === 0 ? (
           <div className="empty-state">
             <p>No artifacts registered for this run.</p>
+            <p>They register when the run lands.</p>
           </div>
         ) : (
           artifacts.map((artifact) => {
             // A file artifact is just a one-entry listing, so both kinds render the same way.
-            const files = !runsRoot
-              ? []
-              : artifact.format === "directory"
+            const files =
+              artifact.format === "directory"
                 ? browse(artifact.storage_uri, runsRoot)
                 : [entry(artifact.storage_uri, runsRoot)];
             return (
@@ -132,9 +176,6 @@ export default async function RunPage({
                           ) : null}
                           {file.name}
                         </a>
-                        {file.isStructure ? (
-                          <StructureViewer url={file.url} name={file.name} />
-                        ) : null}
                       </li>
                     ))}
                   </ul>

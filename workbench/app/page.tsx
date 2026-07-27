@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listRuns } from "@/lib/db";
-import { FOLDABLE, listExamples } from "@/lib/vizfold";
+import { FOLDABLE, listProteins } from "@/lib/vizfold";
 import FoldCard from "@/app/FoldCard";
 import Poller from "@/app/Poller";
 
@@ -11,7 +11,11 @@ export default async function HomePage() {
   const runs = listRuns();
   // Past runs stay browsable when the CLI is unreachable: an empty picker explains itself, a 500
   // does not.
-  const examples = await listExamples().catch(() => []);
+  const proteins = await listProteins().catch(() => []);
+  // A batch run records its tags joined with `+`, so one row can carry several proteins.
+  const folded = new Set(
+    runs.filter((run) => run.status === "completed").flatMap((run) => run.input_id.split("+")),
+  );
 
   return (
     <main className="page-shell">
@@ -24,9 +28,23 @@ export default async function HomePage() {
             attention behind it.
           </p>
         </div>
+        <dl className="hero-stats">
+          <div>
+            <dt>Serving</dt>
+            <dd>{FOLDABLE.join(", ") || "no backend"}</dd>
+          </div>
+          <div>
+            <dt>Folded</dt>
+            <dd>{folded.size}</dd>
+          </div>
+          <div>
+            <dt>Available to fold</dt>
+            <dd>{proteins.length}</dd>
+          </div>
+        </dl>
       </section>
 
-      <FoldCard examples={examples} backends={FOLDABLE} />
+      <FoldCard proteins={proteins} backends={FOLDABLE} />
 
       <section className="panel">
         <div className="panel-header">
@@ -39,14 +57,14 @@ export default async function HomePage() {
         {runs.length === 0 ? (
           <div className="empty-state">
             <p>No runs yet.</p>
-            <p>Pick a protein above and hit Fold.</p>
+            <p>Pick one or more proteins above and hit Fold.</p>
           </div>
         ) : (
           <table className="runs-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Input</th>
+                <th>Proteins</th>
                 <th>Model</th>
                 <th>Target</th>
                 <th>Status</th>
@@ -60,7 +78,7 @@ export default async function HomePage() {
                     <Link href={`/runs/${run.id}`}>{run.id}</Link>
                   </td>
                   <td>
-                    <Link href={`/runs/${run.id}`}>{run.input_id}</Link>
+                    <Link href={`/runs/${run.id}`}>{run.input_id.split("+").join(", ")}</Link>
                   </td>
                   <td>{run.model_slug}</td>
                   <td>{run.target_slug}</td>
