@@ -3189,6 +3189,21 @@ mod tests {
         Ok(())
     }
 
+    /// ESMFold's `--fasta` and its preflight both take a file, and a bundled example names the
+    /// directory holding one. Regression: it used to record the directory and could never fold.
+    #[test]
+    fn an_example_resolves_to_its_fasta_file_not_its_directory() {
+        let resolved = super::resolve_targets(&["6KWC_1".to_owned()]).expect("6KWC_1 resolves");
+        let [target] = resolved.as_slice() else {
+            panic!("one target, got {}", resolved.len());
+        };
+        assert!(
+            std::path::Path::new(&target.fasta).is_file(),
+            "resolved '{}' should be the file, not the directory",
+            target.fasta.display()
+        );
+    }
+
     /// Two targets, one execution: one row naming both, and one directory OpenFold can be pointed at.
     #[tokio::test]
     async fn two_targets_submit_one_run_over_a_staged_directory() -> Result<(), DbErr> {
