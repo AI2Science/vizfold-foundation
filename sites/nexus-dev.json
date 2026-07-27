@@ -1,5 +1,5 @@
 {
-  "OPENFOLD_AF2_ROOT": "/media/volume/data/alphafold2/database",
+  "OPENFOLD_AF2_ROOT": "/projects/alphafold2/database",
   "OPENFOLD_BUILD_TIME": "01:00:00",
   "OPENFOLD_EXAMPLE": "1UBQ_1",
   "OPENFOLD_GPU_PARTITION": "gpu",
