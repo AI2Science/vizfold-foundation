@@ -15,10 +15,17 @@ vizfold install esmfold
 vizfold status          # resolved config + which backends are installed
 ```
 
-For a specific torch build, point the installer at a wheel index:
+**torch is matched to the GPU driver.** PyPI's default wheel is built against the newest CUDA, which
+a cluster's older driver refuses outright — the fold reaches a GPU node and dies with "the NVIDIA
+driver on your system is too old". So the installer reads the driver's CUDA version and takes the
+newest `download.pytorch.org` wheel index that driver accepts (a 12.8 driver gets `cu128`), printing
+both. A torch already installed from a newer CUDA is replaced rather than kept.
+
+Override it with a wheel index of your own, or set it empty to take whatever PyPI serves:
 
 ```bash
-ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu128 vizfold install esmfold
+ESMFOLD_PIP_INDEX_URL=https://download.pytorch.org/whl/cu126 vizfold install esmfold
+ESMFOLD_PIP_INDEX_URL= vizfold install esmfold
 ```
 
 `ESMFOLD_TORCH_SPEC` pins the spec itself (default `torch`), e.g. `torch==2.5.1`. Neither is saved to
