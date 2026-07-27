@@ -1,5 +1,5 @@
 #!/bin/bash
-# interactive.sh -- library. interactive::resolve echoes a value (the site default, or a /dev/tty answer), so callers always proceed.
+# interactive::resolve always echoes a value -- the site default, or a /dev/tty answer -- so callers always proceed.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "interactive.sh is a library" >&2; exit 1; }
 [ -n "${INTERACTIVE_SH:-}" ] && return 0

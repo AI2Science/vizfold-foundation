@@ -4,13 +4,13 @@ import { FOLDABLE, listExamples } from "@/lib/vizfold";
 import FoldCard from "@/app/FoldCard";
 import Poller from "@/app/Poller";
 
-// Read the executor db per request; never prerender a stale run list at build time.
+// Read the executor db per request; never prerender a stale run list.
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const runs = listRuns();
-  // The dashboard is still useful for browsing past runs when the CLI is unreachable, so a failed
-  // lookup degrades to an empty picker (which explains itself) rather than a 500.
+  // Past runs stay browsable when the CLI is unreachable: an empty picker explains itself, a 500
+  // does not.
   const examples = await listExamples().catch(() => []);
 
   return (

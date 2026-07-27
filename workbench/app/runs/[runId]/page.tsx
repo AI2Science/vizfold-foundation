@@ -14,8 +14,8 @@ const IS_STRUCTURE = /\.(pdb|cif|ent)$/i;
 
 type FileEntry = { name: string; url: string; isImage: boolean; isStructure: boolean };
 
-// The run's own directory, <prefix>/runs/<id>. Its parent is the public/runs symlink target, so
-// a file's browser URL is `/runs/` + its path relative to that parent.
+// <prefix>/runs/<id>. Its parent is the public/runs symlink target, so a file's browser URL is
+// `/runs/` + its path relative to that parent.
 function runRoot(artifacts: ArtifactRow[], id: number): string | null {
   const own = artifacts.find((a) => a.type_slug === "run_output_directory");
   if (own) return own.storage_uri;

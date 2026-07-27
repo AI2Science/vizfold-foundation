@@ -70,7 +70,7 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
     };
 
     let fasta_dir = Path::new(&fasta_dir);
-    // A file or a directory: the script takes either, and a one-target run passes the file itself.
+    // A one-target run passes the FASTA file itself, so a file counts as much as a directory.
     let fasta_files = if fasta_dir.is_file() {
         vec![fasta_dir.to_path_buf()]
     } else if fasta_dir.is_dir() {
@@ -99,7 +99,7 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
 
     let mut found: BTreeSet<String> = BTreeSet::new();
     for fasta_path in &fasta_files {
-        // Monomer mode SKIPS a multi-record file with only a print, so the target would vanish.
+        // Monomer mode skips a multi-record file with only a print, so the target would vanish.
         match parse_single_fasta_tag(fasta_path) {
             Ok(tag) => {
                 found.insert(tag);
@@ -135,7 +135,7 @@ fn fasta_input_check(parameters: &Value, input_id: &str) -> PreflightCheck {
         );
     }
 
-    // The batch is exactly what input_id names: `+`-joined tags, one target or many.
+    // input_id names the whole batch: `+`-joined tags.
     let expected: BTreeSet<&str> = input_id.split('+').collect();
     let found: BTreeSet<&str> = found.iter().map(String::as_str).collect();
     if found != expected {
@@ -223,7 +223,7 @@ fn precomputed_alignment_key_check(parameters: &Value, input_id: &str) -> Prefli
         );
     }
 
-    // One key per tag in the batch, so a target with no alignments fails before the GPU is touched.
+    // One key per tag, so a target with no alignments fails before the GPU is touched.
     let missing: Vec<String> = input_id
         .split('+')
         .map(|tag| alignment_dir.join(tag))
@@ -638,7 +638,6 @@ mod tests {
 
     #[test]
     fn available_resources_flags_come_from_execution_parameters() {
-        // (execution_parameters field, override value, model_parameters, expected flag, expected value)
         let cases = [
             (
                 "model_device",
@@ -718,8 +717,6 @@ mod tests {
         assert!(error.to_string().contains("cpus must be an integer"));
     }
 
-    /// A configured data_dir may carry a trailing separator; the joined database path must not
-    /// double it.
     #[test]
     fn a_trailing_separator_on_data_dir_does_not_double_up() {
         let mut execution = execution_parameters();
@@ -740,7 +737,6 @@ mod tests {
         );
     }
 
-    /// `residue_idx` reaches the script under a different name than the parameter carries.
     #[test]
     fn residue_idx_is_emitted_as_triangle_residue_idx() {
         let mut execution = execution_parameters();
@@ -1006,7 +1002,6 @@ mod tests {
         assert!(check_message(&report, "fasta_dir").contains("contains no .fasta or .fa files"));
     }
 
-    /// A batch: several FASTAs in one directory, named by the `+`-joined input_id.
     #[test]
     fn preflight_passes_when_every_fasta_in_the_directory_is_named_by_input_id() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
@@ -1024,7 +1019,6 @@ mod tests {
 
         assert_eq!(check_status(&report, "fasta_dir"), PreflightStatus::Passed);
 
-        // A tag the batch does not hold is named, rather than folding a smaller batch than asked for.
         let report = preflight_openfold(
             &layout.command(),
             &preflight_run_with_input_id("1UBQ_1+2OMF_1+6KWC_1", layout.execution_parameters()),
@@ -1035,8 +1029,7 @@ mod tests {
         assert!(check_message(&report, "fasta_dir").contains("missing: '6KWC_1'"));
     }
 
-    /// Monomer mode skips a multi-record file wherever it sits, so every file is checked, not the
-    /// first: the batch would otherwise fold one target short with only a print to say so.
+    /// Every file is checked, not just the first, or the batch folds one target short.
     #[test]
     fn preflight_fails_when_a_later_fasta_holds_multiple_records() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
@@ -1076,7 +1069,6 @@ mod tests {
         assert!(check_message(&report, "fasta_dir").contains("distinct tags"));
     }
 
-    /// One target passes its FASTA straight through, so preflight must take a file as well.
     #[test]
     fn preflight_passes_when_fasta_dir_is_a_single_file() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
@@ -1140,8 +1132,7 @@ mod tests {
         assert_eq!(check_status(&report, "data_dir"), PreflightStatus::Failed);
     }
 
-    /// The output directory comes from the profile, so a stale `output_dir` execution parameter
-    /// pointing at a path that does not exist must not be what preflight checks.
+    /// The profile decides the output directory, so a stale execution parameter is not what is checked.
     #[test]
     fn preflight_ignores_an_output_dir_in_execution_parameters() {
         let layout = TestLayout::new("1UBQ_1|Chain A");
@@ -1178,8 +1169,7 @@ mod tests {
         );
     }
 
-    /// An unresolvable output location aborts preflight outright rather than landing as a failed
-    /// check among the others.
+    /// An unresolvable output location aborts preflight rather than landing as one failed check.
     #[test]
     fn preflight_returns_clear_error_for_missing_output_location() {
         let layout = TestLayout::new("1UBQ_1|Chain A");

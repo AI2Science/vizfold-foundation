@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// The install-time config `config::save` writes: one flat JSON map, the source of every resolved path.
+/// The flat JSON map `config::save` writes at install time: source of every resolved path.
 pub fn config_file() -> PathBuf {
     if let Ok(explicit) = std::env::var("VIZFOLD_CONFIG")
         && !explicit.is_empty()
@@ -20,7 +20,7 @@ pub fn is_initialized() -> bool {
     config_file().is_file()
 }
 
-/// Mirrors `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`; `tests/vocabulary.sh` fails if the two differ.
+/// Mirrors `VIZFOLD_CONFIG_KEYS` in `lib/config.sh`; `tests/vocabulary.sh` fails on drift.
 pub const CONFIG_KEYS: &[&str] = &[
     "ESMFOLD_ENV_PREFIX",
     "OPENFOLD_ACCOUNT",
@@ -62,7 +62,7 @@ fn vizfold_config() -> &'static Map<String, Value> {
     })
 }
 
-/// Empty is unset: the key set is fixed, so an unsettled name is present-but-empty and must fall through.
+/// Empty is unset: the key set is fixed, so an unsettled name is present-but-empty.
 fn non_empty(value: Option<&str>) -> Option<String> {
     value.filter(|v| !v.is_empty()).map(str::to_owned)
 }
@@ -105,7 +105,7 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| default_data_dir(&prefix()))
 }
 
-/// The install's own default for it, kept separate so the literal can be pinned.
+/// The install's own default, split out so a test can pin the literal.
 fn default_data_dir(prefix: &Path) -> PathBuf {
     prefix.join("openfold/data")
 }
@@ -117,26 +117,26 @@ pub fn env_base() -> PathBuf {
         .unwrap_or_else(|| prefix().join("envs"))
 }
 
-/// `<env base>/vizfold-<backend>`: a fixed name per backend, so nothing has to be told where one is.
+/// `<env base>/vizfold-<backend>`: fixed per backend, so nothing has to be told where one is.
 pub fn env_dir(name: &str) -> PathBuf {
     env_base().join(format!("vizfold-{name}"))
 }
 
-/// OpenFold's env. The install records it; the fallback covers a config where only ESMFold was installed.
+/// The install records the prefix; the fallback covers a config where only ESMFold was installed.
 pub fn openfold_env_prefix() -> PathBuf {
     resolved("OPENFOLD_ENV_PREFIX")
         .map(PathBuf::from)
         .unwrap_or_else(|| env_dir("openfold"))
 }
 
-/// Environment prefix for the ESMFold backend, same story as `openfold_env_prefix`.
+/// Same story as `openfold_env_prefix`.
 pub fn esmfold_env_prefix() -> PathBuf {
     resolved("ESMFOLD_ENV_PREFIX")
         .map(PathBuf::from)
         .unwrap_or_else(|| env_dir("esmfold"))
 }
 
-/// The install-resolved config map as sorted (key, value) string pairs, for `vizfold status`.
+/// Sorted (key, value) pairs, for `vizfold status`.
 pub fn config_entries() -> Vec<(String, String)> {
     let mut entries: Vec<(String, String)> = vizfold_config()
         .iter()
@@ -146,14 +146,14 @@ pub fn config_entries() -> Vec<(String, String)> {
     entries
 }
 
-/// Mirrors `vizfold::prefix`, fallback included -- otherwise `status` describes a directory no install uses.
+/// Mirrors `vizfold::prefix`, fallback included, or `status` names a directory no install uses.
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
         .unwrap_or_else(|| default_prefix(&home_dir()))
 }
 
-/// `vizfold::prefix`'s own default, kept separate so the literal can be pinned.
+/// `vizfold::prefix`'s own default, split out so a test can pin the literal.
 fn default_prefix(home: &str) -> PathBuf {
     PathBuf::from(format!("{home}/openfold"))
 }
@@ -177,7 +177,6 @@ impl SlurmContext {
     }
 }
 
-/// Empty string counts as absent, same as an unset env var.
 fn or_default<'a>(value: Option<&'a str>, default: &'a str) -> &'a str {
     value.filter(|v| !v.is_empty()).unwrap_or(default)
 }
@@ -207,7 +206,7 @@ pub fn gpu_launch(
     args.push("-p".to_owned());
     args.push(partition.to_owned());
     args.push(format!("--gres={}", or_default(gres, "gpu:1")));
-    // Several space-separated flags in one value: setup::fold_vars relies on word splitting too.
+    // One value, several flags: setup::fold_vars word-splits it too.
     args.extend(
         or_default(resources, "--cpus-per-task=8 --mem=32G")
             .split_whitespace()
@@ -229,7 +228,7 @@ pub fn gpu_launch_args() -> Vec<String> {
     )
 }
 
-/// The GPU partition `gpu_launch_args` would srun onto, resolved the same env-var-or-config way.
+/// The partition `gpu_launch_args` would srun onto.
 pub fn gpu_partition() -> Option<String> {
     resolved("OPENFOLD_GPU_PARTITION")
 }
@@ -246,8 +245,7 @@ pub fn database_url() -> String {
     )
 }
 
-/// VIZFOLD_DB > OPENFOLD_PREFIX > XDG data home; a `sqlite:` value passes through, a bare path gets
-/// `?mode=rwc`. Callers resolve, as `gpu_launch` does.
+/// VIZFOLD_DB > OPENFOLD_PREFIX > XDG data home; `sqlite:` passes through, a bare path gets `?mode=rwc`.
 fn database_url_from(db: Option<String>, prefix: Option<String>, data_home: &str) -> String {
     if let Some(db) = db {
         return if db.starts_with("sqlite:") {
@@ -269,7 +267,7 @@ pub fn database_path() -> Option<PathBuf> {
     (!path.is_empty() && path != ":memory:").then(|| PathBuf::from(path))
 }
 
-/// The dev checkout, one level up from this crate. Baked in at build time, so use it only if it exists.
+/// The dev checkout one level up. Baked in at build time, so use it only if it exists.
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -292,7 +290,6 @@ mod tests {
         );
     }
 
-    /// The fixed key set writes "" for what the install did not settle; that must read as missing.
     #[test]
     fn an_empty_config_value_reads_as_unset() {
         assert_eq!(non_empty(Some("")), None);
@@ -308,8 +305,8 @@ mod tests {
         assert_eq!(env_base().file_name().unwrap(), "envs");
     }
 
-    /// Mirrors `setup::config`'s `DATA=${OPENFOLD_DATA_DIR:-$STATE/data}`. It moved once already, and
-    /// drift makes `status` and `uninstall` name a directory no install uses.
+    /// Mirrors `setup::config`'s `DATA=${OPENFOLD_DATA_DIR:-$STATE/data}`; it moved once, and drift
+    /// makes `status` and `uninstall` name a directory no install uses.
     #[test]
     fn the_data_dir_default_sits_under_the_backend_state_dir() {
         assert_eq!(
@@ -322,8 +319,7 @@ mod tests {
         );
     }
 
-    /// The three sources in order. A configured database being ignored does not fail loudly -- it
-    /// silently opens a different file, and the run history looks gone.
+    /// Getting the order wrong fails silently: a different file opens, and the run history looks gone.
     #[test]
     #[rustfmt::skip]
     fn the_database_url_prefers_vizfold_db_then_the_prefix() {
@@ -337,7 +333,6 @@ mod tests {
         assert_eq!(url(None, None), "sqlite:///xdg/vizfold/vizfold.db?mode=rwc");
     }
 
-    // (name, context, partition, account, gres, resources, time, expected args)
     #[test]
     #[rustfmt::skip]
     fn gpu_launch_cases() {

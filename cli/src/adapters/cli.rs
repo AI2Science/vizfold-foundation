@@ -37,7 +37,7 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-// `run` carries every fold flag, so its variant dwarfs the rest. One is parsed, once, per process.
+// `run` carries every fold flag; one enum is parsed, once, per process.
 #[allow(clippy::large_enum_variant)]
 enum Command {
     /// Install the checkout everything runs from (`base`), or a model backend from it.
@@ -131,7 +131,6 @@ struct DownloadArgs {
     dataset: String,
 }
 
-/// A model backend vizfold supports.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum Backend {
     Openfold,
@@ -146,8 +145,7 @@ impl Backend {
         }
     }
 
-    /// Installer script, relative to the vizfold checkout: each backend owns one under
-    /// `backends/<name>/install/`.
+    /// Installer script, relative to the checkout: each backend owns one under `backends/<name>/install/`.
     fn installer(self) -> &'static str {
         match self {
             Self::Openfold => config::INSTALLER,
@@ -155,8 +153,7 @@ impl Backend {
         }
     }
 
-    /// Data-download entrypoint, relative to the checkout. `None` for ESMFold: it pulls its
-    /// weights from HuggingFace at run time.
+    /// Downloader dir, relative to the checkout. `None` for ESMFold: it fetches weights at run time.
     fn downloader_dir(self) -> Option<&'static str> {
         match self {
             Self::Openfold => Some("downloaders/openfold"),
@@ -182,7 +179,6 @@ impl Backend {
         }
     }
 
-    /// This backend's subtree of the checkout: its project, its installer, its build droppings.
     fn dir(self, home: &Path) -> PathBuf {
         home.join("backends").join(self.slug())
     }
@@ -264,8 +260,7 @@ struct ServeArgs {
 }
 
 impl ServeArgs {
-    /// What the dashboard is handed, comma-joined: the backends named, in the order given, else
-    /// every one installed -- never a Fold option that cannot run.
+    /// For the dashboard: the named backends in order, else all installed -- never one that cannot run.
     fn backends_env(&self) -> String {
         let served: Vec<Backend> = if self.backends.is_empty() {
             Backend::value_variants()
@@ -434,12 +429,10 @@ fn clamp_cpus(cpus: i64, available_resources_json: &str) -> i64 {
     cpus.min(max_cpus)
 }
 
-/// What each command needs sound before it starts, in `health`'s vocabulary -- the one place a
-/// prerequisite is refused, so no command grows its own check. `Status` names none: it reports.
+/// The one place a prerequisite is refused, so no command grows its own check.
 fn prereqs(command: &Command) -> Vec<Component> {
-    // `run <id>` replays the run's own backend, which this gate cannot read without the DB; it
-    // checks the default instead, so uninstalling a backend out from under a queued run still
-    // reaches the runner -- which then names the missing interpreter by path.
+    // `run <id>` cannot read the run's own backend without the DB, so it gates on the default:
+    // uninstalling a backend under a queued run still reaches the runner, which names what is missing.
     let backend = |explicit: Option<Backend>| {
         backend_health(
             explicit
@@ -500,7 +493,6 @@ pub async fn run() -> Result<(), DbErr> {
         }
     }
 
-    // These touch the filesystem only; they need no database connection.
     match cli.command {
         Command::Install(args) => return run_install(args.part),
         Command::Download(args) => return run_download(args.backend, args.dataset),
@@ -579,7 +571,6 @@ fn install_backend(backend: Backend) -> Result<(), DbErr> {
     )
 }
 
-/// Run a child to completion with inherited stdio, naming it in either failure.
 fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<(), DbErr> {
     let status = command
         .status()
@@ -591,7 +582,6 @@ fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<
         .ok_or_else(|| DbErr::Custom(format!("{what}: {status}")))
 }
 
-/// Download a backend's data into `config::data_dir()`.
 fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     let Some(dir) = backend.downloader_dir() else {
         println!(
@@ -685,7 +675,7 @@ fn run_status() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// One independently breakable part. `health` derives `Broken` from the problem list, so no builder tracks both.
+/// One independently breakable part.
 #[derive(Default)]
 struct Component {
     name: &'static str,
@@ -759,8 +749,7 @@ fn on_path(program: &str) -> Option<PathBuf> {
         .find(|path| executable(path))
 }
 
-/// What `install.sh` puts beside the vizfold binary. Every environment is created and run through it.
-/// The one binary `install.sh` bootstraps and everything downstream resolves off PATH.
+/// The one binary `install.sh` bootstraps; every environment is created and run through it.
 const CORE_DEP: &str = "micromamba";
 
 fn core_deps_health() -> Component {
@@ -838,7 +827,7 @@ const CHECKED_PATHS: &[(&str, &str)] = &[
 /// The same, but only while OpenFold is installed: its own uninstall must not read as a broken config.
 const OPENFOLD_PATHS: &[(&str, &str)] = &[("OPENFOLD_DATA_DIR", "")];
 
-/// Config keys only the scheduler can settle, grouped by the one question that answers them.
+/// Config keys only the scheduler can settle, grouped by the question that answers them.
 const CHECKED_PARTITIONS: &[&str] = &["OPENFOLD_PARTITION", "OPENFOLD_GPU_PARTITION"];
 const CHECKED_ACCOUNTS: &[&str] = &["OPENFOLD_ACCOUNT", "OPENFOLD_GPU_ACCOUNT"];
 
@@ -920,7 +909,6 @@ fn path_problem(key: &str, marker: &str) -> Option<String> {
     })
 }
 
-/// A backend's own installation: its environment runs, and its fold inputs are where they belong.
 fn backend_health(backend: Backend) -> Component {
     let env = backend.env_prefix();
     if !backend.is_installed() {
@@ -935,7 +923,6 @@ fn backend_health(backend: Backend) -> Component {
     let mut problems: Vec<String> = missing("interpreter", env.join("bin/python"))
         .into_iter()
         .collect();
-    // The backend's own CLI, in the environment that runs it.
     problems.extend(missing("entrypoint", env.join("bin").join(backend.slug())));
     if backend == Backend::Openfold {
         problems.extend(checkout_problem());
@@ -951,8 +938,7 @@ fn backend_health(backend: Backend) -> Component {
     }
 }
 
-/// OpenFold is an editable install into the checkout, so losing it breaks every fold at import --
-/// which the environment itself, entrypoint and all, still looks healthy through.
+/// An editable install into the checkout: losing it breaks every fold at import, env still healthy.
 fn checkout_problem() -> Option<String> {
     let src = config::vizfold_src();
     (!src.join(config::INSTALLER).is_file()).then(|| {
@@ -1101,7 +1087,6 @@ fn unknown_to_scheduler(
         .then(|| format!("{key} names {noun} {value}, which this cluster does not have"))
 }
 
-/// The last line of `status`: what to do, in one sentence.
 fn summary(components: &[Component]) -> String {
     let broken: Vec<&str> = components
         .iter()
@@ -1145,7 +1130,6 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     }
 }
 
-/// Bring a part current: the checkout to a ref, a backend to the checkout as it now stands.
 fn run_update(args: UpdateArgs) -> Result<(), DbErr> {
     match args.part.backend() {
         None => update_base(args.r#ref.as_deref()),
@@ -1157,8 +1141,7 @@ fn run_update(args: UpdateArgs) -> Result<(), DbErr> {
     }
 }
 
-/// Neither installer reruns on drift -- openfold seals each step in `$STATE/.done`, esmfold gates on
-/// an import check -- so the scripts a fresh checkout brought only reach the env through this.
+/// Neither installer reruns on drift, so a fresh checkout's scripts reach the env only through this.
 fn reinstall(backend: Backend, yes: bool) -> Result<(), DbErr> {
     let targets = removal_plan(reinstall_paths(
         backend,
@@ -1173,9 +1156,8 @@ fn reinstall(backend: Backend, yes: bool) -> Result<(), DbErr> {
     install_backend(backend)
 }
 
-/// Reinstall takes back everything install planted except downloads: params are ~4 GB, or a mirror
-/// symlink tree, and neither is install state. `data` defaults to a subdirectory of the state dir
-/// install also plants, so a directory holding it is spent entry by entry, never removed whole.
+/// Everything install planted except downloads: params are ~4 GB, or a mirror symlink tree, and
+/// neither is install state. `data` may sit under a planted directory, spent entry by entry instead.
 fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path, data: &Path) -> Vec<PathBuf> {
     backend
         .install_paths(prefix, home)
@@ -1195,7 +1177,7 @@ fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path, data: &Path) ->
         .collect()
 }
 
-/// Move the checkout to a ref, by default this binary's own release tag. Install droppings are gitignored.
+/// Move the checkout to a ref, by default this binary's own release tag.
 fn update_base(wanted: Option<&str>) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let target = wanted.unwrap_or(&release::tag()).to_owned();
@@ -1254,7 +1236,7 @@ fn git_cmd(dir: &Path, args: &[&str]) -> std::process::Command {
     command
 }
 
-/// One read-only git question as trimmed stdout. `None` when git cannot answer at all.
+/// One read-only git question as trimmed stdout; `None` when git cannot answer.
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
     let output = git_cmd(dir, args).output().ok()?;
     output
@@ -1263,7 +1245,6 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-/// What the checkout is actually on: its tag if it sits exactly on one, else a short commit.
 fn checkout_ref(src: &Path) -> Option<String> {
     git(src, &["describe", "--tags", "--exact-match"])
         .or_else(|| git(src, &["rev-parse", "--short", "HEAD"]))
@@ -1306,7 +1287,6 @@ fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
         ))
     })?;
     println!("vizfold {wanted} is installed at {}", exe.display());
-    // The scripts are pinned per version, so the checkout is now behind until `update` moves it.
     println!(
         "The checkout still runs {current}'s scripts. Bring it along with: vizfold update base"
     );
@@ -1339,8 +1319,8 @@ fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
 /// Undo `vizfold install`. Not a script, because the checkout holding it is one of the things removed.
 fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     let (prefix, home) = (config::prefix(), config::openfold_home());
-    // One plan for all parts: `removal_plan` folds the backend paths that live inside the checkout
-    // under it, which removing part by part would instead drop as already gone.
+    // One plan for all parts: `removal_plan` folds paths inside the checkout under it, which
+    // removing part by part would instead drop as already gone.
     let targets = match args.part {
         Some(part) => part.install_paths(&prefix, &home),
         None => Part::value_variants()
@@ -1385,7 +1365,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Print what goes, confirm it unless `yes`, remove it. `false` means the user declined and nothing went.
+/// Print, confirm unless `yes`, remove. `false`: the user declined and nothing went.
 fn remove_confirmed(headline: &str, targets: &[PathBuf], yes: bool) -> Result<bool, DbErr> {
     println!("{headline}");
     for target in targets {
@@ -1404,8 +1384,7 @@ fn remove_confirmed(headline: &str, targets: &[PathBuf], yes: bool) -> Result<bo
     Ok(true)
 }
 
-/// What `uninstall` removes, and prints for confirmation. A relative path means an empty config
-/// value resolved into one -- never delete off the cwd.
+/// A relative path means an empty config value resolved into one -- never delete off the cwd.
 fn removal_plan(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
     targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
     targets.sort();
@@ -1427,7 +1406,7 @@ fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
         config::env_dir("workbench"),
         prefix.join("vizfold.db"),
         config::config_file(),
-        // The package cache outlives any one backend; the binary is bootstrap state, beside `vizfold` itself.
+        // The package cache outlives any one backend.
         prefix.join("mamba"),
     ];
     // The staged copy only; with no prefix settled the two are one path, the source tree.
@@ -1485,7 +1464,6 @@ fn run_completions(shell: Option<Shell>) -> Result<(), DbErr> {
         .map_err(|error| DbErr::Custom(format!("failed to write completions: {error}")))
 }
 
-/// Start the workbench dashboard, streaming its output to this shell.
 fn run_serve(args: ServeArgs) -> Result<(), DbErr> {
     let workbench = serve_dir()?;
 
@@ -1590,7 +1568,6 @@ fn node_is_new_enough(version: &str) -> bool {
     (major, minor) >= MIN_NODE
 }
 
-/// The bin directory of a usable Node already on PATH, if there is one.
 fn system_node_bin() -> Option<PathBuf> {
     let output = std::process::Command::new("node")
         .args([
@@ -1606,7 +1583,7 @@ fn system_node_bin() -> Option<PathBuf> {
         .flatten()
 }
 
-/// Node from PATH when new enough, else its own env -- kept out of every backend env. Returns the bin dir.
+/// Node from PATH when new enough, else its own env -- kept out of every backend env.
 fn ensure_node() -> Result<PathBuf, DbErr> {
     let env_dir = config::env_dir("workbench");
     let bin = env_dir.join("bin");
@@ -1806,8 +1783,7 @@ fn list_examples(json: bool) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Fold every target in one execution, or replay a queued run by id -- one verb. Re-registers
-/// artifacts (idempotent).
+/// Fold every target in one execution, or replay a queued run by id. Re-registers artifacts (idempotent).
 async fn run_run(database: &sea_orm::DatabaseConnection, args: RunArgs) -> Result<(), DbErr> {
     let run_id = match queued_run_id(&args.targets)? {
         Some(run_id) => run_id,
@@ -1904,7 +1880,7 @@ fn unknown_target(target: &str) -> DbErr {
     })
 }
 
-/// A lone integer target replays that run. Mixed with anything else it is ambiguous, not a batch.
+/// A lone integer target replays that run; mixed with anything else it is ambiguous.
 fn queued_run_id(targets: &[String]) -> Result<Option<i32>, DbErr> {
     let ids: Vec<i32> = targets
         .iter()
@@ -1919,7 +1895,6 @@ fn queued_run_id(targets: &[String]) -> Result<Option<i32>, DbErr> {
     }
 }
 
-/// One FASTA to fold: where it is, what it holds, and whether it came from the bundled examples.
 #[derive(Debug)]
 struct Target {
     fasta: PathBuf,
@@ -1934,8 +1909,7 @@ fn tags(resolved: &[Target]) -> Vec<&str> {
         .collect()
 }
 
-/// Every FASTA the targets name, in the order given: an example id resolves to its bundled FASTA,
-/// a path to itself, and a directory to every FASTA in it.
+/// Every FASTA the targets name, in order: an example id, a path, or a directory of FASTAs.
 fn resolve_targets(targets: &[String]) -> Result<Vec<Target>, DbErr> {
     let mut resolved: Vec<Target> = Vec::new();
     for target in targets {
@@ -1997,8 +1971,7 @@ fn batch_inputs_dir() -> PathBuf {
     config::prefix().join("runs/inputs")
 }
 
-/// cwd first, then the checkout -- a relative target means what the shell means by it, as
-/// `canonicalize_local_path` does for the flags.
+/// cwd first, then the checkout: a relative target means what the shell means by it.
 fn local_path(target: &str) -> PathBuf {
     let path = Path::new(target);
     std::env::current_dir()
@@ -2032,10 +2005,9 @@ fn stage_batch(inputs_dir: &Path, resolved: &[Target]) -> Result<PathBuf, DbErr>
     Ok(dir)
 }
 
-/// `<tags>-<hash of the files behind them>`: the same batch always stages into the same directory,
-/// and two batches sharing a tag set but not their sources never share one -- otherwise a second
-/// submit would relink the inputs of a batch already recorded and waiting to fold. The tag list is
-/// dropped for a first tag and a count once it outgrows a directory name.
+/// `<tags>-<hash of the files behind them>`: same batch, same directory; same tags over different
+/// files, a different one -- so a submit cannot relink a batch already recorded and waiting to fold.
+/// Long tag lists collapse to first+count.
 fn batch_name(resolved: &[Target]) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -2051,7 +2023,7 @@ fn batch_name(resolved: &[Target]) -> String {
     format!("{head}-{:x}", hasher.finish())
 }
 
-/// The seeded records a local run is built from. Both backends differ only in which they name.
+/// The seeded records a local run is built from; both backends differ only in which they name.
 struct LocalCatalog {
     backend_id: i32,
     target_id: i32,
@@ -2254,7 +2226,6 @@ async fn submit_esmfold_run(
     Ok(run)
 }
 
-/// The backend a bare `vizfold run` uses: the only one installed, else OpenFold. `--backend` always wins.
 fn default_backend() -> Result<Backend, DbErr> {
     match (
         Backend::Openfold.is_installed(),
@@ -2344,8 +2315,7 @@ fn read_fasta(path: &Path) -> Result<examples::Example, DbErr> {
     })
 }
 
-/// Seeding runs immediately before every lookup, so a miss here means the database is not one
-/// vizfold wrote -- naming the file is the only thing that helps.
+/// Seeding runs immediately before every lookup, so a miss means the database is not one vizfold wrote.
 fn seed_required_error() -> DbErr {
     DbErr::Custom(format!(
         "the run's backend, local execution target, or matching profile is missing from {} \
@@ -2513,8 +2483,6 @@ mod tests {
 
     use crate::core::{db, seed};
 
-    /// Everything the three old argument surfaces carried now hangs off `run`, and the clap
-    /// defaults it applies are the only defaults there are.
     fn run_args(argv: &[&str]) -> RunArgs {
         let full: Vec<&str> = ["vizfold", "run"]
             .into_iter()
@@ -2541,7 +2509,6 @@ mod tests {
                 .expect("install <part> should parse");
             assert!(matches!(cli.command, Command::Install(InstallArgs { part }) if part == want));
         }
-        // The part is required and constrained to the known set.
         assert!(Cli::try_parse_from(["vizfold", "install"]).is_err());
         assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
     }
@@ -2582,7 +2549,6 @@ mod tests {
         );
     }
 
-    /// The one path partition reinstall makes: params are ~4 GB, or a mirror symlink tree.
     #[test]
     fn a_reinstall_keeps_the_downloads_and_takes_everything_else() {
         let base = std::env::temp_dir().join(format!("vizfold-reinstall-{}", std::process::id()));
@@ -2605,8 +2571,7 @@ mod tests {
         assert_eq!(kept.len(), full.len() - 1, "only the data dir is spared");
     }
 
-    /// The data dir defaults to a subdirectory of the state dir install also plants, so leaving it
-    /// out of the list is not enough: removing the state dir whole takes the databases with it.
+    /// The data dir sits inside the state dir install also plants: removing that whole takes the databases.
     #[test]
     fn a_reinstall_removes_no_directory_the_downloads_live_under() {
         let base = std::env::temp_dir().join(format!("vizfold-nested-data-{}", std::process::id()));
@@ -2625,7 +2590,7 @@ mod tests {
             !kept.iter().any(|path| data.starts_with(path)),
             "a removal target holds the downloads: {kept:?}"
         );
-        // What makes the installer redo its work: without these it short-circuits on the sentinel.
+        // Without these the installer short-circuits on the sentinel.
         assert!(kept.contains(&state.join(".done")), "the sentinel must go");
         assert!(
             kept.contains(&state.join("pkgs")),
@@ -2633,9 +2598,8 @@ mod tests {
         );
     }
 
-    /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env
-    /// -- and that reading is exactly what bare `serve` hands the dashboard. Both keys are pinned
-    /// here rather than in a second test, which would race this one over the same variables.
+    /// Each backend reads its own key: a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env, and
+    /// that reading is what bare `serve` hands the dashboard. One test, not two: they would race.
     #[test]
     fn backend_is_installed_tracks_its_own_env_prefix_key() {
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
@@ -2686,8 +2650,7 @@ mod tests {
         }
     }
 
-    /// The prelude is the whole of what we add to clap_complete's output. Verified load-bearing: a
-    /// zsh that never ran compinit registers nothing without it, and the syntax is an error in bash.
+    /// Verified load-bearing: a zsh that never ran compinit registers nothing, and it errors in bash.
     #[test]
     fn only_zsh_carries_the_compinit_prelude() {
         let script = |shell| String::from_utf8(completion_script(shell)).expect("utf-8");
@@ -2703,8 +2666,7 @@ mod tests {
                 "{shell} has no compdef to arrange for"
             );
         }
-        // The name bound here is what the user's TAB has to match; nothing else in the script
-        // fails visibly if it is wrong -- completion would simply do nothing, for everyone.
+        // Nothing fails visibly if this name is wrong -- completion would simply do nothing.
         assert!(
             zsh.contains("compdef _vizfold vizfold\n"),
             "zsh binds `vizfold`"
@@ -2762,7 +2724,6 @@ mod tests {
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(prefix.join("outputs")).unwrap();
-        // The editable install's extension, named for the Python ABI and arch that built it.
         let backend = home.join("backends/openfold");
         std::fs::create_dir_all(&backend).unwrap();
         let extension = backend.join("attn_core_inplace_cuda.cpython-311-x86_64-linux-gnu.so");
@@ -2780,7 +2741,7 @@ mod tests {
             assert!(paths.contains(&expected), "missing {}", expected.display());
         }
         assert!(!paths.contains(&prefix.join("outputs")), "run outputs kept");
-        // The package cache serves the workbench env too; one backend's uninstall must not take it.
+        // The cache serves the workbench env too.
         assert!(
             !paths.contains(&prefix.join("mamba")),
             "the cache is shared"
@@ -2815,7 +2776,6 @@ mod tests {
                 owned.display()
             );
         }
-        // Only the clone vizfold made itself: a user-supplied checkout is never `uninstall`'s to take.
         assert!(
             super::base_paths(&prefix) == vec![config::default_src()]
                 || config::vizfold_src() != config::default_src(),
@@ -2839,14 +2799,12 @@ mod tests {
             shared.contains(&prefix.join("workbench")),
             "a staged workbench is shared"
         );
-        // With no prefix settled the two are one path, and that one is the source tree.
         assert!(
             !super::shared_paths(&home, &home).contains(&home.join("workbench")),
             "the checkout's own workbench must survive"
         );
     }
 
-    /// The checks name keys as strings; one outside the schema reports on a value nothing writes.
     /// `uninstall` is `rm -rf`: no relative path may reach it, and no path an outer target covers.
     #[test]
     fn the_removal_plan_keeps_only_absolute_uncovered_paths_that_exist() {
@@ -2857,18 +2815,17 @@ mod tests {
         let plan = super::removal_plan(vec![
             // Exists relative to the cwd tests run in: without the guard, uninstall deletes it.
             PathBuf::from("Cargo.toml"),
-            base.join("does-not-exist"), // nothing to remove
-            base.join("outer/inner"),    // covered by its parent below
+            base.join("does-not-exist"),
+            base.join("outer/inner"),
             base.join("outer"),
-            base.join("outer"), // duplicate
+            base.join("outer"), // duplicate: dedup is what keeps the plan one entry
         ]);
 
         assert_eq!(plan, vec![base.join("outer")]);
         std::fs::remove_dir_all(&base).ok();
     }
 
-    /// The gate table by the names it produces. `status` and base's own verbs stay off `repo` --
-    /// they are what a missing or drifted checkout is repaired with.
+    /// The gate table by the names it produces: `status` and base's own verbs stay off `repo`.
     #[test]
     fn every_command_gates_on_the_prereqs_it_actually_needs() {
         let names = |argv: &[&str]| {
@@ -2883,7 +2840,6 @@ mod tests {
         assert_eq!(names(&["vizfold", "uninstall"]), Vec::<&str>::new());
         assert_eq!(names(&["vizfold", "install", "base"]), ["core deps"]);
         assert_eq!(names(&["vizfold", "update", "base"]), ["core deps"]);
-        // A backend is installed out of the checkout, so it is refused until there is one.
         assert_eq!(
             names(&["vizfold", "install", "openfold"]),
             ["core deps", "repo"]
@@ -2897,7 +2853,6 @@ mod tests {
             names(&["vizfold", "serve"]),
             ["core deps", "repo", "config"]
         );
-        // Named backends are gated; bare `serve` resolves to the installed ones, so it gates on none.
         assert_eq!(
             names(&["vizfold", "serve", "openfold", "esmfold"]),
             ["core deps", "repo", "config", "openfold", "esmfold"]
@@ -2924,7 +2879,6 @@ mod tests {
             ["config", "esmfold"]
         );
 
-        // The one binary the bootstrap installs, named in the detail whether or not it is found.
         let core = super::core_deps_health();
         assert!(
             core.detail.ends_with("micromamba"),
@@ -2933,8 +2887,7 @@ mod tests {
         );
     }
 
-    /// Never cloned and drifted are different problems with different fixes; before this, both read
-    /// BROKEN and both pointed at the updater, which cannot create a checkout.
+    /// Never cloned and drifted need different fixes; both once read BROKEN and pointed at the updater.
     #[test]
     fn an_absent_checkout_is_not_a_broken_one() {
         let dir = std::env::temp_dir().join(format!("vizfold-repo-{}", std::process::id()));
@@ -2959,7 +2912,6 @@ mod tests {
         assert_eq!(present.remedy, "vizfold update base");
     }
 
-    /// The rule `refuses` encodes: Unverified is not a failure.
     #[test]
     fn only_absent_and_broken_refuse() {
         assert!(super::refuses(State::Absent));
@@ -3044,7 +2996,6 @@ mod tests {
         );
     }
 
-    /// Broken exactly when it carries a problem, so no builder keeps two fields in step by hand.
     #[test]
     fn health_promotes_any_component_with_a_problem() {
         for component in super::health() {
@@ -3059,8 +3010,7 @@ mod tests {
         }
     }
 
-    /// A failed micromamba fetch leaves a truncated, non-executable file; reading that as installed
-    /// sends the user into `Permission denied` from inside an installer instead of at the gate.
+    /// A failed fetch leaves a non-executable file; reading it as installed fails deep in an installer.
     #[test]
     fn a_present_but_non_executable_file_is_not_the_dependency() {
         let dir = std::env::temp_dir().join(format!("vizfold-exec-{}", std::process::id()));
@@ -3117,15 +3067,14 @@ mod tests {
 
         assert!(dst.join("package.json").is_file());
         assert!(dst.join("app/page.tsx").is_file());
-        assert!(!dst.join(".next").exists()); // excluded at top level
-        assert!(dst.join("node_modules/installed.js").is_file()); // preserved
-        assert!(!dst.join("node_modules/dep.js").exists()); // src node_modules not copied
+        assert!(!dst.join(".next").exists());
+        assert!(dst.join("node_modules/installed.js").is_file());
+        assert!(!dst.join("node_modules/dep.js").exists());
         std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn copy_tree_skips_a_symlinked_directory() {
-        // public/runs is a symlink; fs::copy would follow it into a directory and hit EISDIR.
         let base =
             std::env::temp_dir().join(format!("vizfold-copytree-link-{}", std::process::id()));
         let (src, dst, outputs) = (base.join("src"), base.join("dst"), base.join("outputs"));
@@ -3138,7 +3087,7 @@ mod tests {
         super::copy_tree(&src, &dst, &[]).unwrap();
 
         assert!(dst.join("package.json").is_file());
-        assert!(!dst.join("public/runs").exists()); // the symlink is not staged
+        assert!(!dst.join("public/runs").exists());
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -3155,15 +3104,13 @@ mod tests {
         assert!(!node_is_new_enough("garbage"));
     }
 
-    /// One positional list, both backends' flags on it, and the default-true bools taking
-    /// `--flag=false`. A lone integer is still how `run_run` spots a queued run.
+    /// One positional list, both backends' flags on it, and the default-true bools taking `--flag=false`.
     #[test]
     fn parses_run() {
         let one = run_args(&["1"]);
         assert_eq!(one.targets, ["1"]);
         assert!(one.backend.is_none());
         assert!(!one.no_exec && !one.json);
-        // Unless asked otherwise: attention maps on, raw outputs kept, one recycle saved.
         assert!(one.attn && one.save_outputs);
         assert_eq!((one.residue_idx, one.num_recycles_save), (1, 1));
         // Unset, not false: whether alignments are precomputed depends on what the targets are.
@@ -3187,11 +3134,10 @@ mod tests {
         assert_eq!(batch.use_precomputed_alignments, Some(false));
         assert_eq!(batch.trace_mode, "attention");
 
-        // The positional is required: a bare `run` is a parse error, not an empty batch.
+        // A bare `run` is a parse error, not an empty batch.
         assert!(Cli::try_parse_from(["vizfold", "run"]).is_err());
     }
 
-    /// A run id names one queued execution; mixing it with a target would be two different asks.
     #[test]
     fn a_run_id_refuses_to_share_the_command_line() {
         let ids = |argv: &[&str]| super::queued_run_id(&run_args(argv).targets);
@@ -3214,8 +3160,7 @@ mod tests {
         }
     }
 
-    /// A batch of two names itself; a batch of twenty cannot, so it keeps a stable short name. The
-    /// same batch always lands in the same directory, and two batches never share one by tag alone.
+    /// Two tags name the directory; twenty collapse to a stable short name.
     #[test]
     fn a_batch_directory_is_named_after_its_tags_and_its_files() {
         let pair = [
@@ -3333,8 +3278,7 @@ mod tests {
         Ok(())
     }
 
-    /// ESMFold's `--fasta` and its preflight both take a file, and a bundled example names the
-    /// directory holding one. Regression: it used to record the directory and could never fold.
+    /// Regression: a bundled example names a directory, and ESMFold's `--fasta` needs the file in it.
     #[test]
     fn an_example_resolves_to_its_fasta_file_not_its_directory() {
         let resolved = super::resolve_targets(&["6KWC_1".to_owned()]).expect("6KWC_1 resolves");
@@ -3348,7 +3292,6 @@ mod tests {
         );
     }
 
-    /// Two targets, one execution: one row naming both, and one directory OpenFold can be pointed at.
     #[tokio::test]
     async fn two_targets_submit_one_run_over_a_staged_directory() -> Result<(), DbErr> {
         let database = seeded_database().await?;
@@ -3394,7 +3337,6 @@ mod tests {
         Ok(())
     }
 
-    /// ESMFold loads its model inside the fold and reads one file, so a batch has nowhere to go.
     #[tokio::test]
     async fn esmfold_refuses_more_than_one_target() -> Result<(), DbErr> {
         let database = seeded_database().await?;
@@ -3409,7 +3351,7 @@ mod tests {
         Ok(())
     }
 
-    /// A directory target folds everything in it, and a repeat is refused rather than overwritten.
+    /// A repeated tag is refused, not overwritten.
     #[test]
     fn a_directory_target_resolves_to_every_fasta_in_it() {
         let dir = crate::core::examples::monomer_dir().join("fasta_dir_6KWC");
@@ -3427,8 +3369,7 @@ mod tests {
         );
     }
 
-    /// A tag names a staged directory and a link, so a path inside a FASTA header must not reach
-    /// the filesystem. It is also the only shape preflight accepts.
+    /// A tag names a staged directory and a link, so a path in a FASTA header must not reach the disk.
     #[test]
     fn a_header_that_is_not_a_tag_is_refused() {
         let dir = std::env::temp_dir().join(format!("vizfold-tag-{}", std::process::id()));
@@ -3474,7 +3415,6 @@ mod tests {
         Ok(())
     }
 
-    /// A target that is neither a run id, a bundled example, nor a path names what is on offer.
     #[test]
     fn an_unknown_target_is_refused_before_anything_is_submitted() {
         assert!(super::resolve_targets(&["not-a-thing".into()]).is_err());
@@ -3503,7 +3443,6 @@ mod tests {
 
     #[test]
     fn model_device_prefers_the_configured_gpu_partition_without_probing() {
-        // A GPU partition with no allocation held: cuda:0 is right even though no GPU is visible here.
         assert_eq!(
             super::model_device_for(config::SlurmContext::None, Some("gpuA100x4"), None),
             "cuda:0"
@@ -3512,14 +3451,13 @@ mod tests {
 
     #[test]
     fn model_device_inside_an_allocation_trusts_the_local_probe() {
-        // Already on the node the fold runs on, so the local probe decides, not the partition config.
         assert_eq!(
             super::model_device_for(config::SlurmContext::InAllocation, Some("gpuA100x4"), None),
             "cpu"
         );
     }
 
-    /// No declared maximum, or unparseable resources, must not clamp the request to something arbitrary.
+    /// An absent or unparseable maximum must not clamp the request to something arbitrary.
     #[test]
     fn cpus_clamp_only_where_the_target_declares_a_maximum() {
         let with_max = json!({"properties": {"cpus": {"maximum": 14}}}).to_string();

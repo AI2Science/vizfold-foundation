@@ -1,5 +1,5 @@
 #!/bin/bash
-# slurm.sh -- shared SLURM flow. Base declares slurm::* hooks as no-ops; a sourced sites/<name>.sh overrides the ones it needs; slurm::run assembles and executes them.
+# Shared SLURM flow: slurm::* hooks default to no-ops, a sourced sites/<name>.sh overrides the ones it needs, slurm::run assembles and executes them.
 
 [ "${BASH_SOURCE[0]}" = "$0" ] && { echo "slurm.sh is a library" >&2; exit 1; }
 [ -n "${SLURM_SH:-}" ] && return 0
@@ -8,13 +8,13 @@ SLURM_SH=1
 . "$(dirname "${BASH_SOURCE[0]}")/config.sh"        # REPO, OF, die
 . "$(dirname "${BASH_SOURCE[0]}")/interactive.sh"
 
-# The site profiles, beside the libs that read them: nothing here is about any one backend.
+# Site profiles sit beside the libs that read them: nothing here is backend-specific.
 SITES=$REPO/sites
 
 # A site overrides this to export the atoms its <site>.json templates reference, before they are filled.
 slurm::discover() { :; }
 
-# Delta-family: pick an allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
+# An allocation under $1 whose accounts (suffixes $2..) all exist, preferring one that holds an install.
 slurm::allocation() {
     local root=$1; shift
     local dir alloc accounts s ok found=()
@@ -32,7 +32,7 @@ slurm::allocation() {
     echo "${found[0]}"
 }
 
-# The /work/nvme allocation whose accounts (suffixes $@) all exist, naming those accounts off the same suffixes.
+# The /work/nvme allocation whose accounts (suffixes $@) all exist; names those accounts off the same suffixes.
 slurm::nvme_alloc() {
     if [ -z "${OPENFOLD_ALLOCATION:-}" ]; then
         OPENFOLD_ALLOCATION=$(interactive::resolve OPENFOLD_ALLOCATION allocation "$(slurm::allocation /work/nvme "$@" || true)")
@@ -44,7 +44,6 @@ slurm::nvme_alloc() {
     return 0
 }
 
-# The user's Slurm default account, overridable inline.
 slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
 
 # Three sources: Delta's login nodes cannot always reach slurmctld. Lower-cased to match sites/.
@@ -56,10 +55,10 @@ slurm::cluster() {
     echo "$name" | tr '[:upper:]' '[:lower:]'
 }
 
-# The prefix when nothing else settles one. No site overrides this hook; delta-gh.json sets OPENFOLD_PREFIX instead (it shares /work/nvme with x86 Delta and must not share the env).
+# The prefix when nothing else settles one. No site overrides this hook; delta-gh.json sets OPENFOLD_PREFIX directly instead.
 slurm::default_prefix() { echo "${OPENFOLD_BASE:+$OPENFOLD_BASE/vizfold}"; }
 
-# Resolve ~/scratch (a symlink on PACE) to the user's scratch root, dropping any subdir it points into.
+# Resolve ~/scratch (a PACE symlink) to the user's scratch root, dropping any subdir it points into.
 slurm::scratch_root() {
     local s; [ -d "$HOME/scratch" ] || return 1; s=$(readlink -f "$HOME/scratch")
     case "$s" in */"$USER"/*) echo "${s%%/"$USER"/*}/$USER" ;; *) echo "$s" ;; esac
@@ -84,7 +83,7 @@ slurm::launch_args() {
     return 0
 }
 
-# Pick the site and settle the layers under it -- every installer starts here. Exports OPENFOLD_SITE.
+# Pick the site and settle the layers under it -- every installer starts here.
 vizfold::settle_site() {
     local cluster site prefix
     cluster=$(slurm::cluster)
@@ -106,10 +105,10 @@ vizfold::settle_site() {
     return 0
 }
 
-# Run the assembled hooks, then run setup.sh on the scheduler (or here when there is none).
+# Run the assembled hooks, then setup.sh on the scheduler (or here when there is none).
 slurm::run() {
     if [ -z "${SLURM_JOB_ID:-}" ] && ! command -v srun >/dev/null 2>&1; then
-        exec bash "$OF/install/setup.sh"          # no scheduler: install here
+        exec bash "$OF/install/setup.sh"
     fi
     local PREFIX ACCOUNT PARTITION SETUP PTY
     PREFIX=${OPENFOLD_PREFIX:-}

@@ -66,7 +66,7 @@ use std::path::Path;
 
 use crate::core::commands::CommandSpec;
 
-/// Mirrors the fold's own `nvidia-smi --query-gpu=name --format=csv,noheader` probe.
+/// Mirrors `setup::preflight`'s `--query-gpu=name` probe, so both name the GPU the same way.
 pub fn detect_gpu() -> Option<String> {
     let output = std::process::Command::new("nvidia-smi")
         .args(["--query-gpu=name", "--format=csv,noheader"])
@@ -216,8 +216,7 @@ pub fn output_dir_check(output_path: &Path) -> PreflightCheck {
 mod tests {
     use super::{PreflightCheck, PreflightReport, PreflightStatus};
 
-    /// Only `Failed` blocks a run: a warning must reach neither `failures()`
-    /// (the list printed as "preflight failed: ...") nor `has_failures()`.
+    /// Only `Failed` blocks a run: a warning reaches neither `failures()` nor `has_failures()`.
     #[test]
     fn warnings_do_not_block_but_failures_do() {
         let report = PreflightReport::new(vec![

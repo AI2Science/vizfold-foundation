@@ -62,7 +62,7 @@ sed '/^main() {/,$d' backends/openfold/install/setup.sh > "$SANDBOX/setup-defs.s
 actual=$(for f in sites/*.json; do f=${f##*/}; (resolve "${f%.json}" 2>/dev/null); done |
     sed "s#\"$REPO\"#\"{REPO}\"#g; s#\"$SANDBOX/#\"{SANDBOX}/#g")
 
-# The same binary reads this file on every cluster, so the key set must not depend on the cluster.
+# One binary reads this file on every cluster, so the key set must not depend on the site.
 shapes=$(for f in "$SANDBOX"/*.json; do
     python3 -c 'import json,sys; print(*sorted(json.load(open(sys.argv[1]))))' "$f"
 done | sort -u)
@@ -70,7 +70,7 @@ if [ "$(printf '%s\n' "$shapes" | wc -l)" -ne 1 ]; then
     echo "FAIL config key set differs by site:"; printf '%s\n' "$shapes"; exit 1
 fi
 
-# ...nor on which backend installed last: a second install rewrites the earlier values, never drops them.
+# ...nor on which backend installed last.
 cp "$SANDBOX/delta.json" "$SANDBOX/before.json"
 (export VIZFOLD_CONFIG=$SANDBOX/delta.json ESMFOLD_ENV_PREFIX=/envs/vizfold-esmfold
  . "$REPO/lib/config.sh" && config::load && config::save) >/dev/null 2>&1
@@ -85,13 +85,12 @@ print("ok   a second backend's install preserves every settled value")
 PY
 
 # The snapshot above walks the layers by hand; settle_site is what both installers actually call.
-# This pins the two together.
 (export USER=x-test HOME=$SANDBOX/home OPENFOLD_ALLOCATION=bbka
  export VIZFOLD_CONFIG=$SANDBOX/settle.json OPENFOLD_HOME=$REPO
  unset OPENFOLD_SITE OPENFOLD_PREFIX OPENFOLD_ACCOUNT OPENFOLD_GPU_ACCOUNT
  . "$REPO/lib/slurm.sh"
  sacctmgr() { echo bbka; }
- slurm::cluster() { echo delta; }                     # as if run on a Delta login node
+ slurm::cluster() { echo delta; }
  vizfold::settle_site >/dev/null 2>&1
  got="$OPENFOLD_SITE $OPENFOLD_PREFIX"
  want="delta /work/nvme/bbka/x-test/vizfold"
@@ -120,7 +119,7 @@ if cfg.get("OPENFOLD_PREFIX"):
     sys.exit(1)
 PY
 
- # Now OpenFold, on Delta. Its own discovery must run and win.
+ # Now OpenFold, on Delta: its own discovery must win.
  (. "$REPO/lib/slurm.sh"
   sacctmgr() { echo bbka; }
   slurm::cluster() { echo delta; }
@@ -134,8 +133,8 @@ PY
       echo "  want: $want"; echo "  got:  $got"; exit 1
   fi)) || exit 1
 
-# Inline beats the site file. The first two keys below are set by every <site>.json, so config::fill
-# has a value of its own to prefer -- keys no site writes would test nothing.
+# The first two keys below are set by every <site>.json, so config::fill has a rival value to prefer
+# -- a key no site writes would test nothing.
 (export OPENFOLD_PARTITION=chosen-partition OPENFOLD_AF2_ROOT=$SANDBOX/chosen-mirror \
         VIZFOLD_DB=$SANDBOX/chosen.db
  resolve delta >/dev/null 2>&1
@@ -143,9 +142,9 @@ PY
 import json, sys
 cfg, sandbox = json.load(open(sys.argv[1])), sys.argv[2]
 want = {
-    "OPENFOLD_PARTITION": "chosen-partition",         # delta.json sets this to "cpu"
-    "OPENFOLD_AF2_ROOT": f"{sandbox}/chosen-mirror",  # delta.json names the real mirror
-    "VIZFOLD_DB": f"{sandbox}/chosen.db",             # no site file sets this one
+    "OPENFOLD_PARTITION": "chosen-partition",
+    "OPENFOLD_AF2_ROOT": f"{sandbox}/chosen-mirror",
+    "VIZFOLD_DB": f"{sandbox}/chosen.db",
 }
 kept = {k: cfg.get(k) for k in want}
 if kept != want:

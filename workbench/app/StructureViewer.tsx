@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// 3Dmol drives WebGL and reads `window`, so the library is imported dynamically inside the
-// effect (never during SSR) and the viewer is built after mount.
+// 3Dmol reads `window`, so it is imported dynamically inside the effect, never during SSR.
 
 type Viewer = ReturnType<(typeof import("3dmol"))["createViewer"]>;
 type Representation = "cartoon" | "stick" | "line";

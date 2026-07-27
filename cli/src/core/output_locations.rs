@@ -5,7 +5,6 @@ use sea_orm::DbErr;
 
 use crate::core::entities::{model_invocation_profiles, runs};
 
-/// Resolves the workspace where a run's outputs are stored.
 pub fn resolve_output_location(
     invocation_profile: &model_invocation_profiles::Model,
     run: &runs::Model,
@@ -17,8 +16,7 @@ pub fn resolve_output_location(
     Ok(PathBuf::from(output_location).join(run.id.to_string()))
 }
 
-/// Prefer the run's immutable snapshot; fall back to the live profile for runs queued before
-/// snapshots existed.
+/// Prefer the run's immutable snapshot; fall back to the live profile for pre-snapshot runs.
 pub fn output_location_from(
     provenance_json: Option<&str>,
     profile_config_json: &str,

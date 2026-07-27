@@ -101,7 +101,6 @@ mod tests {
         );
     }
 
-    /// The three answers, against whatever version this build actually is.
     #[test]
     fn the_version_line_says_which_of_the_three_states_this_is() {
         let current = super::current();
