@@ -51,15 +51,32 @@ bootstrap::micromamba() {
     echo "installed micromamba to $BIN/micromamba"
 }
 
+# Append a line to one shell's rc, once. .zshrc only if it exists (zsh may not be installed);
+# .bashrc regardless, since bash reads it on every interactive shell even on a fresh account.
+bootstrap::rc() {   # $1 shell, $2 line
+    local rc=$HOME/.${1}rc
+    [ "$1" = bash ] || [ -f "$rc" ] || return 0
+    grep -qsF "$2" "$rc" || echo "$2" >> "$rc"
+}
+
 # Put ~/.local/bin on PATH for future shells (idempotent), and note it for this one.
 bootstrap::path() {
     case ":$PATH:" in *":$BIN:"*) return ;; esac
     local line="export PATH=\"$BIN:\$PATH\""
-    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-        if [ "$rc" = "$HOME/.zshrc" ] && [ ! -f "$rc" ]; then continue; fi
-        grep -qsF "$line" "$rc" 2>/dev/null || echo "$line" >> "$rc"
-    done
+    bootstrap::rc bash "$line"
+    bootstrap::rc zsh "$line"
     echo "added $BIN to PATH in your shell rc; restart your shell or run: $line"
+}
+
+# Tab completion, eval'd from the binary rather than written out as a file: it then follows whatever
+# vizfold is on PATH, so a self-update cannot leave a stale script behind. After the PATH line, which
+# is what puts vizfold there; the guard keeps an uninstall from erroring on every shell start.
+bootstrap::completions() {
+    local shell
+    for shell in bash zsh; do
+        bootstrap::rc "$shell" "command -v vizfold >/dev/null && eval \"\$(vizfold completions $shell)\""
+    done
+    echo "enabled tab completion in your shell rc"
 }
 
 main() {
@@ -69,6 +86,11 @@ main() {
     bootstrap::download
     bootstrap::micromamba
     bootstrap::path
+    bootstrap::completions
     echo "vizfold installed at $BIN/vizfold. Run \`vizfold install base\` for the checkout, then \`vizfold install openfold\` (or \`esmfold\`)."
 }
-main
+
+# Sourced (tests/install_rc.sh) this file is just its definitions. Not the backend installers'
+# `BASH_SOURCE = $0` guard: piped through `curl | bash` this script has no BASH_SOURCE at all, and
+# that guard would read the absence as "sourced" and bootstrap nothing.
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ "${BASH_SOURCE[0]}" = "$0" ]; then main; fi

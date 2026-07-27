@@ -1,4 +1,5 @@
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -62,6 +63,15 @@ enum Command {
     Run(RunArgs),
     /// Register known artifacts for a completed run.
     RegisterArtifacts { run_id: i32 },
+    /// Print this shell's tab-completion script. `install.sh` wires it into your shell rc.
+    Completions(CompletionsArgs),
+}
+
+#[derive(Debug, Args)]
+struct CompletionsArgs {
+    /// Shell to emit for. Defaults to the one `$SHELL` names.
+    #[arg(value_enum)]
+    shell: Option<Shell>,
 }
 
 #[derive(Debug, Args)]
@@ -438,7 +448,10 @@ fn prereqs(command: &Command) -> Vec<Component> {
         )
     };
     match command {
-        Command::Status | Command::Uninstall(_) | Command::SelfUpdate(_) => vec![],
+        Command::Status
+        | Command::Uninstall(_)
+        | Command::SelfUpdate(_)
+        | Command::Completions(_) => vec![],
         // A backend installs from the checkout; base's own verbs are what repair it, so they stay off it.
         Command::Install(InstallArgs { part }) | Command::Update(UpdateArgs { part, .. }) => {
             std::iter::once(core_deps_health())
@@ -496,6 +509,7 @@ pub async fn run() -> Result<(), DbErr> {
         Command::Update(args) => return run_update(args),
         Command::SelfUpdate(args) => return run_self_update(args),
         Command::Serve(args) => return run_serve(args),
+        Command::Completions(args) => return run_completions(args.shell),
         Command::List(ListArgs {
             resource: ListResource::Examples { json },
         }) => return list_examples(json),
@@ -522,7 +536,8 @@ pub async fn run() -> Result<(), DbErr> {
         | Command::Uninstall(_)
         | Command::Update(_)
         | Command::SelfUpdate(_)
-        | Command::Serve(_) => {
+        | Command::Serve(_)
+        | Command::Completions(_) => {
             unreachable!("handled before DB connect")
         }
     }
@@ -1444,6 +1459,31 @@ fn confirmed() -> Result<bool, DbErr> {
         .read_line(&mut answer)
         .map_err(|error| DbErr::Custom(format!("could not read confirmation: {error}")))?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+/// zsh registers a completion through `compdef`, which exists only once compinit has run, and a bare
+/// ~/.zshrc never runs it -- so carry the guard here rather than in every place that evals this.
+/// bash needs no prelude: `complete` is a builtin.
+fn completion_script(shell: Shell) -> Vec<u8> {
+    let mut script = match shell {
+        Shell::Zsh => {
+            b"autoload -Uz compinit; (( $+functions[compdef] )) || compinit -C\n".to_vec()
+        }
+        _ => Vec::new(),
+    };
+    clap_complete::generate(shell, &mut Cli::command(), "vizfold", &mut script);
+    script
+}
+
+fn run_completions(shell: Option<Shell>) -> Result<(), DbErr> {
+    let shell = shell.or_else(Shell::from_env).ok_or_else(|| {
+        DbErr::Custom(format!(
+            "cannot tell which shell {} is; name one, e.g. `vizfold completions bash`",
+            std::env::var("SHELL").unwrap_or_else(|_| "$SHELL".to_owned())
+        ))
+    })?;
+    std::io::Write::write_all(&mut std::io::stdout(), &completion_script(shell))
+        .map_err(|error| DbErr::Custom(format!("failed to write completions: {error}")))
 }
 
 /// Start the workbench dashboard, streaming its output to this shell.
@@ -2644,6 +2684,34 @@ mod tests {
         unsafe {
             std::env::remove_var("OPENFOLD_ENV_PREFIX");
             std::env::remove_var("ESMFOLD_ENV_PREFIX");
+        }
+    }
+
+    /// The prelude is the whole of what we add to clap_complete's output, and it is load-bearing:
+    /// without it a ~/.zshrc that never ran compinit prints `command not found: compdef` on every
+    /// shell start and registers nothing. bash must not carry it -- `complete` is a builtin there,
+    /// and the zsh syntax would be an error.
+    #[test]
+    fn only_zsh_carries_the_compinit_prelude() {
+        let script = |shell| String::from_utf8(completion_script(shell)).expect("utf-8");
+        let zsh = script(Shell::Zsh);
+        assert!(
+            zsh.starts_with("autoload -Uz compinit;"),
+            "the prelude must come before the script that needs compdef, got: {}",
+            zsh.lines().next().unwrap_or_default()
+        );
+        for shell in [Shell::Bash, Shell::Fish] {
+            assert!(
+                !script(shell).contains("compinit"),
+                "{shell} has no compdef to arrange for"
+            );
+        }
+        // Proves generation ran at all, rather than the prelude standing in for a script.
+        for shell in [Shell::Zsh, Shell::Bash] {
+            assert!(
+                script(shell).contains("completions"),
+                "{shell} names our subcommands"
+            );
         }
     }
 

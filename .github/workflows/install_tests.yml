@@ -16,3 +16,4 @@ jobs:
       - run: bash tests/vocabulary.sh
       - run: bash tests/link_mirror.sh
       - run: bash tests/esmfold_env.sh
+      - run: bash tests/install_rc.sh
