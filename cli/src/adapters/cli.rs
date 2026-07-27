@@ -442,8 +442,7 @@ fn prereqs(command: &Command) -> Vec<Component> {
     }
 }
 
-/// Ok and Unverified proceed: a check that could not be run -- an unreachable scheduler -- must
-/// not stop a local fold.
+/// Ok and Unverified proceed: an unreachable scheduler must not stop a local fold.
 fn refuses(state: State) -> bool {
     matches!(state, State::Absent | State::Broken)
 }
@@ -1229,7 +1228,7 @@ fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
 /// Undo `vizfold install`. Not a script, because the checkout holding it is one of the things removed.
 fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     let (prefix, home) = (config::prefix(), config::openfold_home());
-    let mut targets = match args.backend {
+    let targets = match args.backend {
         Some(backend) => backend.install_paths(&prefix, &home),
         None => [Backend::Openfold, Backend::Esmfold]
             .into_iter()
@@ -1238,17 +1237,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             .collect(),
     };
 
-    // Relative paths mean an empty config value resolved into one; never delete off the cwd.
-    targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
-    targets.sort();
-    targets.dedup();
-    // Drop what an outer target already covers. ponytail: O(n^2) over ~25 paths.
-    let outer = targets.clone();
-    targets.retain(|path| {
-        !outer
-            .iter()
-            .any(|other| other != path && path.starts_with(other))
-    });
+    let targets = removal_plan(targets);
     let what = args.backend.map_or("vizfold", Backend::slug);
     if targets.is_empty() {
         println!("Nothing to remove for {what}.");
@@ -1291,6 +1280,22 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
         }
     }
     Ok(())
+}
+
+/// What `uninstall` removes, and prints for confirmation. A relative path means an empty config
+/// value resolved into one -- never delete off the cwd.
+fn removal_plan(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
+    targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
+    targets.sort();
+    targets.dedup();
+    // Drop what an outer target already covers. ponytail: O(n^2) over ~25 paths.
+    let outer = targets.clone();
+    targets.retain(|path| {
+        !outer
+            .iter()
+            .any(|other| other != path && path.starts_with(other))
+    });
+    targets
 }
 
 /// What no backend owns, so only a full uninstall removes it. The checkout only if vizfold cloned it.
@@ -2320,8 +2325,7 @@ mod tests {
         assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
     }
 
-    /// Install state hangs off each backend's own config key, so a stray `ESMFOLD_ENV_PREFIX` must
-    /// not move OpenFold's env with it.
+    /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env.
     #[test]
     fn backend_is_installed_tracks_its_own_env_prefix_key() {
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
@@ -2449,8 +2453,28 @@ mod tests {
     }
 
     /// The checks name keys as strings; one outside the schema reports on a value nothing writes.
-    /// The gate table, by the names it produces. `status` and the updaters stay ungated: they are
-    /// what a user runs to repair a broken install.
+    /// `uninstall` is `rm -rf`: no relative path may reach it, and no path an outer target covers.
+    #[test]
+    fn the_removal_plan_keeps_only_absolute_uncovered_paths_that_exist() {
+        let base = std::env::temp_dir().join(format!("vizfold-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("outer/inner")).expect("fixture");
+
+        let plan = super::removal_plan(vec![
+            // Exists relative to the cwd tests run in: without the guard, uninstall deletes it.
+            PathBuf::from("Cargo.toml"),
+            base.join("does-not-exist"), // nothing to remove
+            base.join("outer/inner"),    // covered by its parent below
+            base.join("outer"),
+            base.join("outer"), // duplicate
+        ]);
+
+        assert_eq!(plan, vec![base.join("outer")]);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// The gate table by the names it produces. `status` and the updaters stay ungated -- they are
+    /// what repairs a broken install.
     #[test]
     fn every_command_gates_on_the_prereqs_it_actually_needs() {
         let names = |argv: &[&str]| {
@@ -2487,8 +2511,7 @@ mod tests {
         );
     }
 
-    /// A check that could not be run is not a failure -- an unreachable slurmctld must not block a
-    /// local fold.
+    /// The rule `refuses` encodes: Unverified is not a failure.
     #[test]
     fn only_absent_and_broken_refuse() {
         assert!(super::refuses(State::Absent));
@@ -2684,9 +2707,8 @@ mod tests {
         assert!(!node_is_new_enough("garbage"));
     }
 
-    /// The defaults: attention is dumped unless asked otherwise, and the backend is left for
-    /// `default_backend` to resolve. The target is a free string -- `run_run` tells a run id from an
-    /// example id by whether it parses as an integer.
+    /// The target is a free string: `run_run` tells a run id from an example id by whether it
+    /// parses as an integer.
     #[test]
     fn parses_run() {
         let cli = Cli::try_parse_from(["vizfold", "run", "1"]).expect("run command should parse");
@@ -2714,8 +2736,7 @@ mod tests {
         ));
     }
 
-    /// Parsed with no flags at all, so the declared defaults are what a bare `queue openfold` gets.
-    /// `defaults_match_for_example` passes `--attn` explicitly and cannot see these.
+    /// No flags at all: `defaults_match_for_example` passes `--attn`, so it cannot see these.
     #[test]
     fn queue_openfold_defaults_to_attention_and_precomputed_alignments() {
         let cli = Cli::try_parse_from(["vizfold", "queue", "openfold"])
@@ -2919,8 +2940,7 @@ mod tests {
         );
     }
 
-    /// A target that declares no cpu maximum -- or whose resources never parsed -- must not clamp
-    /// the request down to something arbitrary.
+    /// No declared maximum, or unparseable resources, must not clamp the request to something arbitrary.
     #[test]
     fn cpus_clamp_only_where_the_target_declares_a_maximum() {
         let with_max = json!({"properties": {"cpus": {"maximum": 14}}}).to_string();

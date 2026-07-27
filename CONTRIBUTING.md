@@ -20,6 +20,7 @@ for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 bash tests/launch_args.sh
 bash tests/site_config.sh   # snapshot of every site's resolved config; -u to accept a change
 bash tests/vocabulary.sh    # rejects env names outside the 19-key config schema
+bash tests/link_mirror.sh   # the three uniclust30 layouts the AF2 mirrors ship
 ```
 
 Python is checked with `flake8 . --select=E9,F63,F7,F82`.

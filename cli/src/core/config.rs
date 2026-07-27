@@ -235,21 +235,31 @@ pub fn gpu_partition() -> Option<String> {
 }
 
 pub fn database_url() -> String {
-    if let Some(db) = resolved("VIZFOLD_DB") {
+    let data_home = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| format!("{}/.local/share", home_dir()));
+    database_url_from(
+        resolved("VIZFOLD_DB"),
+        resolved("OPENFOLD_PREFIX"),
+        &data_home,
+    )
+}
+
+/// VIZFOLD_DB > OPENFOLD_PREFIX > XDG data home; a `sqlite:` value passes through, a bare path gets
+/// `?mode=rwc`. Callers resolve, as `gpu_launch` does.
+fn database_url_from(db: Option<String>, prefix: Option<String>, data_home: &str) -> String {
+    if let Some(db) = db {
         return if db.starts_with("sqlite:") {
             db
         } else {
             format!("sqlite://{db}?mode=rwc")
         };
     }
-    if let Some(p) = resolved("OPENFOLD_PREFIX") {
-        return format!("sqlite://{p}/vizfold.db?mode=rwc");
+    match prefix {
+        Some(prefix) => format!("sqlite://{prefix}/vizfold.db?mode=rwc"),
+        None => format!("sqlite://{data_home}/vizfold/vizfold.db?mode=rwc"),
     }
-    let dh = std::env::var("XDG_DATA_HOME")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| format!("{}/.local/share", home_dir()));
-    format!("sqlite://{dh}/vizfold/vizfold.db?mode=rwc")
 }
 
 /// File behind `database_url()`, when it is a file-backed sqlite URL.
@@ -298,8 +308,8 @@ mod tests {
         assert_eq!(env_base().file_name().unwrap(), "envs");
     }
 
-    /// Mirrors `setup::config`'s `DATA=${OPENFOLD_DATA_DIR:-$STATE/data}`. This moved once, in the
-    /// state-dir change, and a silent drift makes `status` and `uninstall` name the wrong directory.
+    /// Mirrors `setup::config`'s `DATA=${OPENFOLD_DATA_DIR:-$STATE/data}`. It moved once already, and
+    /// drift makes `status` and `uninstall` name a directory no install uses.
     #[test]
     fn the_data_dir_default_sits_under_the_backend_state_dir() {
         assert_eq!(
@@ -310,6 +320,21 @@ mod tests {
             super::default_prefix("/home/me"),
             std::path::PathBuf::from("/home/me/openfold")
         );
+    }
+
+    /// The three sources in order. A configured database being ignored does not fail loudly -- it
+    /// silently opens a different file, and the run history looks gone.
+    #[test]
+    #[rustfmt::skip]
+    fn the_database_url_prefers_vizfold_db_then_the_prefix() {
+        let url = |db: Option<&str>, prefix: Option<&str>| {
+            super::database_url_from(db.map(str::to_owned), prefix.map(str::to_owned), "/xdg")
+        };
+
+        assert_eq!(url(Some("/db/mine.db"), Some("/p")), "sqlite:///db/mine.db?mode=rwc");
+        assert_eq!(url(Some("sqlite://x?mode=ro"), Some("/p")), "sqlite://x?mode=ro");
+        assert_eq!(url(None, Some("/p")), "sqlite:///p/vizfold.db?mode=rwc");
+        assert_eq!(url(None, None), "sqlite:///xdg/vizfold/vizfold.db?mode=rwc");
     }
 
     // (name, context, partition, account, gres, resources, time, expected args)

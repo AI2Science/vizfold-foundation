@@ -134,8 +134,7 @@ mod tests {
         assert_eq!(output.stderr.trim(), "stderr");
     }
 
-    /// A signal-killed child has no exit code; we report our own -1 sentinel
-    /// rather than letting the run look successful.
+    /// A signal-killed child has no exit code; -1 is ours, so the run cannot look successful.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_signalled_child_reports_the_minus_one_sentinel() {
