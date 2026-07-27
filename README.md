@@ -23,7 +23,9 @@ curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/
 That fetches the prebuilt binary for your architecture from the latest GitHub release into
 `~/.local/bin` (set `VIZFOLD_VERSION=vX.Y.Z` to pin a release), along with `micromamba` beside it:
 every environment is created and run through it, and everything after this point assumes both are
-on your `PATH`. Then the checkout everything else runs from, and a backend — OpenFold below, or
+on your `PATH`. It also enables tab completion, by adding a line to `~/.bashrc` and to `~/.zshrc`
+where one exists; open a new shell to pick it up. Then the checkout everything else runs from, and a
+backend — OpenFold below, or
 `vizfold install esmfold` (see [docs/esmfold.md](docs/esmfold.md)):
 
 ```bash
@@ -273,6 +275,16 @@ list                List executor records
 show                Show one executor record
 run                 Fold targets in one execution: bundled examples, FASTAs, directories of FASTAs -- or a queued run by id
 register-artifacts  Register known artifacts for a completed run
+completions         Print this shell's tab-completion script. `install.sh` wires it into your shell rc
+```
+
+Completion covers subcommands, flags, and the values of a fixed set — `install <TAB>` offers `base`,
+`openfold`, `esmfold`. The bootstrap eval's the binary's own output rather than writing a script out,
+so a `self-update` cannot leave a stale one behind. To wire it up by hand, or for a shell the
+bootstrap does not touch:
+
+```bash
+eval "$(vizfold completions bash)"          # also: zsh, fish, elvish, powershell
 ```
 
 `vizfold list examples` shows what folds without an MSA search — the bundled monomers whose
@@ -335,7 +347,7 @@ cargo run -- status        # works with no install; everything else needs one
 cargo run -- list models
 ```
 
-Every command except `install`, `uninstall`, `status`, `update` and `self-update` is gated on a
+Every command except `install`, `uninstall`, `status`, `update`, `self-update` and `completions` is gated on a
 config existing at `~/.config/vizfold/vizfold.json` (`VIZFOLD_CONFIG` selects a different file), and
 exits telling you to install a backend first. There is no seed step: migrations run on every
 connect, and the run path seeds the default backends, their `local-*` targets and matching

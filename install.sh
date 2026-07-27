@@ -51,15 +51,37 @@ bootstrap::micromamba() {
     echo "installed micromamba to $BIN/micromamba"
 }
 
+# .zshrc only where it exists -- writing one would invent a config for a shell that may not be
+# installed. .bashrc regardless: bash reads it on every interactive shell, fresh account or not.
+bootstrap::rc() {   # $1 shell, $2 line
+    local rc=$HOME/.${1}rc
+    [ "$1" = bash ] || [ -f "$rc" ] || return 0
+    grep -qsF "$2" "$rc" && return 0
+    # An rc whose last line has no newline would otherwise take ours fused onto the end of it.
+    [ ! -s "$rc" ] || [ -z "$(tail -c1 "$rc")" ] || echo >> "$rc"
+    echo "$2" >> "$rc"
+}
+
 # Put ~/.local/bin on PATH for future shells (idempotent), and note it for this one.
 bootstrap::path() {
     case ":$PATH:" in *":$BIN:"*) return ;; esac
     local line="export PATH=\"$BIN:\$PATH\""
-    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-        if [ "$rc" = "$HOME/.zshrc" ] && [ ! -f "$rc" ]; then continue; fi
-        grep -qsF "$line" "$rc" 2>/dev/null || echo "$line" >> "$rc"
-    done
+    bootstrap::rc bash "$line"
+    bootstrap::rc zsh "$line"
     echo "added $BIN to PATH in your shell rc; restart your shell or run: $line"
+}
+
+# Eval'd from the binary rather than written out as a file, so a self-update leaves nothing stale.
+# By absolute path, never PATH: Ubuntu's and RHEL's stock profiles source .bashrc *before* they
+# prepend ~/.local/bin, so a PATH lookup is false exactly when this line runs. `-x` keeps an
+# uninstalled binary quiet; 2>/dev/null keeps one too old to know the subcommand quiet too. Only
+# interactive shells have completion to register, and bash sources .bashrc under ssh as well.
+bootstrap::completions() {
+    local shell
+    for shell in bash zsh; do
+        bootstrap::rc "$shell" "case \$- in *i*) [ -x \"$BIN/vizfold\" ] && eval \"\$(\"$BIN/vizfold\" completions $shell 2>/dev/null)\" ;; esac"
+    done
+    echo "enabled tab completion in your shell rc"
 }
 
 main() {
@@ -69,6 +91,11 @@ main() {
     bootstrap::download
     bootstrap::micromamba
     bootstrap::path
+    bootstrap::completions
     echo "vizfold installed at $BIN/vizfold. Run \`vizfold install base\` for the checkout, then \`vizfold install openfold\` (or \`esmfold\`)."
 }
-main
+
+# Sourced (tests/install_rc.sh) this file is just its definitions. Not the backend installers'
+# `BASH_SOURCE = $0` guard: piped through `curl | bash` this script has no BASH_SOURCE at all, and
+# that guard would read the absence as "sourced" and bootstrap nothing.
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ "${BASH_SOURCE[0]}" = "$0" ]; then main; fi
