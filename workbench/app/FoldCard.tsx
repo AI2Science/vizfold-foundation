@@ -4,9 +4,16 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Example } from "@/lib/vizfold";
 
-export default function FoldCard({ examples }: { examples: Example[] }) {
+export default function FoldCard({
+  examples,
+  backends,
+}: {
+  examples: Example[];
+  backends: string[];
+}) {
   const router = useRouter();
   const [inputId, setInputId] = useState(examples[0]?.id ?? "");
+  const [backend, setBackend] = useState(backends[0] ?? "");
   const [attn, setAttn] = useState(true);
   const [folding, setFolding] = useState(false);
   const [error, setError] = useState("");
@@ -33,7 +40,7 @@ export default function FoldCard({ examples }: { examples: Example[] }) {
       const response = await fetch("/api/runs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inputId, attn }),
+        body: JSON.stringify({ inputId, attn, backend }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not start the fold.");
@@ -68,6 +75,23 @@ export default function FoldCard({ examples }: { examples: Example[] }) {
             ))}
           </select>
         </label>
+
+        {backends.length > 1 ? (
+          <label className="field">
+            <span>Model</span>
+            <select
+              value={backend}
+              onChange={(event) => setBackend(event.target.value)}
+              disabled={folding}
+            >
+              {backends.map((slug) => (
+                <option key={slug} value={slug}>
+                  {slug}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <label className="field">
           <span className="check">
