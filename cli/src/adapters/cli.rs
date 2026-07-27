@@ -442,12 +442,17 @@ fn prereqs(command: &Command) -> Vec<Component> {
     }
 }
 
+/// Ok and Unverified proceed: a check that could not be run -- an unreachable scheduler -- must
+/// not stop a local fold.
+fn refuses(state: State) -> bool {
+    matches!(state, State::Absent | State::Broken)
+}
+
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // Ok and Unverified proceed: an unreachable scheduler must not stop a local fold.
     for component in prereqs(&cli.command).into_iter().map(settled) {
-        if matches!(component.state, State::Absent | State::Broken) {
+        if refuses(component.state) {
             eprintln!("{}: {}", component.name, component.detail);
             for problem in &component.problems {
                 eprintln!("  {problem}");
@@ -715,17 +720,19 @@ fn on_path(program: &str) -> Option<PathBuf> {
 }
 
 /// What `install.sh` puts beside the vizfold binary. Every environment is created and run through it.
+/// The one binary `install.sh` bootstraps and everything downstream resolves off PATH.
+const CORE_DEP: &str = "micromamba";
+
 fn core_deps_health() -> Component {
-    let found = on_path("micromamba");
+    let found = on_path(CORE_DEP);
     Component {
         name: "core deps",
-        detail: found.as_ref().map_or_else(
-            || "micromamba".to_owned(),
-            |path| path.display().to_string(),
-        ),
+        detail: found
+            .as_ref()
+            .map_or_else(|| CORE_DEP.to_owned(), |path| path.display().to_string()),
         problems: found
             .is_none()
-            .then(|| "no executable `micromamba` on PATH".to_owned())
+            .then(|| format!("no executable `{CORE_DEP}` on PATH"))
             .into_iter()
             .collect(),
         remedy: format!(
@@ -2442,6 +2449,54 @@ mod tests {
     }
 
     /// The checks name keys as strings; one outside the schema reports on a value nothing writes.
+    /// The gate table, by the names it produces. `status` and the updaters stay ungated: they are
+    /// what a user runs to repair a broken install.
+    #[test]
+    fn every_command_gates_on_the_prereqs_it_actually_needs() {
+        let names = |argv: &[&str]| {
+            let cli = Cli::try_parse_from(argv).expect("argv should parse");
+            super::prereqs(&cli.command)
+                .into_iter()
+                .map(|component| component.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(names(&["vizfold", "status"]), Vec::<&str>::new());
+        assert_eq!(names(&["vizfold", "update"]), Vec::<&str>::new());
+        assert_eq!(names(&["vizfold", "install", "openfold"]), ["core deps"]);
+        assert_eq!(names(&["vizfold", "list", "examples"]), ["repo"]);
+        assert_eq!(
+            names(&["vizfold", "serve"]),
+            ["core deps", "repo", "config"]
+        );
+        assert_eq!(
+            names(&["vizfold", "run", "1UBQ_1"]),
+            ["core deps", "config", "openfold"]
+        );
+        assert_eq!(
+            names(&["vizfold", "queue", "esmfold", "--fasta", "x.fasta"]),
+            ["config", "esmfold"]
+        );
+
+        // The one binary the bootstrap installs, named in the detail whether or not it is found.
+        let core = super::core_deps_health();
+        assert!(
+            core.detail.ends_with("micromamba"),
+            "core deps must look for micromamba, got {}",
+            core.detail
+        );
+    }
+
+    /// A check that could not be run is not a failure -- an unreachable slurmctld must not block a
+    /// local fold.
+    #[test]
+    fn only_absent_and_broken_refuse() {
+        assert!(super::refuses(State::Absent));
+        assert!(super::refuses(State::Broken));
+        assert!(!super::refuses(State::Unverified));
+        assert!(!super::refuses(State::Ok));
+    }
+
     #[test]
     fn checked_keys_are_all_in_the_schema() {
         let checked = super::CHECKED_PATHS

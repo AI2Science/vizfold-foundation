@@ -102,7 +102,12 @@ pub fn default_src() -> PathBuf {
 pub fn data_dir() -> PathBuf {
     resolved("OPENFOLD_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| prefix().join("openfold/data"))
+        .unwrap_or_else(|| default_data_dir(&prefix()))
+}
+
+/// The install's own default for it, kept separate so the literal can be pinned.
+fn default_data_dir(prefix: &Path) -> PathBuf {
+    prefix.join("openfold/data")
 }
 
 /// The one directory holding every environment. Mirrors `vizfold::env_base`.
@@ -145,7 +150,12 @@ pub fn config_entries() -> Vec<(String, String)> {
 pub fn prefix() -> PathBuf {
     resolved("OPENFOLD_PREFIX")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("{}/openfold", home_dir())))
+        .unwrap_or_else(|| default_prefix(&home_dir()))
+}
+
+/// `vizfold::prefix`'s own default, kept separate so the literal can be pinned.
+fn default_prefix(home: &str) -> PathBuf {
+    PathBuf::from(format!("{home}/openfold"))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -286,6 +296,20 @@ mod tests {
         assert_eq!(env_dir("openfold").file_name().unwrap(), "vizfold-openfold");
         assert_eq!(env_dir("openfold").parent().unwrap(), env_base());
         assert_eq!(env_base().file_name().unwrap(), "envs");
+    }
+
+    /// Mirrors `setup::config`'s `DATA=${OPENFOLD_DATA_DIR:-$STATE/data}`. This moved once, in the
+    /// state-dir change, and a silent drift makes `status` and `uninstall` name the wrong directory.
+    #[test]
+    fn the_data_dir_default_sits_under_the_backend_state_dir() {
+        assert_eq!(
+            super::default_data_dir(std::path::Path::new("/work/p")),
+            std::path::PathBuf::from("/work/p/openfold/data")
+        );
+        assert_eq!(
+            super::default_prefix("/home/me"),
+            std::path::PathBuf::from("/home/me/openfold")
+        );
     }
 
     // (name, context, partition, account, gres, resources, time, expected args)

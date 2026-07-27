@@ -385,3 +385,33 @@ pub(crate) fn optional_i64(object: &Value, field_name: &str) -> Option<i64> {
 pub(crate) fn data_path(data_dir: &str, suffix: &str) -> String {
     format!("{}/{}", data_dir.trim_end_matches(['/', '\\']), suffix)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// Positionals are emitted in `position` order, not alphabetically -- the model's argv is
+    /// positional, so ordering by name would hand it the arguments swapped.
+    #[test]
+    fn positionals_order_by_position_and_the_rest_by_name() {
+        let schema = json!({"properties": {
+            "aaa_second": {"positional": true, "position": 2},
+            "zzz_first":  {"positional": true, "position": 1},
+            "b_flag": {"cli_flag": "--b"},
+            "a_flag": {"cli_flag": "--a"},
+        }});
+
+        let positional: Vec<&str> = super::sorted_schema_declarations(&schema, true)
+            .into_iter()
+            .filter(|(_, d)| d.get("positional").is_some())
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(positional, ["zzz_first", "aaa_second"]);
+
+        let by_name: Vec<&str> = super::sorted_schema_declarations(&schema, false)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(by_name[0], "a_flag", "non-positionals sort by name");
+    }
+}
