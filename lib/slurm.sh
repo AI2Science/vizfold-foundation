@@ -147,5 +147,14 @@ slurm::run() {
     local LAUNCH=()
     while IFS= read -r arg; do LAUNCH+=("$arg"); done < <(slurm::launch_args "$ACCOUNT" "${PARTITION:-}" "$PTY")
     echo "${LAUNCH[0]} $SETUP"
-    exec "${LAUNCH[@]}" "$SETUP"
+    exec "${LAUNCH[@]}" bash -c "$(slurm::wait_then_exec)" _ "$SETUP"
+}
+
+# `install repo` can finish seconds before this runs, and $HOME is NFS on most of these clusters: the
+# compute node's attribute cache may not hold the checkout yet, and srun execve'ing a script it
+# cannot see dies with a bare "No such file or directory". bash is local to the node, so it starts
+# either way and waits for the view to catch up; when the file is already there this costs nothing.
+slurm::wait_then_exec() {
+    echo 'for _ in $(seq 60); do [ -r "$1" ] && break; sleep 1; done
+exec bash "$1"'
 }
