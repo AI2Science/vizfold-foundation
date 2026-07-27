@@ -17,45 +17,49 @@ export const BACKENDS: string[] | null =
  *  uninstalled one. */
 export const FOLDABLE = BACKENDS ?? ["openfold", "esmfold"];
 
+/** Where the executor writes each run: `<RUNS_DIR>/<run id>`, alongside its submit log. */
+export const RUNS_DIR = `${PREFIX}/runs`;
+
 const run = promisify(execFile);
 
-export type Example = {
+export type Protein = {
   id: string;
   residues: number;
   description: string;
   sequence: string;
+  /** `alignments/<id>` is there to reuse; false pays for the full MSA search. */
+  alignments: boolean;
 };
 
-export async function listExamples(): Promise<Example[]> {
-  const { stdout } = await run(BIN, ["list", "examples", "--json"]);
+export async function listProteins(): Promise<Protein[]> {
+  const { stdout } = await run(BIN, ["list", "proteins", "--json"]);
   return JSON.parse(stdout);
 }
 
-/** `--no-exec` writes only the run row, so this is near-instant. */
+/** One run for the whole selection — the CLI folds every target in a single execution, with the
+ *  model loaded once. `--no-exec` writes only the run row, so this is near-instant. */
 export async function queueRun(
-  example: Example,
+  ids: string[],
   attn: boolean,
   backend?: string,
 ): Promise<number> {
-  // --attn takes a value and defaults to true, so pass it either way; the CLI reads the id and
-  // sequence out of the example's FASTA itself.
-  const args = ["run", example.id, `--attn=${attn}`, "--no-exec"];
+  // --attn takes a value and defaults to true, so pass it either way; the CLI reads each id's
+  // sequence out of its FASTA itself.
+  const args = ["run", ...ids, `--attn=${attn}`, "--no-exec", "--json"];
   if (backend) args.push("--backend", backend);
   const { stdout } = await run(BIN, args);
-  // Each backend queues under its own label — match the line's shape, not the name in it.
-  const id = stdout.match(/Queued \S+ run (\d+)/)?.[1];
-  if (!id) throw new Error(`no run id in run output: ${stdout.trim()}`);
-  return Number(id);
+  const { run_id: id } = JSON.parse(stdout);
+  if (typeof id !== "number") throw new Error(`no run id in run output: ${stdout.trim()}`);
+  return id;
 }
 
 /** Detached: a fold runs for minutes, far longer than a request may be held open. The page polls
  *  from there, and `fold` registers the artifacts itself once it lands. */
 export function foldInBackground(runId: number): void {
-  // Unset, `${PREFIX}/runs` is "/runs" — mkdir at the filesystem root, after the row is written.
+  // Unset, RUNS_DIR is "/runs" — mkdir at the filesystem root, after the row is written.
   if (!PREFIX) throw new Error("OPENFOLD_PREFIX is unset; start the dashboard with `vizfold serve`");
-  const logs = `${PREFIX}/runs`;
-  mkdirSync(logs, { recursive: true });
-  const log = openSync(`${logs}/${runId}.submit.log`, "a");
+  mkdirSync(RUNS_DIR, { recursive: true });
+  const log = openSync(`${RUNS_DIR}/${runId}.submit.log`, "a");
   const child = spawn(BIN, ["run", String(runId)], {
     detached: true,
     stdio: ["ignore", log, log],

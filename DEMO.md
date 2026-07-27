@@ -12,7 +12,7 @@ bootstrap from the [README](README.md#install):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
-vizfold install base
+vizfold install repo
 vizfold install openfold
 ```
 
@@ -25,8 +25,8 @@ VizFold status
 
 COMPONENT  STATUS  DETAIL
 ---------  ------  ------
-binary     ok      0.6.0 (latest)
-repo       ok      /u/yjayawardana/vizfold-src at v0.6.0
+cli        ok      0.9.0 (latest)
+repo       ok      /u/yjayawardana/vizfold-repo at v0.9.0
 config     ok      19 keys
 openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
@@ -40,7 +40,7 @@ Config: /u/yjayawardana/.config/vizfold/vizfold.json
   OPENFOLD_GPU_ACCOUNT = bbol-delta-gpu
   OPENFOLD_GPU_PARTITION = gpuA100x4-interactive
   OPENFOLD_GPU_TIME = 01:00:00
-  OPENFOLD_HOME = /u/yjayawardana/vizfold-src
+  OPENFOLD_HOME = /u/yjayawardana/vizfold-repo
   OPENFOLD_PREFIX = /work/nvme/bbol/yjayawardana/vizfold
   ...
   database = /work/nvme/bbol/yjayawardana/vizfold/vizfold.db (present)
@@ -52,7 +52,7 @@ unset. Anything unhealthy is listed under `Problems:` with the command that fixe
 ## The short version
 
 ```bash
-vizfold list examples
+vizfold list proteins
 vizfold run 6KWC_1
 ```
 
@@ -130,10 +130,10 @@ Preflight: passed
 [warning] gpu: no GPU visible; the run will fall back to CPU
 [passed] program configured: program 'python3' is configured
 [passed] script argument configured: script argument 'scripts/openfold/run_pretrained_openfold.py' follows -u
-[passed] working directory: '/u/yjayawardana/vizfold-src' exists
-[passed] script file: '/u/yjayawardana/vizfold-src/scripts/openfold/run_pretrained_openfold.py' exists
+[passed] working directory: '/u/yjayawardana/vizfold-repo' exists
+[passed] script file: '/u/yjayawardana/vizfold-repo/scripts/openfold/run_pretrained_openfold.py' exists
 [passed] input_id: run input_id '6KWC_1' is configured
-[passed] fasta_dir: '/u/yjayawardana/vizfold-src/examples/monomer/fasta_dir_6KWC/6KWC.fasta' holds 1 FASTA file(s), tagged '6KWC_1' as run input_id says
+[passed] fasta_dir: '/u/yjayawardana/vizfold-repo/examples/monomer/fasta_dir_6KWC/6KWC.fasta' holds 1 FASTA file(s), tagged '6KWC_1' as run input_id says
 ...
 
 Command exit_code: 0

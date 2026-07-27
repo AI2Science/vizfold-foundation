@@ -1,14 +1,24 @@
 import { NextResponse } from "next/server";
-import { BACKENDS, foldInBackground, listExamples, queueRun } from "@/lib/vizfold";
+import { BACKENDS, foldInBackground, listProteins, queueRun } from "@/lib/vizfold";
 
 export async function POST(request: Request) {
-  const { inputId, attn = true, backend = "" } = await request.json();
+  const { ids, attn = true, backend = "" } = await request.json();
 
-  // Trust boundary: only an id the CLI itself listed is ever handed back to it.
-  const example = (await listExamples()).find((one) => one.id === inputId);
-  if (!example) {
+  // Trust boundary: only ids the CLI itself listed are ever handed back to it.
+  const known = new Set((await listProteins()).map((protein) => protein.id));
+  const wanted: unknown[] = Array.isArray(ids) ? ids : [];
+  const picked = wanted.filter((id): id is string => typeof id === "string" && known.has(id));
+  if (picked.length === 0 || picked.length !== wanted.length) {
     return NextResponse.json(
-      { error: `Unknown example "${inputId}".` },
+      { error: "Pick one or more listed proteins." },
+      { status: 400 },
+    );
+  }
+  // Serving nothing means nothing can fold; an unnamed backend would otherwise fall through to
+  // the CLI's default, which is exactly the backend `serve` found no installation of.
+  if (BACKENDS?.length === 0) {
+    return NextResponse.json(
+      { error: "No backend is being served." },
       { status: 400 },
     );
   }
@@ -21,7 +31,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const runId = await queueRun(example, Boolean(attn), backend);
+    const runId = await queueRun(picked, Boolean(attn), backend);
     foldInBackground(runId);
     return NextResponse.json({ runId }, { status: 201 });
   } catch (error) {

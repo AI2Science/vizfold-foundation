@@ -325,6 +325,71 @@ textarea {
   color: #fff;
 }
 
+.hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 20px 0 0;
+}
+
+.hero-stats dt {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hero-stats dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+}
+
+.picker {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.picker label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  cursor: pointer;
+}
+
+/* Two classes each: `.field span` is bold and would otherwise win. */
+.picker .tag {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.picker .tag-on {
+  border-color: #bfe6cd;
+  background: #e2f5e9;
+  color: #1a7f43;
+}
+
+.picker .note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-soft);
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .page-shell {
     padding-inline: 16px;

@@ -1,5 +1,6 @@
-//! The bundled monomer examples: `fasta_dir_<stem>/<stem>.fasta` beside `alignments/<id>` under
-//! `<OPENFOLD_HOME>/examples/monomer`. Both must exist, or the fold falls back to a full MSA search.
+//! The bundled monomer proteins: `fasta_dir_<stem>/<stem>.fasta` under
+//! `<OPENFOLD_HOME>/examples/monomer`, with `alignments/<id>` beside it where an MSA is precomputed.
+//! One without is still foldable -- it just pays for the full MSA search.
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +13,8 @@ pub struct Example {
     /// The FASTA header's molecule-name field, empty when the header carries only an id.
     pub description: String,
     pub sequence: String,
+    /// `alignments/<id>` is there to reuse. False means folding it runs the full MSA search.
+    pub alignments: bool,
 }
 
 pub fn monomer_dir() -> PathBuf {
@@ -39,7 +42,7 @@ pub fn fasta_file(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Every complete example in `dir`, cheapest first -- residue count is what someone chooses on.
+/// Every protein in `dir`, cheapest first -- residue count is what someone chooses on.
 pub fn scan(dir: &Path) -> Vec<Example> {
     let alignments = dir.join("alignments");
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -55,7 +58,10 @@ pub fn scan(dir: &Path) -> Vec<Example> {
         })
         .filter_map(|entry| first_fasta(&entry.path()))
         .filter_map(|fasta| parse(&std::fs::read_to_string(fasta).ok()?))
-        .filter(|example| alignments.join(&example.id).is_dir())
+        .map(|example| Example {
+            alignments: alignments.join(&example.id).is_dir(),
+            ..example
+        })
         .collect();
     found.sort_by(|a, b| a.residues.cmp(&b.residues).then_with(|| a.id.cmp(&b.id)));
     found
@@ -99,6 +105,7 @@ fn parse(text: &str) -> Option<Example> {
         id,
         description,
         sequence,
+        alignments: false, // only scan() can see the alignments dir beside the FASTA
     })
 }
 
@@ -144,6 +151,7 @@ mod tests {
                 residues: 15,
                 description: "UBIQUITIN".into(),
                 sequence: "MQIFVKTLTGKTITL".into(),
+                alignments: true,
             }]
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -159,8 +167,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Listed either way, but the flag has to be right: it is what decides whether a fold reuses
+    /// the alignments or pays for the full MSA search, and `list proteins` prints it as a column.
     #[test]
-    fn excludes_an_example_with_no_alignment_directory() {
+    fn records_whether_each_protein_has_alignments() {
         let dir = tree(
             "unaligned",
             &[
@@ -168,8 +178,14 @@ mod tests {
                 ("1UBQ", ">1UBQ_1|Chain A|UBIQUITIN\nMQIFVKTL\n", true),
             ],
         );
-        let ids: Vec<String> = scan(&dir).into_iter().map(|e| e.id).collect();
-        assert_eq!(ids, vec!["1UBQ_1"]);
+        let found: Vec<(String, bool)> = scan(&dir)
+            .into_iter()
+            .map(|e| (e.id, e.alignments))
+            .collect();
+        assert_eq!(
+            found,
+            vec![("1UBQ_1".to_owned(), true), ("2OMF_1".to_owned(), false)]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

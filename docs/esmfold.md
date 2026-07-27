@@ -11,7 +11,7 @@ Python 3.11, PyTorch, Transformers, the `esmfold` package) and records `ESMFOLD_
 `~/.config/vizfold/vizfold.json`.
 
 ```bash
-vizfold install base    # once per machine: the checkout the installers live in
+vizfold install repo    # once per machine: the checkout the installers live in
 vizfold install esmfold
 vizfold status          # resolved config + which backends are installed
 ```

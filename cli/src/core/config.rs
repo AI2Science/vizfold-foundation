@@ -87,15 +87,15 @@ pub fn openfold_home() -> PathBuf {
 pub const INSTALLER: &str = "backends/openfold/install/install.sh";
 
 /// Checkout holding `INSTALLER`: `OPENFOLD_HOME`, else the default clone location.
-pub fn vizfold_src() -> PathBuf {
+pub fn vizfold_repo() -> PathBuf {
     resolved("OPENFOLD_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(default_src)
+        .unwrap_or_else(default_repo)
 }
 
-/// Where `vizfold install base` clones -- the only checkout `vizfold uninstall` may delete.
-pub fn default_src() -> PathBuf {
-    PathBuf::from(format!("{}/vizfold-src", home_dir()))
+/// Where `vizfold install repo` clones -- the only checkout `vizfold uninstall` may delete.
+pub fn default_repo() -> PathBuf {
+    PathBuf::from(format!("{}/vizfold-repo", home_dir()))
 }
 
 /// The one root every OpenFold data path resolves under, weights included. Mirrors `setup::config`.
@@ -272,7 +272,7 @@ fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .filter(|root| root.join(INSTALLER).is_file())
-        .map_or_else(default_src, Path::to_path_buf)
+        .map_or_else(default_repo, Path::to_path_buf)
 }
 
 #[cfg(test)]
