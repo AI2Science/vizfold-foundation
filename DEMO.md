@@ -12,7 +12,7 @@ bootstrap from the [README](README.md#install):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AI2Science/vizfold-foundation/main/install.sh | bash
-vizfold install base
+vizfold install source
 vizfold install openfold
 ```
 
@@ -25,8 +25,8 @@ VizFold status
 
 COMPONENT  STATUS  DETAIL
 ---------  ------  ------
-binary     ok      0.6.0 (latest)
-repo       ok      /u/yjayawardana/vizfold-src at v0.6.0
+cli        ok      0.9.0 (latest)
+source     ok      /u/yjayawardana/vizfold-src at v0.9.0
 config     ok      19 keys
 openfold   ok      /work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-openfold
 esmfold    absent  not installed (/work/nvme/bbol/yjayawardana/vizfold/envs/vizfold-esmfold)
@@ -52,7 +52,7 @@ unset. Anything unhealthy is listed under `Problems:` with the command that fixe
 ## The short version
 
 ```bash
-vizfold list examples
+vizfold list proteins
 vizfold run 6KWC_1
 ```
 
