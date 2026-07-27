@@ -263,6 +263,9 @@ main() {
     setup::ready
 }
 
+# Sourced (tests/link_mirror.sh) this file is just its definitions; only an execution installs.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
+
 # A site's hooks are pure function defs; sourcing them here lets it override any setup:: step above.
 [ -n "${OPENFOLD_SITE:-}" ] && [ -f "$REPO/sites/$OPENFOLD_SITE.sh" ] && . "$REPO/sites/$OPENFOLD_SITE.sh"
 main "$@"

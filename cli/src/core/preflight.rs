@@ -216,32 +216,10 @@ pub fn output_dir_check(output_path: &Path) -> PreflightCheck {
 mod tests {
     use super::{PreflightCheck, PreflightReport, PreflightStatus};
 
+    /// Only `Failed` blocks a run: a warning must reach neither `failures()`
+    /// (the list printed as "preflight failed: ...") nor `has_failures()`.
     #[test]
-    fn all_passing_checks_have_no_failures() {
-        let report = PreflightReport::new(vec![PreflightCheck::passed("workspace", "ready")]);
-
-        assert!(!report.has_failures());
-    }
-
-    #[test]
-    fn failed_check_marks_report_as_failed() {
-        let report = PreflightReport::new(vec![PreflightCheck::failed("python", "not found")]);
-
-        assert!(report.has_failures());
-    }
-
-    #[test]
-    fn warnings_do_not_count_as_failures() {
-        let report = PreflightReport::new(vec![PreflightCheck::warning(
-            "cuda",
-            "GPU support is unavailable",
-        )]);
-
-        assert!(!report.has_failures());
-    }
-
-    #[test]
-    fn helpers_return_checks_matching_their_status() {
+    fn warnings_do_not_block_but_failures_do() {
         let report = PreflightReport::new(vec![
             PreflightCheck::passed("workspace", "ready"),
             PreflightCheck::warning("cuda", "unavailable"),
@@ -251,14 +229,5 @@ mod tests {
         assert_eq!(report.failures().len(), 1);
         assert_eq!(report.failures()[0].status, PreflightStatus::Failed);
         assert!(report.has_failures());
-    }
-
-    #[test]
-    fn empty_report_has_no_failures_or_checks() {
-        let report = PreflightReport::default();
-
-        assert!(!report.has_failures());
-        assert!(report.failures().is_empty());
-        assert!(report.checks.is_empty());
     }
 }

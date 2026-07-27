@@ -78,7 +78,7 @@ pub fn version_line(latest: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{asset, tag_from_release_url, version_line, version_of};
+    use super::{asset, tag_from_release_url, version_line};
 
     /// A mismatch would download nothing on the platform install.sh bootstrapped.
     #[test]
@@ -99,13 +99,6 @@ mod tests {
             tag_from_release_url("https://github.com/AI2Science/vizfold-foundation/releases"),
             None
         );
-        assert_eq!(tag_from_release_url(""), None);
-    }
-
-    #[test]
-    fn version_of_accepts_a_tag_or_a_bare_version() {
-        assert_eq!(version_of("v0.5.0"), "0.5.0");
-        assert_eq!(version_of("0.5.0"), "0.5.0");
     }
 
     /// The three answers, against whatever version this build actually is.

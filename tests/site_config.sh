@@ -134,18 +134,24 @@ PY
       echo "  want: $want"; echo "  got:  $got"; exit 1
   fi)) || exit 1
 
-# An inline choice must survive: overwriting one moves someone's run history or staged datasets.
-(export VIZFOLD_DB=$SANDBOX/chosen.db OPENFOLD_DATA_DIR=$SANDBOX/chosen-data
+# Inline beats the site file. The first two keys below are set by every <site>.json, so config::fill
+# has a value of its own to prefer -- keys no site writes would test nothing.
+(export OPENFOLD_PARTITION=chosen-partition OPENFOLD_AF2_ROOT=$SANDBOX/chosen-mirror \
+        VIZFOLD_DB=$SANDBOX/chosen.db
  resolve delta >/dev/null 2>&1
  python3 - "$SANDBOX/delta.json" "$SANDBOX" <<'PY' || exit 1
 import json, sys
 cfg, sandbox = json.load(open(sys.argv[1])), sys.argv[2]
-want = {"VIZFOLD_DB": f"{sandbox}/chosen.db", "OPENFOLD_DATA_DIR": f"{sandbox}/chosen-data"}
+want = {
+    "OPENFOLD_PARTITION": "chosen-partition",         # delta.json sets this to "cpu"
+    "OPENFOLD_AF2_ROOT": f"{sandbox}/chosen-mirror",  # delta.json names the real mirror
+    "VIZFOLD_DB": f"{sandbox}/chosen.db",             # no site file sets this one
+}
 kept = {k: cfg.get(k) for k in want}
 if kept != want:
     print("FAIL the install overwrote a value set inline:", kept, "wanted", want)
     sys.exit(1)
-print("ok   an inline database and data directory survive the install")
+print("ok   an inline choice beats the site file that also sets it")
 PY
 ) || exit 1
 

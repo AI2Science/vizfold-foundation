@@ -165,17 +165,19 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Ids run counter to residue counts on purpose: sorting by id would pass otherwise.
     #[test]
-    fn sorts_cheapest_first() {
+    fn sorts_cheapest_first_then_by_id() {
         let dir = tree(
             "order",
             &[
-                ("2OMF", ">2OMF_1|Chain A|PORIN\nAEIYNKDGNK\n", true),
-                ("1G1J", ">1G1J_1|Chains A, B|NSP4\nIEKQ\n", true),
+                ("1AAA", ">1AAA_1|Chain A|PORIN\nAEIYNKDGNK\n", true),
+                ("9ZZZ", ">9ZZZ_1|Chains A, B|NSP4\nIEKQ\n", true),
+                ("5MMM", ">5MMM_1|Chain A|TIE\nAEIYNKDGNK\n", true),
             ],
         );
         let ids: Vec<String> = scan(&dir).into_iter().map(|e| e.id).collect();
-        assert_eq!(ids, vec!["1G1J_1", "2OMF_1"]);
+        assert_eq!(ids, vec!["9ZZZ_1", "1AAA_1", "5MMM_1"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

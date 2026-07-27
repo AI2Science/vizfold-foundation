@@ -198,6 +198,8 @@ mod tests {
         },
     };
 
+    use crate::core::output_locations::output_location_from;
+
     use super::{SubmitRunInput, UpdateRunStatusInput, runs, submit_run, update_run_status};
 
     async fn test_db() -> Result<DatabaseConnection, DbErr> {
@@ -301,30 +303,37 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn snapshot_records_every_catalog_payload_and_the_resolved_paths() {
-        let snapshot = super::provenance_snapshot(
+    fn snapshot_of(profile_config_json: &str) -> String {
+        super::provenance_snapshot(
             "openfold",
             Some("v2.1"),
             "local-openfold",
             "local_subprocess",
-            r#"{"output_location":"/work/runs"}"#,
+            profile_config_json,
             Path::new("/opt/openfold"),
             Path::new("/opt/prefix"),
             Path::new("/opt/prefix/envs/vizfold-openfold"),
-        );
-        let value: serde_json::Value = serde_json::from_str(&snapshot).expect("valid json");
+        )
+    }
 
-        assert_eq!(value["backend"]["slug"], "openfold");
-        assert_eq!(value["backend"]["version"], "v2.1");
-        assert_eq!(value["target"]["slug"], "local-openfold");
-        assert_eq!(value["profile"]["invocation_kind"], "local_subprocess");
-        assert_eq!(value["profile"]["config"]["output_location"], "/work/runs");
-        assert_eq!(value["resolved"]["openfold_home"], "/opt/openfold");
-        assert_eq!(value["resolved"]["prefix"], "/opt/prefix");
-        assert_eq!(
-            value["resolved"]["env_prefix"],
-            "/opt/prefix/envs/vizfold-openfold"
-        );
+    /// The profile config is embedded parsed, not stringified, so the reader can find it at
+    /// `profile.config.output_location`.
+    #[test]
+    fn the_snapshot_reads_back_through_output_location_from() {
+        let snapshot = snapshot_of(r#"{"output_location":"/work/runs"}"#);
+
+        let resolved = output_location_from(Some(&snapshot), "{}").expect("resolved");
+
+        assert_eq!(resolved, "/work/runs");
+    }
+
+    /// A profile whose config never parsed still yields a usable snapshot, with a null config
+    /// rather than a panic or a raw string.
+    #[test]
+    fn an_unparseable_profile_config_becomes_null() {
+        let value: serde_json::Value =
+            serde_json::from_str(&snapshot_of("not-json")).expect("valid json");
+
+        assert!(value["profile"]["config"].is_null());
     }
 }

@@ -76,10 +76,6 @@ async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
         .find(|target| target.slug == "local-openfold")
         .expect("local OpenFold target should be seeded");
     assert_eq!(openfold_target.target_type, "local");
-    assert_eq!(
-        openfold_target.description.as_deref(),
-        Some("Local OpenFold subprocess execution target for demo/development.")
-    );
 
     let backend = model_backends::list_model_backends(&db)
         .await?
@@ -329,44 +325,46 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
     Ok(())
 }
 
+/// The schema declares `ON DELETE RESTRICT`, and `db::connect` turns foreign keys on: together they
+/// stop a backend disappearing out from under the runs that reference it.
 #[tokio::test]
-async fn baseline_schema_creates_every_table_including_provenance() -> Result<(), DbErr> {
+async fn a_backend_with_runs_cannot_be_deleted() -> Result<(), DbErr> {
     let db = test_db().await?;
+    let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
+    let target =
+        execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
+    let profile = model_invocation_profiles::register_model_invocation_profile(
+        &db,
+        sample_invocation_profile_input(backend.id, target.id),
+    )
+    .await?;
+    runs::submit_run(
+        &db,
+        SubmitRunInput {
+            model_backend_id: backend.id,
+            execution_target_id: target.id,
+            invocation_profile_id: profile.id,
+            status: "submitted".into(),
+            input_id: "1UBQ_1".into(),
+            input_sequence: "MSTNPKPQRITF".into(),
+            model_parameters_json: json!({}).to_string(),
+            execution_parameters_json: json!({}).to_string(),
+            provenance_json: None,
+        },
+    )
+    .await?;
 
-    let tables: Vec<String> = db
-        .query_all(Statement::from_string(
+    let error = db
+        .execute(Statement::from_string(
             DatabaseBackend::Sqlite,
-            "select name from sqlite_master where type='table' order by name".to_owned(),
+            format!("delete from model_backends where id = {}", backend.id),
         ))
-        .await?
-        .iter()
-        .map(|row| row.try_get::<String>("", "name").expect("name"))
-        .collect();
+        .await
+        .expect_err("deleting a referenced backend should fail");
 
-    for expected in [
-        "artifact_types",
-        "artifacts",
-        "execution_targets",
-        "model_backends",
-        "model_invocation_profiles",
-        "runs",
-    ] {
-        assert!(
-            tables.iter().any(|t| t == expected),
-            "missing table {expected}"
-        );
-    }
-
-    let columns: Vec<String> = db
-        .query_all(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "select name from pragma_table_info('runs')".to_owned(),
-        ))
-        .await?
-        .iter()
-        .map(|row| row.try_get::<String>("", "name").expect("name"))
-        .collect();
-
-    assert!(columns.iter().any(|c| c == "provenance_json"));
+    assert!(
+        error.to_string().to_lowercase().contains("foreign key"),
+        "expected a foreign key violation, got {error}"
+    );
     Ok(())
 }

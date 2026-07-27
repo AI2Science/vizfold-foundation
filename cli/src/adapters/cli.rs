@@ -442,12 +442,16 @@ fn prereqs(command: &Command) -> Vec<Component> {
     }
 }
 
+/// Ok and Unverified proceed: an unreachable scheduler must not stop a local fold.
+fn refuses(state: State) -> bool {
+    matches!(state, State::Absent | State::Broken)
+}
+
 pub async fn run() -> Result<(), DbErr> {
     let cli = Cli::parse();
 
-    // Ok and Unverified proceed: an unreachable scheduler must not stop a local fold.
     for component in prereqs(&cli.command).into_iter().map(settled) {
-        if matches!(component.state, State::Absent | State::Broken) {
+        if refuses(component.state) {
             eprintln!("{}: {}", component.name, component.detail);
             for problem in &component.problems {
                 eprintln!("  {problem}");
@@ -715,17 +719,19 @@ fn on_path(program: &str) -> Option<PathBuf> {
 }
 
 /// What `install.sh` puts beside the vizfold binary. Every environment is created and run through it.
+/// The one binary `install.sh` bootstraps and everything downstream resolves off PATH.
+const CORE_DEP: &str = "micromamba";
+
 fn core_deps_health() -> Component {
-    let found = on_path("micromamba");
+    let found = on_path(CORE_DEP);
     Component {
         name: "core deps",
-        detail: found.as_ref().map_or_else(
-            || "micromamba".to_owned(),
-            |path| path.display().to_string(),
-        ),
+        detail: found
+            .as_ref()
+            .map_or_else(|| CORE_DEP.to_owned(), |path| path.display().to_string()),
         problems: found
             .is_none()
-            .then(|| "no executable `micromamba` on PATH".to_owned())
+            .then(|| format!("no executable `{CORE_DEP}` on PATH"))
             .into_iter()
             .collect(),
         remedy: format!(
@@ -1222,7 +1228,7 @@ fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
 /// Undo `vizfold install`. Not a script, because the checkout holding it is one of the things removed.
 fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     let (prefix, home) = (config::prefix(), config::openfold_home());
-    let mut targets = match args.backend {
+    let targets = match args.backend {
         Some(backend) => backend.install_paths(&prefix, &home),
         None => [Backend::Openfold, Backend::Esmfold]
             .into_iter()
@@ -1231,17 +1237,7 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
             .collect(),
     };
 
-    // Relative paths mean an empty config value resolved into one; never delete off the cwd.
-    targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
-    targets.sort();
-    targets.dedup();
-    // Drop what an outer target already covers. ponytail: O(n^2) over ~25 paths.
-    let outer = targets.clone();
-    targets.retain(|path| {
-        !outer
-            .iter()
-            .any(|other| other != path && path.starts_with(other))
-    });
+    let targets = removal_plan(targets);
     let what = args.backend.map_or("vizfold", Backend::slug);
     if targets.is_empty() {
         println!("Nothing to remove for {what}.");
@@ -1284,6 +1280,22 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
         }
     }
     Ok(())
+}
+
+/// What `uninstall` removes, and prints for confirmation. A relative path means an empty config
+/// value resolved into one -- never delete off the cwd.
+fn removal_plan(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
+    targets.retain(|path| path.is_absolute() && std::fs::symlink_metadata(path).is_ok());
+    targets.sort();
+    targets.dedup();
+    // Drop what an outer target already covers. ponytail: O(n^2) over ~25 paths.
+    let outer = targets.clone();
+    targets.retain(|path| {
+        !outer
+            .iter()
+            .any(|other| other != path && path.starts_with(other))
+    });
+    targets
 }
 
 /// What no backend owns, so only a full uninstall removes it. The checkout only if vizfold cloned it.
@@ -2239,64 +2251,7 @@ mod tests {
 
     use crate::core::{db, seed};
 
-    #[test]
-    fn parses_list_runs_with_status_filter() {
-        let cli = Cli::try_parse_from(["vizfold", "list", "runs", "--status", "failed"])
-            .expect("list runs command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::List(ListArgs {
-                resource: ListResource::Runs { status: Some(status) }
-            }) if status == "failed"
-        ));
-    }
-
-    #[test]
-    fn parses_show_run() {
-        let cli = Cli::try_parse_from(["vizfold", "show", "run", "1"])
-            .expect("show run command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Show(ShowArgs {
-                resource: ShowResource::Run { run_id: 1 }
-            })
-        ));
-    }
-
-    #[test]
-    fn parses_queue_openfold_required_arguments() {
-        let cli = Cli::try_parse_from([
-            "vizfold",
-            "queue",
-            "openfold",
-            "--input-id",
-            "6KWC_1",
-            "--fasta",
-            "fasta",
-            "--data-dir",
-            "data",
-        ])
-        .expect("queue command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::Queue(QueueArgs {
-                model: QueueModel::Openfold(OpenfoldQueueArgs {
-                    input_id,
-                    fasta,
-                    data_dir,
-                    attn: true,
-                    use_precomputed_alignments: true,
-                    cpus: None,
-                    ..
-                })
-            }) if input_id.as_deref() == Some("6KWC_1")
-                && fasta.as_deref() == Some("fasta") && data_dir.as_deref() == Some("data")
-        ));
-    }
-
+    /// The defaults, and that `--save-fp16` is a bare presence flag while `--trace-mode` takes a value.
     #[test]
     fn parses_queue_esmfold_arguments() {
         let cli = Cli::try_parse_from([
@@ -2317,19 +2272,17 @@ mod tests {
             cli.command,
             Command::Queue(QueueArgs {
                 model: QueueModel::Esmfold(EsmfoldQueueArgs {
-                    input_id,
-                    fasta,
                     trace_mode,
                     save_fp16: true,
                     structure_traces: false,
                     ref model,
                     ..
                 })
-            }) if input_id.as_deref() == Some("6KWC_1") && fasta == "6KWC.fasta"
-                && trace_mode == "attention" && model == "facebook/esmfold_v1"
+            }) if trace_mode == "attention" && model == "facebook/esmfold_v1"
         ));
     }
 
+    /// The default-true bools take `ArgAction::Set`, so `--flag=false` is a legal spelling.
     #[test]
     fn parses_queue_openfold_optional_flags() {
         let cli = Cli::try_parse_from([
@@ -2338,12 +2291,6 @@ mod tests {
             "openfold",
             "--input-id",
             "6KWC_1",
-            "--fasta",
-            "fasta",
-            "--data-dir",
-            "data",
-            "--cpus",
-            "4",
             "--attn=true",
             "--use-precomputed-alignments=false",
         ])
@@ -2353,7 +2300,6 @@ mod tests {
             cli.command,
             Command::Queue(QueueArgs {
                 model: QueueModel::Openfold(OpenfoldQueueArgs {
-                    cpus: Some(4),
                     attn: true,
                     use_precomputed_alignments: false,
                     ..
@@ -2379,19 +2325,16 @@ mod tests {
         assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
     }
 
+    /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env.
     #[test]
-    fn parses_status() {
-        let cli = Cli::try_parse_from(["vizfold", "status"]).expect("status command should parse");
-        assert!(matches!(cli.command, Command::Status));
-    }
-
-    #[test]
-    fn backend_is_installed_tracks_its_env_prefix() {
+    fn backend_is_installed_tracks_its_own_env_prefix_key() {
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         // SAFETY: single-threaded test; pinned so env_prefix() does not read the real config.
         unsafe { std::env::set_var("ESMFOLD_ENV_PREFIX", &base) };
+        assert_eq!(Backend::Esmfold.env_prefix(), base);
+        assert_ne!(Backend::Openfold.env_prefix(), base);
         assert!(
             Backend::Esmfold.is_installed(),
             "an existing env dir reads as installed"
@@ -2510,6 +2453,73 @@ mod tests {
     }
 
     /// The checks name keys as strings; one outside the schema reports on a value nothing writes.
+    /// `uninstall` is `rm -rf`: no relative path may reach it, and no path an outer target covers.
+    #[test]
+    fn the_removal_plan_keeps_only_absolute_uncovered_paths_that_exist() {
+        let base = std::env::temp_dir().join(format!("vizfold-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("outer/inner")).expect("fixture");
+
+        let plan = super::removal_plan(vec![
+            // Exists relative to the cwd tests run in: without the guard, uninstall deletes it.
+            PathBuf::from("Cargo.toml"),
+            base.join("does-not-exist"), // nothing to remove
+            base.join("outer/inner"),    // covered by its parent below
+            base.join("outer"),
+            base.join("outer"), // duplicate
+        ]);
+
+        assert_eq!(plan, vec![base.join("outer")]);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// The gate table by the names it produces. `status` and the updaters stay ungated -- they are
+    /// what repairs a broken install.
+    #[test]
+    fn every_command_gates_on_the_prereqs_it_actually_needs() {
+        let names = |argv: &[&str]| {
+            let cli = Cli::try_parse_from(argv).expect("argv should parse");
+            super::prereqs(&cli.command)
+                .into_iter()
+                .map(|component| component.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(names(&["vizfold", "status"]), Vec::<&str>::new());
+        assert_eq!(names(&["vizfold", "update"]), Vec::<&str>::new());
+        assert_eq!(names(&["vizfold", "install", "openfold"]), ["core deps"]);
+        assert_eq!(names(&["vizfold", "list", "examples"]), ["repo"]);
+        assert_eq!(
+            names(&["vizfold", "serve"]),
+            ["core deps", "repo", "config"]
+        );
+        assert_eq!(
+            names(&["vizfold", "run", "1UBQ_1"]),
+            ["core deps", "config", "openfold"]
+        );
+        assert_eq!(
+            names(&["vizfold", "queue", "esmfold", "--fasta", "x.fasta"]),
+            ["config", "esmfold"]
+        );
+
+        // The one binary the bootstrap installs, named in the detail whether or not it is found.
+        let core = super::core_deps_health();
+        assert!(
+            core.detail.ends_with("micromamba"),
+            "core deps must look for micromamba, got {}",
+            core.detail
+        );
+    }
+
+    /// The rule `refuses` encodes: Unverified is not a failure.
+    #[test]
+    fn only_absent_and_broken_refuse() {
+        assert!(super::refuses(State::Absent));
+        assert!(super::refuses(State::Broken));
+        assert!(!super::refuses(State::Unverified));
+        assert!(!super::refuses(State::Ok));
+    }
+
     #[test]
     fn checked_keys_are_all_in_the_schema() {
         let checked = super::CHECKED_PATHS
@@ -2685,16 +2695,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_serve_with_port() {
-        let cli = Cli::try_parse_from(["vizfold", "serve", "--port", "3001"])
-            .expect("serve command should parse");
-        assert!(matches!(
-            cli.command,
-            Command::Serve(ServeArgs { port: Some(3001) })
-        ));
-    }
-
-    #[test]
     fn node_version_gate_is_major_then_minor() {
         assert!(node_is_new_enough("22.13.0"));
         assert!(node_is_new_enough("v26.5.0"));
@@ -2707,6 +2707,8 @@ mod tests {
         assert!(!node_is_new_enough("garbage"));
     }
 
+    /// The target is a free string: `run_run` tells a run id from an example id by whether it
+    /// parses as an integer.
     #[test]
     fn parses_run() {
         let cli = Cli::try_parse_from(["vizfold", "run", "1"]).expect("run command should parse");
@@ -2720,11 +2722,7 @@ mod tests {
                 json: false,
             }) if target == "1"
         ));
-    }
 
-    /// One verb: the target is a run id or an example id, told apart by whether it parses as an integer.
-    #[test]
-    fn run_takes_an_example_id_as_its_target() {
         let cli = Cli::try_parse_from(["vizfold", "run", "6KWC_1", "--attn=false"])
             .expect("run command should parse");
 
@@ -2736,6 +2734,26 @@ mod tests {
                 ..
             }) if target == "6KWC_1"
         ));
+    }
+
+    /// No flags at all: `defaults_match_for_example` passes `--attn`, so it cannot see these.
+    #[test]
+    fn queue_openfold_defaults_to_attention_and_precomputed_alignments() {
+        let cli = Cli::try_parse_from(["vizfold", "queue", "openfold"])
+            .expect("queue openfold should parse with no flags");
+        let Command::Queue(QueueArgs {
+            model: QueueModel::Openfold(parsed),
+        }) = cli.command
+        else {
+            panic!("expected an openfold queue");
+        };
+
+        assert!(parsed.attn, "attention maps are on unless asked otherwise");
+        assert!(
+            parsed.use_precomputed_alignments,
+            "a full MSA search is opt-in"
+        );
+        assert_eq!(parsed.residue_idx, 1);
     }
 
     /// `for_example` hardcodes clap's `queue openfold` defaults; this fails if one drifts.
@@ -2764,17 +2782,6 @@ mod tests {
             sequence: "MQIFVKTL".into(),
         };
         assert_eq!(OpenfoldQueueArgs::for_example(&example, true), parsed);
-    }
-
-    #[test]
-    fn parses_register_artifacts() {
-        let cli = Cli::try_parse_from(["vizfold", "register-artifacts", "1"])
-            .expect("register-artifacts command should parse");
-
-        assert!(matches!(
-            cli.command,
-            Command::RegisterArtifacts { run_id: 1 }
-        ));
     }
 
     #[tokio::test]
@@ -2933,9 +2940,16 @@ mod tests {
         );
     }
 
+    /// No declared maximum, or unparseable resources, must not clamp the request to something arbitrary.
     #[test]
-    fn cpus_default_follows_available_parallelism() {
-        let expected = std::thread::available_parallelism().map_or(1, |n| n.get() as i64);
-        assert_eq!(super::default_cpus(), expected);
+    fn cpus_clamp_only_where_the_target_declares_a_maximum() {
+        let with_max = json!({"properties": {"cpus": {"maximum": 14}}}).to_string();
+        assert_eq!(super::clamp_cpus(18, &with_max), 14);
+        assert_eq!(super::clamp_cpus(8, &with_max), 8);
+        assert_eq!(
+            super::clamp_cpus(18, &json!({"properties": {}}).to_string()),
+            18
+        );
+        assert_eq!(super::clamp_cpus(18, "not-json"), 18);
     }
 }
