@@ -143,6 +143,9 @@ setup::build_openfold() {
 setup::link_mirror() {
     log datasets
     for d in "$AF2"/*; do
+        # An empty or unreadable mirror leaves the glob literal, and `ln` would happily make a
+        # dangling link named `*` -- succeeding, so the install runs on and dies at verify instead.
+        [ -e "$d" ] || continue
         [ "${d##*/}" = uniclust30 ] && continue
         # Explicit link name: GNU ln -sfn onto a real dir errors instead of linking inside it.
         ln -sfn "$d" "$DATA/${d##*/}"
@@ -204,16 +207,25 @@ assert util.find_spec("flash_attn"), "flash_attn is not importable"
 assert os.path.isdir(os.environ.get("CUTLASS_PATH", "")), "CUTLASS_PATH is unset"
 print("flash_attn ok, CUTLASS_PATH", os.environ["CUTLASS_PATH"])
 PY
+    # What every fold reads, precomputed alignments or not.
     local b p required=("$DATA/params/params_model_1_ptm.npz" "$STEREO" "$DATA/pdb_mmcif/mmcif_files")
-    [ "$MIRROR" = yes ] && required+=(
-        "$DATA/uniref90/uniref90.fasta"
-        "$DATA/mgnify/mgy_clusters_2022_05.fa"
-        "$DATA/pdb70/pdb70"
-        "$UNICLUST/uniclust30_2018_08"
-        "$DATA/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt"
-    )
     for b in jackhmmer hhblits hhsearch; do command -v "$b" >/dev/null || die "missing binary: $b"; done
     for p in "${required[@]}"; do have "$p" || die "missing: $p"; done
+
+    # The MSA databases are read only when folding a sequence that has no alignments beside it, so a
+    # mirror without them is a working install with a smaller reach -- not a failed one. Dying here
+    # instead would name a mirror path the person running the install usually cannot do anything about.
+    local msa=() m
+    for m in "$DATA/uniref90/uniref90.fasta" "$DATA/mgnify/mgy_clusters_2022_05.fa" \
+             "$DATA/pdb70/pdb70" "$UNICLUST/uniclust30_2018_08" \
+             "$DATA/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt"; do
+        have "$m" || msa+=("${m#"$DATA"/}")
+    done
+    if [ ${#msa[@]} -gt 0 ]; then
+        echo "== note: no MSA databases under ${AF2:-$DATA} -- ${msa[*]}"
+        echo "   The bundled proteins fold: their alignments ship with the checkout."
+        echo "   Folding a sequence of your own needs them: vizfold download openfold all"
+    fi
 }
 
 setup::fold_vars() {
@@ -260,12 +272,12 @@ main() {
         setup::nvrtc_preload
     fi
     setup::openfold_present || setup::build_openfold
-    if [ "$MIRROR" = yes ]; then
-        setup::link_mirror
-    else
-        step params setup::fetch_params
-        setup::fetch_templates
-    fi
+    [ "$MIRROR" = yes ] && setup::link_mirror
+    # Whatever the mirror did not carry, fetch. A mirror holding only the weights, or only the
+    # databases, is normal, and verify's `missing: <path>` names somewhere the user cannot act on.
+    # Both fetches are bounded: one 4 GB tar, and only the mmCIFs the bundled examples cite.
+    have "$DATA/params/params_model_1_ptm.npz" || step params setup::fetch_params
+    [ -n "$(ls -A "$DATA/pdb_mmcif/mmcif_files" 2>/dev/null | head -1)" ] || setup::fetch_templates
     setup::stereo
     setup::verify
     setup::fold_vars
