@@ -18,3 +18,4 @@ jobs:
       - run: bash tests/esmfold_env.sh
       - run: bash tests/install_rc.sh
       - run: bash tests/configure_repo.sh
+      - run: bash tests/libcuda_stub.sh

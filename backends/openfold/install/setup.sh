@@ -59,17 +59,31 @@ setup::env() {
     micromamba create -y --no-rc -p "$ENV_DIR" -f "$ENV_YML" "cuda-version<=$MAX_CUDA"
 }
 
+# `-lcuda` names the driver, which installs only libcuda.so.1 -- nothing a linker can resolve. The
+# toolkit's stub supplies the missing .so, and carries SONAME libcuda.so.1, so anything linked
+# against it still loads the real driver. Triton needs this when it builds its cuda_utils shim,
+# which it does on the first fold as well as during verify.
+setup::libcuda_stubs() {
+    local stub
+    for stub in "$CONDA_PREFIX"/lib/stubs/libcuda.so "$CONDA_PREFIX"/targets/*/lib/stubs/libcuda.so; do
+        [ -e "$stub" ] && { dirname "$stub"; return; }
+    done
+}
+
 # activate.d is the one place a fold's runtime variables come from; `micromamba run -p` applies it.
 setup::activate() {
     log activate
     mamba::activate "$ENV_DIR"
     mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+    # Link time only. On LD_LIBRARY_PATH the stub would shadow the real driver and every fold would
+    # come up with no GPU, which is a far quieter failure than the link error it fixes.
+    local stubs; stubs=$(setup::libcuda_stubs)
     cat > "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh" <<ACTIVATE
 export CUTLASS_PATH=$CUTLASS
 export KMP_AFFINITY=none
 export OPENFOLD_DATA_DIR=$DATA
 export TRITON_CACHE_DIR=\${TRITON_CACHE_DIR:-/tmp/vizfold-triton-\$(id -u)}
-export LIBRARY_PATH=\$CONDA_PREFIX/lib:\${LIBRARY_PATH:-}
+export LIBRARY_PATH=\$CONDA_PREFIX/lib${stubs:+:$stubs}:\${LIBRARY_PATH:-}
 export LD_LIBRARY_PATH=\$CONDA_PREFIX/lib:\${LD_LIBRARY_PATH:-}
 ACTIVATE
     . "$CONDA_PREFIX/etc/conda/activate.d/openfold.sh"
