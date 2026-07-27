@@ -20,3 +20,4 @@ jobs:
       - run: bash tests/configure_repo.sh
       - run: bash tests/libcuda_stub.sh
       - run: bash tests/slurm_account.sh
+      - run: bash tests/wait_then_exec.sh
