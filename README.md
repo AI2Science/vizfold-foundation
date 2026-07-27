@@ -54,14 +54,16 @@ An install is two halves: the `vizfold` binary and the checkout it runs the inst
 dashboard from, pinned to the binary's own release tag.
 
 ```bash
-vizfold self-update      # replace the binary with the newest release, then bring its checkout along
-vizfold update           # move the checkout to this binary's tag (clones it if there is none)
+vizfold self-update      # the binary only
+vizfold update           # the checkout only, to this binary's tag (clones it if there is none)
 ```
 
-`self-update` runs `vizfold update` afterwards because a new binary on an old checkout runs the old
-install scripts — which `status` reports as a broken `repo` if the two ever drift. `vizfold update
---ref <tag-or-branch>` moves the checkout somewhere else; it refuses to touch a checkout with
-uncommitted changes.
+One command each, so run both to move a whole install. Between them the checkout is behind, which
+`status` reports as a broken `repo` — "the scripts are v0.7.1, but this binary is v0.7.2" — and
+which `serve` and `list examples` refuse on, since both read the checkout.
+
+`vizfold update --ref <tag-or-branch>` moves the checkout somewhere else; it refuses to touch a
+checkout with uncommitted changes.
 
 ### Uninstall
 
@@ -239,8 +241,8 @@ install             Install a model backend (openfold or esmfold) on this machin
 download            Download a backend's data (OpenFold AlphaFold2 databases/params)
 status              Show resolved config, which backends are installed, and whether it all checks out
 uninstall           Remove one backend, or everything the install generated
-update              Update the vizfold checkout the installers and dashboard come from
-self-update         Replace this binary with the latest release, then update the checkout to match
+update              Move the checkout the installers and dashboard run from to this binary's release
+self-update         Replace this binary with the latest release. Run `update` after, for the checkout
 serve               Start the workbench dashboard
 list                List executor records
 show                Show one executor record

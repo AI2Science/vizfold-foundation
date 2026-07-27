@@ -45,9 +45,9 @@ enum Command {
     Status,
     /// Remove one backend, or everything the install generated.
     Uninstall(UninstallArgs),
-    /// Update the vizfold checkout the installers and dashboard come from.
+    /// Move the checkout the installers and dashboard run from to this binary's release.
     Update(UpdateArgs),
-    /// Replace this binary with the latest release, then update the checkout to match.
+    /// Replace this binary with the latest release. Run `update` after, for the checkout.
     SelfUpdate(SelfUpdateArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
@@ -1190,16 +1190,9 @@ fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
         ))
     })?;
     println!("vizfold {wanted} is installed at {}", exe.display());
-
-    // The new binary, not this one, knows which checkout its own scripts came from.
-    println!();
-    match std::process::Command::new(&exe).arg("update").status() {
-        Ok(status) if status.success() => Ok(()),
-        _ => {
-            println!("The checkout could not be updated; run `vizfold update` yourself.");
-            Ok(())
-        }
-    }
+    // The scripts are pinned per version, so the checkout is now behind until `update` moves it.
+    println!("The checkout still runs {current}'s scripts. Bring it along with: vizfold update");
+    Ok(())
 }
 
 /// Prove the download is a working binary of the version it claims before it replaces anything.
@@ -1207,7 +1200,7 @@ fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
     run_to_completion(
         "download",
         std::process::Command::new("curl")
-            .args(["-fSL", url, "-o"])
+            .args(["-fsSL", url, "-o"])
             .arg(staged),
     )?;
     std::fs::set_permissions(staged, std::os::unix::fs::PermissionsExt::from_mode(0o755))
