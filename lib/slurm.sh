@@ -44,7 +44,18 @@ slurm::nvme_alloc() {
     return 0
 }
 
-slurm::default_account() { echo "${OPENFOLD_ACCOUNT:-$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null)}"; }
+# DefaultAccount is blank wherever a cluster never set one -- Nexus is one -- so fall back to the
+# associations. Exactly one is the answer; with several, which to charge is the user's call and the
+# prompt stays empty rather than guessing.
+slurm::default_account() {
+    local default assoc
+    [ -n "${OPENFOLD_ACCOUNT:-}" ] && { echo "$OPENFOLD_ACCOUNT"; return; }
+    default=$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null | head -1)
+    [ -n "$default" ] && { echo "$default"; return; }
+    assoc=$(sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | sort -u | grep -c .)
+    [ "$assoc" = 1 ] && sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null | sort -u
+    return 0
+}
 
 # Three sources: Delta's login nodes cannot always reach slurmctld. Lower-cased to match sites/.
 slurm::cluster() {
@@ -97,6 +108,10 @@ vizfold::settle_site() {
     [ -n "${OPENFOLD_PREFIX:-}" ] || slurm::discover    # the atoms the <site>.json templates need
     config::site_defaults "$SITES/$site.sh"             # fill + expand <site>.json off those atoms
     config::load                                        # then the previous install's answers
+
+    # Before the prefix, so `vizfold install repo` records it too: that path writes the config
+    # without ever reaching slurm::run, which is where the account is otherwise settled.
+    export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$(slurm::default_account)}
 
     prefix=$(interactive::resolve OPENFOLD_PREFIX "install prefix" \
         "${OPENFOLD_PREFIX:-$(slurm::default_prefix)}")
