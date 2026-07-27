@@ -93,7 +93,7 @@ pub fn vizfold_src() -> PathBuf {
         .unwrap_or_else(default_src)
 }
 
-/// Where `vizfold install` clones -- the only checkout `vizfold uninstall` may delete.
+/// Where `vizfold install base` clones -- the only checkout `vizfold uninstall` may delete.
 pub fn default_src() -> PathBuf {
     PathBuf::from(format!("{}/vizfold-src", home_dir()))
 }

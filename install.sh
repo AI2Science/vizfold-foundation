@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bootstrap vizfold's core dependencies into ~/.local/bin -- the release binary and micromamba, which every environment is created and run through. Then `vizfold install` installs a model backend (OpenFold, ESMFold; each a pip/conda-installable package under backends/<name>/ with its own installer).
+# Bootstrap vizfold's core dependencies into ~/.local/bin -- the release binary and micromamba, which every environment is created and run through. Then `vizfold install base` fetches the checkout those live in, and `vizfold install <backend>` installs a model backend (OpenFold, ESMFold; each a pip/conda-installable package under backends/<name>/ with its own installer).
 set -euo pipefail
 
 die() { echo "FATAL: $*" >&2; exit 1; }
@@ -69,6 +69,6 @@ main() {
     bootstrap::download
     bootstrap::micromamba
     bootstrap::path
-    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install openfold\` (or \`esmfold\`) to install a model backend."
+    echo "vizfold installed at $BIN/vizfold. Run \`vizfold install base\` for the checkout, then \`vizfold install openfold\` (or \`esmfold\`)."
 }
 main

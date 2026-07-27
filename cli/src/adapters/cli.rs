@@ -37,17 +37,17 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Install a model backend (openfold or esmfold) on this machine.
+    /// Install the checkout everything runs from (`base`), or a model backend from it.
     Install(InstallArgs),
     /// Download a backend's data (OpenFold AlphaFold2 databases/params).
     Download(DownloadArgs),
     /// Show resolved config, which backends are installed, and whether it all checks out.
     Status,
-    /// Remove one backend, or everything the install generated.
+    /// Remove one part, or everything the install generated.
     Uninstall(UninstallArgs),
-    /// Move the checkout the installers and dashboard run from to this binary's release.
+    /// Move the checkout to this binary's release (`base`), or reinstall a backend from it.
     Update(UpdateArgs),
-    /// Replace this binary with the latest release. Run `update` after, for the checkout.
+    /// Replace this binary with the latest release. Run `update base` after, for the checkout.
     SelfUpdate(SelfUpdateArgs),
     /// Start the workbench dashboard.
     Serve(ServeArgs),
@@ -65,9 +65,48 @@ enum Command {
 
 #[derive(Debug, Args)]
 struct InstallArgs {
-    /// Model backend to install.
+    /// What to install: the checkout everything runs from, or a model backend from it.
     #[arg(value_enum)]
-    backend: Backend,
+    part: Part,
+}
+
+/// What a lifecycle verb acts on: the checkout every backend installs from, or one backend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Part {
+    Base,
+    Openfold,
+    Esmfold,
+}
+
+impl Part {
+    fn backend(self) -> Option<Backend> {
+        match self {
+            Self::Base => None,
+            Self::Openfold => Some(Backend::Openfold),
+            Self::Esmfold => Some(Backend::Esmfold),
+        }
+    }
+
+    fn slug(self) -> &'static str {
+        self.backend().map_or("base", Backend::slug)
+    }
+
+    /// Exactly what `install <part>` puts there, so `uninstall <part>` takes back the same set.
+    fn install_paths(self, prefix: &Path, home: &Path) -> Vec<PathBuf> {
+        self.backend().map_or_else(
+            || base_paths(prefix),
+            |backend| backend.install_paths(prefix, home),
+        )
+    }
+}
+
+/// The checkout, and only the clone vizfold made itself: never a user-supplied `OPENFOLD_HOME`.
+fn base_paths(prefix: &Path) -> Vec<PathBuf> {
+    let src = config::vizfold_src();
+    (src == config::default_src() && !prefix.starts_with(&src))
+        .then_some(src)
+        .into_iter()
+        .collect()
 }
 
 #[derive(Debug, Args)]
@@ -172,9 +211,9 @@ impl Backend {
 
 #[derive(Debug, Args)]
 struct UninstallArgs {
-    /// Model backend to remove. Omit to remove every backend, the config, and the run database too.
+    /// Part to remove. Omit to remove every part, the config, and the run database too.
     #[arg(value_enum)]
-    backend: Option<Backend>,
+    part: Option<Part>,
     /// Remove without the confirmation prompt.
     #[arg(long, short = 'y')]
     yes: bool,
@@ -182,9 +221,15 @@ struct UninstallArgs {
 
 #[derive(Debug, Args)]
 struct UpdateArgs {
-    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag.
+    /// What to bring current: the checkout, or a backend reinstalled from it.
+    #[arg(value_enum)]
+    part: Part,
+    /// Tag or branch to move the checkout to. Defaults to this binary's own release tag. `base` only.
     #[arg(long, value_name = "REF")]
     r#ref: Option<String>,
+    /// Reinstall without the confirmation prompt.
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -421,15 +466,20 @@ fn prereqs(command: &Command) -> Vec<Component> {
         )
     };
     match command {
-        Command::Status | Command::Uninstall(_) | Command::Update(_) | Command::SelfUpdate(_) => {
-            vec![]
+        Command::Status | Command::Uninstall(_) | Command::SelfUpdate(_) => vec![],
+        // A backend installs from the checkout; base's own verbs are what repair it, so they stay off it.
+        Command::Install(InstallArgs { part }) | Command::Update(UpdateArgs { part, .. }) => {
+            std::iter::once(core_deps_health())
+                .chain(part.backend().map(|_| repo_health()))
+                .collect()
         }
-        Command::Install(_) => vec![core_deps_health()],
         Command::List(ListArgs {
             resource: ListResource::Examples { .. },
         }) => vec![repo_health()],
         Command::Serve(_) => vec![core_deps_health(), repo_health(), config_health()],
-        Command::Download(args) => vec![config_health(), backend(Some(args.backend))],
+        Command::Download(args) => {
+            vec![repo_health(), config_health(), backend(Some(args.backend))]
+        }
         Command::Queue(args) => vec![
             config_health(),
             backend(Some(match args.model {
@@ -437,7 +487,12 @@ fn prereqs(command: &Command) -> Vec<Component> {
                 QueueModel::Esmfold(_) => Backend::Esmfold,
             })),
         ],
-        Command::Run(args) => vec![core_deps_health(), config_health(), backend(args.backend)],
+        Command::Run(args) => vec![
+            core_deps_health(),
+            repo_health(),
+            config_health(),
+            backend(args.backend),
+        ],
         _ => vec![config_health()],
     }
 }
@@ -463,11 +518,11 @@ pub async fn run() -> Result<(), DbErr> {
 
     // These touch the filesystem only; they need no database connection.
     match cli.command {
-        Command::Install(args) => return run_install(args.backend),
+        Command::Install(args) => return run_install(args.part),
         Command::Download(args) => return run_download(args.backend, args.dataset),
         Command::Status => return run_status(),
         Command::Uninstall(args) => return run_uninstall(args),
-        Command::Update(args) => return run_update(args.r#ref.as_deref()),
+        Command::Update(args) => return run_update(args),
         Command::SelfUpdate(args) => return run_self_update(args),
         Command::Serve(args) => return run_serve(args),
         Command::List(ListArgs {
@@ -508,20 +563,27 @@ pub async fn run() -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Run the checkout's installer, cloning the checkout first -- the binary ships only itself. Idempotent.
-fn run_install(backend: Backend) -> Result<(), DbErr> {
+/// Make a part exist. Idempotent: both backend installers short-circuit on presence, as base does.
+fn run_install(part: Part) -> Result<(), DbErr> {
+    match part.backend() {
+        Some(backend) => install_backend(backend),
+        None => install_base(),
+    }
+}
+
+/// Fetch the checkout the binary installs everything from -- it ships only itself. Never moves one.
+fn install_base() -> Result<(), DbErr> {
+    let src = config::vizfold_src();
+    if src.join(config::INSTALLER).is_file() {
+        println!("{} already is a vizfold checkout.", src.display());
+        return Ok(());
+    }
+    clone_checkout(&src)
+}
+
+fn install_backend(backend: Backend) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let installer = src.join(backend.installer());
-    if !installer.is_file() {
-        clone_checkout(&src)?;
-    }
-    if !installer.is_file() {
-        return Err(DbErr::Custom(format!(
-            "no {} installer at {}; set OPENFOLD_HOME to a checkout",
-            backend.slug(),
-            installer.display()
-        )));
-    }
     println!(
         "Installing {}: bash {}",
         backend.slug(),
@@ -547,7 +609,7 @@ fn run_to_completion(what: &str, command: &mut std::process::Command) -> Result<
         .ok_or_else(|| DbErr::Custom(format!("{what}: {status}")))
 }
 
-/// Download a backend's data into `config::data_dir()`, cloning the checkout if absent.
+/// Download a backend's data into `config::data_dir()`.
 fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
     let Some(dir) = backend.downloader_dir() else {
         println!(
@@ -557,9 +619,6 @@ fn run_download(backend: Backend, dataset: String) -> Result<(), DbErr> {
         return Ok(());
     };
     let src = config::vizfold_src();
-    if !src.join(dir).is_dir() {
-        clone_checkout(&src)?;
-    }
     let script_name = if dataset == "all" {
         "download_alphafold_dbs.sh".to_string()
     } else {
@@ -752,13 +811,22 @@ fn binary_health() -> Component {
 
 /// The checkout everything runs from. Drift is flagged only for the clone vizfold made itself.
 fn repo_health() -> Component {
-    let src = config::vizfold_src();
-    let at = checkout_ref(&src);
+    repo_health_at(&config::vizfold_src())
+}
+
+fn repo_health_at(src: &Path) -> Component {
+    if !src.join(config::INSTALLER).is_file() {
+        return Component {
+            name: "repo",
+            state: State::Absent,
+            detail: format!("no checkout at {}", src.display()),
+            remedy: "vizfold install base".to_owned(),
+            ..Default::default()
+        };
+    }
+    let at = checkout_ref(src);
     let expected = release::tag();
     let problems = match &at {
-        _ if !src.join(config::INSTALLER).is_file() => {
-            vec![format!("{} is not a vizfold checkout", src.display())]
-        }
         Some(at) if *at != expected && src == config::default_src() => {
             vec![format!(
                 "the scripts are {at}, but this binary is {expected}"
@@ -773,14 +841,14 @@ fn repo_health() -> Component {
             None => src.display().to_string(),
         },
         problems,
-        remedy: "vizfold update".to_owned(),
+        remedy: "vizfold update base".to_owned(),
         ..Default::default()
     }
 }
 
 /// Path keys, each with the file proving the claim (empty: the path itself). All must be in `CONFIG_KEYS`.
 const CHECKED_PATHS: &[(&str, &str)] = &[
-    ("OPENFOLD_HOME", config::INSTALLER),
+    // Not OPENFOLD_HOME: `repo` settles the checkout, and one missing directory must redden one component.
     ("OPENFOLD_PREFIX", ""),
     ("VIZFOLD_ENV_BASE", ""),
 ];
@@ -888,6 +956,7 @@ fn backend_health(backend: Backend) -> Component {
     // The backend's own CLI, in the environment that runs it.
     problems.extend(missing("entrypoint", env.join("bin").join(backend.slug())));
     if backend == Backend::Openfold {
+        problems.extend(checkout_problem());
         problems.extend(params_problem());
         problems.extend(example_problem());
     }
@@ -898,6 +967,18 @@ fn backend_health(backend: Backend) -> Component {
         remedy: format!("vizfold install {}", backend.slug()),
         ..Default::default()
     }
+}
+
+/// OpenFold is an editable install into the checkout, so losing it breaks every fold at import --
+/// which the environment itself, entrypoint and all, still looks healthy through.
+fn checkout_problem() -> Option<String> {
+    let src = config::vizfold_src();
+    (!src.join(config::INSTALLER).is_file()).then(|| {
+        format!(
+            "the checkout it is installed from is gone: {}",
+            src.display()
+        )
+    })
 }
 
 fn missing(what: &str, path: PathBuf) -> Option<String> {
@@ -1082,12 +1163,53 @@ fn clone_checkout(src: &std::path::Path) -> Result<(), DbErr> {
     }
 }
 
+/// Bring a part current: the checkout to a ref, a backend to the checkout as it now stands.
+fn run_update(args: UpdateArgs) -> Result<(), DbErr> {
+    match args.part.backend() {
+        None => update_base(args.r#ref.as_deref()),
+        Some(backend) if args.r#ref.is_some() => Err(DbErr::Custom(format!(
+            "--ref moves the checkout, so it belongs to `vizfold update base`, not {}",
+            backend.slug()
+        ))),
+        Some(backend) => reinstall(backend, args.yes),
+    }
+}
+
+/// Neither installer reruns on drift -- openfold seals each step in `$STATE/.done`, esmfold gates on
+/// an import check -- so the scripts a fresh checkout brought only reach the env through this.
+fn reinstall(backend: Backend, yes: bool) -> Result<(), DbErr> {
+    let targets = removal_plan(reinstall_paths(
+        backend,
+        &config::prefix(),
+        &config::openfold_home(),
+    ));
+    let headline = format!("Reinstalling {} first removes:", backend.slug());
+    if !targets.is_empty() && !remove_confirmed(&headline, &targets, yes)? {
+        return Ok(());
+    }
+    install_backend(backend)
+}
+
+/// Reinstall takes back everything install planted except downloads: params are ~4 GB, or a mirror
+/// symlink tree, and neither is install state.
+fn reinstall_paths(backend: Backend, prefix: &Path, home: &Path) -> Vec<PathBuf> {
+    let data = config::data_dir();
+    backend
+        .install_paths(prefix, home)
+        .into_iter()
+        .filter(|path| *path != data)
+        .collect()
+}
+
 /// Move the checkout to a ref, by default this binary's own release tag. Install droppings are gitignored.
-fn run_update(wanted: Option<&str>) -> Result<(), DbErr> {
+fn update_base(wanted: Option<&str>) -> Result<(), DbErr> {
     let src = config::vizfold_src();
     let target = wanted.unwrap_or(&release::tag()).to_owned();
     if !src.join(config::INSTALLER).is_file() {
-        return clone_checkout(&src);
+        return Err(DbErr::Custom(format!(
+            "no vizfold checkout at {}; create one with `vizfold install base`",
+            src.display()
+        )));
     }
     if !src.join(".git").exists() {
         return Err(DbErr::Custom(format!(
@@ -1191,7 +1313,9 @@ fn run_self_update(args: SelfUpdateArgs) -> Result<(), DbErr> {
     })?;
     println!("vizfold {wanted} is installed at {}", exe.display());
     // The scripts are pinned per version, so the checkout is now behind until `update` moves it.
-    println!("The checkout still runs {current}'s scripts. Bring it along with: vizfold update");
+    println!(
+        "The checkout still runs {current}'s scripts. Bring it along with: vizfold update base"
+    );
     Ok(())
 }
 
@@ -1221,39 +1345,31 @@ fn fetch_release(url: &str, staged: &Path, wanted: &str) -> Result<(), DbErr> {
 /// Undo `vizfold install`. Not a script, because the checkout holding it is one of the things removed.
 fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     let (prefix, home) = (config::prefix(), config::openfold_home());
-    let targets = match args.backend {
-        Some(backend) => backend.install_paths(&prefix, &home),
-        None => [Backend::Openfold, Backend::Esmfold]
-            .into_iter()
-            .flat_map(|backend| backend.install_paths(&prefix, &home))
+    // One plan for all parts: `removal_plan` folds the backend paths that live inside the checkout
+    // under it, which removing part by part would instead drop as already gone.
+    let targets = match args.part {
+        Some(part) => part.install_paths(&prefix, &home),
+        None => Part::value_variants()
+            .iter()
+            .flat_map(|part| part.install_paths(&prefix, &home))
             .chain(shared_paths(&prefix, &home))
             .collect(),
     };
 
     let targets = removal_plan(targets);
-    let what = args.backend.map_or("vizfold", Backend::slug);
+    let what = args.part.map_or("vizfold", Part::slug);
     if targets.is_empty() {
         println!("Nothing to remove for {what}.");
         return Ok(());
     }
 
-    println!("This removes everything {what} installed:");
-    for target in &targets {
-        println!("  {}", target.display());
-    }
-    if !args.yes && !confirmed()? {
-        println!("Aborted.");
+    let headline = format!("This removes everything {what} installed:");
+    if !remove_confirmed(&headline, &targets, args.yes)? {
         return Ok(());
     }
-    for target in &targets {
-        match remove_path(target) {
-            Ok(()) => println!("removed {}", target.display()),
-            Err(error) => eprintln!("warning: could not remove {}: {error}", target.display()),
-        }
-    }
-    match args.backend {
+    match args.part {
         Some(_) => println!(
-            "\nKept: the config, the run database, and every other backend.\nReinstall with: vizfold install {what}"
+            "\nKept: the config, the run database, and every other part.\nReinstall with: vizfold install {what}"
         ),
         None => {
             // Only once emptied: remove_dir refuses otherwise, which is the whole guard.
@@ -1275,6 +1391,25 @@ fn run_uninstall(args: UninstallArgs) -> Result<(), DbErr> {
     Ok(())
 }
 
+/// Print what goes, confirm it unless `yes`, remove it. `false` means the user declined and nothing went.
+fn remove_confirmed(headline: &str, targets: &[PathBuf], yes: bool) -> Result<bool, DbErr> {
+    println!("{headline}");
+    for target in targets {
+        println!("  {}", target.display());
+    }
+    if !yes && !confirmed()? {
+        println!("Aborted.");
+        return Ok(false);
+    }
+    for target in targets {
+        match remove_path(target) {
+            Ok(()) => println!("removed {}", target.display()),
+            Err(error) => eprintln!("warning: could not remove {}: {error}", target.display()),
+        }
+    }
+    Ok(true)
+}
+
 /// What `uninstall` removes, and prints for confirmation. A relative path means an empty config
 /// value resolved into one -- never delete off the cwd.
 fn removal_plan(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -1291,7 +1426,7 @@ fn removal_plan(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
     targets
 }
 
-/// What no backend owns, so only a full uninstall removes it. The checkout only if vizfold cloned it.
+/// What no part owns, so only a full uninstall removes it.
 fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
     // Named entries, never the env base: only the `vizfold-` ones under it are ours.
     let mut paths = vec![
@@ -1304,10 +1439,6 @@ fn shared_paths(prefix: &Path, home: &Path) -> Vec<PathBuf> {
     // The staged copy only; with no prefix settled the two are one path, the source tree.
     if prefix != home {
         paths.push(prefix.join("workbench"));
-    }
-    let src = config::vizfold_src();
-    if src == config::default_src() && !prefix.starts_with(&src) {
-        paths.push(src);
     }
     if let Some(database) = config::database_path() {
         let sidecar = |suffix| PathBuf::from(format!("{}{suffix}", database.display()));
@@ -2302,20 +2433,78 @@ mod tests {
     }
 
     #[test]
-    fn parses_install_backend() {
+    fn parses_install_part() {
         for (arg, want) in [
-            ("openfold", Backend::Openfold),
-            ("esmfold", Backend::Esmfold),
+            ("base", Part::Base),
+            ("openfold", Part::Openfold),
+            ("esmfold", Part::Esmfold),
         ] {
             let cli = Cli::try_parse_from(["vizfold", "install", arg])
-                .expect("install <backend> should parse");
-            assert!(
-                matches!(cli.command, Command::Install(InstallArgs { backend }) if backend == want)
-            );
+                .expect("install <part> should parse");
+            assert!(matches!(cli.command, Command::Install(InstallArgs { part }) if part == want));
         }
-        // The backend is required and constrained to the known set.
+        // The part is required and constrained to the known set.
         assert!(Cli::try_parse_from(["vizfold", "install"]).is_err());
         assert!(Cli::try_parse_from(["vizfold", "install", "rosetta"]).is_err());
+    }
+
+    /// `update` takes the same vocabulary `install` does; a bare one is a parse error, not a default.
+    #[test]
+    fn parses_update_part() {
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "update", "base", "--ref", "v0.1.0"])
+                .expect("update base --ref should parse")
+                .command,
+            Command::Update(UpdateArgs { part: Part::Base, r#ref: Some(at), yes: false }) if at == "v0.1.0"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "update", "openfold", "--yes"])
+                .expect("update <backend> --yes should parse")
+                .command,
+            Command::Update(UpdateArgs {
+                part: Part::Openfold,
+                r#ref: None,
+                yes: true
+            })
+        ));
+        assert!(Cli::try_parse_from(["vizfold", "update"]).is_err());
+        assert!(Cli::try_parse_from(["vizfold", "update", "vizfold"]).is_err());
+    }
+
+    /// Only base takes a ref; silently ignoring it on a backend would fake a version move.
+    #[test]
+    fn a_ref_on_a_backend_update_is_refused() {
+        let update = |argv: &[&str]| match Cli::try_parse_from(argv).expect("argv").command {
+            Command::Update(args) => args,
+            other => panic!("not an update: {other:?}"),
+        };
+        assert!(
+            super::run_update(update(&["vizfold", "update", "esmfold", "--ref", "v0.1.0"]))
+                .is_err_and(|error| format!("{error}").contains("vizfold update base"))
+        );
+    }
+
+    /// The one path partition reinstall makes: params are ~4 GB, or a mirror symlink tree.
+    #[test]
+    fn a_reinstall_keeps_the_downloads_and_takes_everything_else() {
+        let base = std::env::temp_dir().join(format!("vizfold-reinstall-{}", std::process::id()));
+        let (prefix, home) = (base.join("prefix"), base.join("checkout"));
+        let full = Backend::Openfold.install_paths(&prefix, &home);
+        let kept = super::reinstall_paths(Backend::Openfold, &prefix, &home);
+
+        assert!(
+            full.contains(&config::data_dir()),
+            "install writes the data dir, or there is nothing to exclude"
+        );
+        assert!(
+            !kept.contains(&config::data_dir()),
+            "downloads are not install state"
+        );
+        assert!(
+            kept.contains(&Backend::Openfold.env_prefix()),
+            "the env is rebuilt"
+        );
+        assert_eq!(kept.len(), full.len() - 1, "only the data dir is spared");
     }
 
     /// Each backend reads its own key, so a stray `ESMFOLD_ENV_PREFIX` cannot move OpenFold's env.
@@ -2340,6 +2529,7 @@ mod tests {
         unsafe { std::env::remove_var("ESMFOLD_ENV_PREFIX") };
     }
 
+    /// A bare `uninstall` stays: it is the only thing that removes what no part owns.
     #[test]
     fn parses_uninstall() {
         assert!(matches!(
@@ -2347,7 +2537,7 @@ mod tests {
                 .expect("uninstall command should parse")
                 .command,
             Command::Uninstall(UninstallArgs {
-                backend: None,
+                part: None,
                 yes: false
             })
         ));
@@ -2356,16 +2546,25 @@ mod tests {
                 .expect("uninstall --yes should parse")
                 .command,
             Command::Uninstall(UninstallArgs {
-                backend: None,
+                part: None,
                 yes: true
             })
         ));
         assert!(matches!(
             Cli::try_parse_from(["vizfold", "uninstall", "esmfold"])
-                .expect("uninstall <backend> should parse")
+                .expect("uninstall <part> should parse")
                 .command,
             Command::Uninstall(UninstallArgs {
-                backend: Some(Backend::Esmfold),
+                part: Some(Part::Esmfold),
+                yes: false
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["vizfold", "uninstall", "base"])
+                .expect("uninstall base should parse")
+                .command,
+            Command::Uninstall(UninstallArgs {
+                part: Some(Part::Base),
                 yes: false
             })
         ));
@@ -2405,25 +2604,41 @@ mod tests {
 
     /// The reinstall invariant: uninstall takes exactly what install puts back, and nothing else.
     #[test]
-    fn one_backend_leaves_the_other_and_everything_shared_alone() {
+    fn one_part_leaves_the_others_and_everything_shared_alone() {
         let base = std::env::temp_dir().join(format!("vizfold-scoped-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
 
-        let openfold = Backend::Openfold.install_paths(&prefix, &home);
-        let esmfold = Backend::Esmfold.install_paths(&prefix, &home);
+        let owned: Vec<Vec<PathBuf>> = Part::value_variants()
+            .iter()
+            .map(|part| part.install_paths(&prefix, &home))
+            .collect();
         let shared = super::shared_paths(&prefix, &home);
 
-        assert!(
-            openfold.iter().all(|path| !esmfold.contains(path)),
-            "the two backends share a path"
-        );
-        for owned in openfold.iter().chain(&esmfold) {
+        for (nth, paths) in owned.iter().enumerate() {
+            for other in owned.iter().enumerate().filter(|(i, _)| *i != nth) {
+                assert!(
+                    paths.iter().all(|path| !other.1.contains(path)),
+                    "two parts share a path"
+                );
+            }
+        }
+        for owned in owned.iter().flatten() {
             assert!(
                 !shared.contains(owned),
-                "{} is a backend's, not shared",
+                "{} is a part's, not shared",
                 owned.display()
             );
         }
+        // Only the clone vizfold made itself: a user-supplied checkout is never `uninstall`'s to take.
+        assert!(
+            super::base_paths(&prefix) == vec![config::default_src()]
+                || config::vizfold_src() != config::default_src(),
+            "base owns the default checkout and nothing else"
+        );
+        assert!(
+            super::base_paths(&config::default_src().join("prefix")).is_empty(),
+            "a prefix inside the checkout keeps the checkout"
+        );
         assert!(shared.contains(&config::config_file()), "config is shared");
         // Removing the base itself once took a whole home directory with it.
         assert!(
@@ -2466,8 +2681,8 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
-    /// The gate table by the names it produces. `status` and the updaters stay ungated -- they are
-    /// what repairs a broken install.
+    /// The gate table by the names it produces. `status` and base's own verbs stay off `repo` --
+    /// they are what a missing or drifted checkout is repaired with.
     #[test]
     fn every_command_gates_on_the_prereqs_it_actually_needs() {
         let names = |argv: &[&str]| {
@@ -2479,16 +2694,30 @@ mod tests {
         };
 
         assert_eq!(names(&["vizfold", "status"]), Vec::<&str>::new());
-        assert_eq!(names(&["vizfold", "update"]), Vec::<&str>::new());
-        assert_eq!(names(&["vizfold", "install", "openfold"]), ["core deps"]);
+        assert_eq!(names(&["vizfold", "uninstall"]), Vec::<&str>::new());
+        assert_eq!(names(&["vizfold", "install", "base"]), ["core deps"]);
+        assert_eq!(names(&["vizfold", "update", "base"]), ["core deps"]);
+        // A backend is installed out of the checkout, so it is refused until there is one.
+        assert_eq!(
+            names(&["vizfold", "install", "openfold"]),
+            ["core deps", "repo"]
+        );
+        assert_eq!(
+            names(&["vizfold", "update", "openfold"]),
+            ["core deps", "repo"]
+        );
         assert_eq!(names(&["vizfold", "list", "examples"]), ["repo"]);
         assert_eq!(
             names(&["vizfold", "serve"]),
             ["core deps", "repo", "config"]
         );
         assert_eq!(
+            names(&["vizfold", "download", "openfold"]),
+            ["repo", "config", "openfold"]
+        );
+        assert_eq!(
             names(&["vizfold", "run", "1UBQ_1"]),
-            ["core deps", "config", "openfold"]
+            ["core deps", "repo", "config", "openfold"]
         );
         assert_eq!(
             names(&["vizfold", "queue", "esmfold", "--fasta", "x.fasta"]),
@@ -2502,6 +2731,32 @@ mod tests {
             "core deps must look for micromamba, got {}",
             core.detail
         );
+    }
+
+    /// Never cloned and drifted are different problems with different fixes; before this, both read
+    /// BROKEN and both pointed at the updater, which cannot create a checkout.
+    #[test]
+    fn an_absent_checkout_is_not_a_broken_one() {
+        let dir = std::env::temp_dir().join(format!("vizfold-repo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(config::INSTALLER).parent().unwrap()).unwrap();
+        let absent = super::repo_health_at(&dir);
+        std::fs::write(dir.join(config::INSTALLER), "").unwrap();
+        let present = super::repo_health_at(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(absent.state, State::Absent);
+        assert!(
+            absent.problems.is_empty(),
+            "absent is not a list of problems"
+        );
+        assert_eq!(absent.remedy, "vizfold install base");
+        assert_ne!(
+            present.state,
+            State::Absent,
+            "a checkout is there to be judged"
+        );
+        assert_eq!(present.remedy, "vizfold update base");
     }
 
     /// The rule `refuses` encodes: Unverified is not a failure.
