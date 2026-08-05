@@ -1,0 +1,4 @@
+# Bun installs into the staged copy under the prefix, never into the checkout's history.
+node_modules/
+dist/
+*.tsbuildinfo
