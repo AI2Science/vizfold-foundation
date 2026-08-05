@@ -1,0 +1,22 @@
+name: workbench tests
+on: [pull_request, push]
+jobs:
+  workbench-tests:
+    # Both, because the dashboard resolves paths: a macOS temp dir is a symlink and Linux's is not,
+    # and a run directory reached through one is what the file and attention routes are gated on.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run typecheck
