@@ -202,11 +202,11 @@ ID  TYPE ID  FORMAT     STORAGE URI
 vizfold serve            # every installed backend; name them to serve a subset
 ```
 
-This starts the Next.js workbench — `vizfold install repo` staged it and installed its
-dependencies — at
-`http://localhost:3000`, linking `$OPENFOLD_PREFIX/runs` under the app's `public/` so the browser
-can load each run's outputs. The dashboard renders the predicted structure in an interactive 3D
-viewer and shows the attention maps. It folds with, and lists runs from, the backends it serves —
+This starts the Bun workbench — `vizfold install repo` staged it and installed its dependencies — at
+`http://localhost:3000`, serving each run's outputs out of `$OPENFOLD_PREFIX/runs` itself. The
+dashboard renders the predicted structure in an interactive 3D viewer, draws arc diagrams in the
+browser from the run's own attention dump, and lists the activations it stored. It folds with, and
+lists runs from, the backends it serves —
 `vizfold serve openfold` on a host with both installed hides the ESMFold runs. From a laptop,
 forward the port over SSH:
 

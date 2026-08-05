@@ -315,8 +315,9 @@ For a full end-to-end walkthrough on a cluster, see [DEMO.md](DEMO.md).
 ## Development
 
 - `cli/` — the Rust `vizfold` CLI and executor core (SeaORM entities, migrations, services, seed).
-- `workbench/` — a Next.js dashboard reading the executor's SQLite read-only: a 3D viewer for
-  predicted PDBs plus the attention-map images.
+- `workbench/` — a Bun dashboard (Bun.serve + React + Base UI) reading the executor's SQLite
+  read-only: a 3D viewer for predicted structures, arc diagrams drawn in the browser from each run's
+  own attention dump, and whatever activations the run stored.
 - `backends/<name>/` — one package per backend: Python package, packaging metadata, environment
   spec, env-provisioning installer (`install/`). `openfold` installs as `import openfold` (conda
   env, CUDA extension); `esmfold` as `import esmfold` (own Python, no CUDA build).
@@ -339,7 +340,8 @@ source.
 ### Prerequisites
 
 - Rust toolchain (`cargo`, `rustc`)
-- Node.js 22.13 or later, and npm (for the workbench)
+- Bun 1.2 or later (for the workbench). `vizfold serve` downloads one beside the staged dashboard
+  when the machine has none, so this is only for running it by hand.
 
 ### CLI and executor
 
@@ -378,20 +380,24 @@ remove it and let the executor recreate it (seeding repopulates the defaults).
 
 ```bash
 cd workbench
-npm install
-npm run dev            # http://localhost:3000
+bun install
+bun run dev            # http://localhost:3000
 ```
 
-`vizfold serve` exports `VIZFOLD_DB`/`OPENFOLD_PREFIX`/`VIZFOLD_BACKENDS` and links run outputs under `public/runs` so
-the 3D viewer and attention images can load them. The workbench reads `process.env` only, never the
-vizfold config, so `npm run dev` by hand needs both passed in — see
-[workbench/README.md](workbench/README.md).
+`vizfold serve` exports `VIZFOLD_BIN`/`VIZFOLD_DB`/`OPENFOLD_PREFIX`/`VIZFOLD_BACKENDS`; the server
+reads each run's files out of the run directory itself, checked against it, so nothing is linked
+into the checkout. The workbench reads `process.env` only, never the vizfold config, so `bun run
+dev` by hand needs them passed in — see [workbench/README.md](workbench/README.md).
 
 ### Tests
 
 ```bash
 cd cli
 cargo test
+
+cd ../workbench
+bun test               # attention parsing and run-file resolution
+bun run typecheck
 ```
 
 These exercise the in-memory SQLite path, SeaORM migrations, and the core registration/run/artifact

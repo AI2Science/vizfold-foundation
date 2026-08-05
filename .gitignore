@@ -35,17 +35,15 @@ cutlass/
 *.db-wal
 *.db-shm
 
-# dependencies
+# dependencies -- installed into the staged workbench at serve time, never committed.
 node_modules/
 .pnp
 .pnp.*
-
-# Next.js
-.next/
-out/
-.vercel/
+.bun-cache/
+# `bun.lock` is the exception below: it is checked in, so an install resolves the same tree twice.
 
 # logs
+bun-debug.log*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -61,9 +59,6 @@ pnpm-debug.log*
 # Rust API build artifacts
 cli/target/
 openfold-demo-output/
-
-# Dashboard symlink to run outputs, created at `vizfold serve` (see run_serve)
-workbench/public/runs
 
 # TypeScript incremental build info
 *.tsbuildinfo
