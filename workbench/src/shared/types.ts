@@ -158,9 +158,3 @@ export type RunDetail = {
   /** True when the run wrote more files than one listing walks; the file list is a prefix. */
   filesTruncated: boolean;
 };
-
-export type FoldRequest = {
-  ids: string[];
-  attn: boolean;
-  backend?: string;
-};

@@ -17,7 +17,7 @@ export const kindOf = (name: string): FileKind =>
 
 /** How many files one listing walks before it stops. A run that writes more than this is reported
  *  as truncated rather than quietly cut short. */
-export const FILE_LIMIT = 4000;
+const FILE_LIMIT = 4000;
 
 /** `<prefix>/runs/<id>`: what the artifact rows point at once the run lands, and where the
  *  executor is writing before then. */

@@ -90,9 +90,12 @@ const byLayer = <T extends { key: string }>(a: T, b: T) => layerOf(a.key) - laye
  */
 export async function readActivations(root: string, files: RunFile[]): Promise<Activations> {
   const sizes = new Map(files.map((file) => [file.path, file.size]));
-  const index = await readJson(join(root, "trace", "index.json"));
-  const summary = await readJson(join(root, "trace", "summary.json"));
-  const meta = asObject(await readJson(join(root, "meta.json")));
+  const [index, summary, metaJson] = await Promise.all([
+    readJson(join(root, "trace", "index.json")),
+    readJson(join(root, "trace", "summary.json")),
+    readJson(join(root, "meta.json")),
+  ]);
+  const meta = asObject(metaJson);
 
   const tensors = [
     ...tensorsFrom("attention", asObject(index)?.attention, sizes),

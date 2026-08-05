@@ -26,7 +26,17 @@ export function Check({ size = 12 }: { size?: number }) {
   );
 }
 
-export type Option<T extends string | number> = { value: T; label: string; hint?: string };
+export type Option<T extends string | number> = { value: T; label: string };
+
+/** Every control on a filter row is a small-caps label over the control itself. */
+export function Field({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <div className="control">
+      {label ? <span className="control-label">{label}</span> : null}
+      {children}
+    </div>
+  );
+}
 
 export function Picker<T extends string | number>({
   label,
@@ -34,25 +44,22 @@ export function Picker<T extends string | number>({
   options,
   onChange,
   disabled,
-  width,
 }: {
   label: string;
   value: T;
   options: Option<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
-  width?: number;
 }) {
   const selected = options.find((option) => option.value === value);
   return (
-    <div className="control">
-      <span className="control-label">{label}</span>
+    <Field label={label}>
       <Select.Root
         value={value}
         onValueChange={(next) => onChange(next as T)}
         disabled={disabled || options.length === 0}
       >
-        <Select.Trigger className="select-trigger" style={width ? { minWidth: width } : undefined}>
+        <Select.Trigger className="select-trigger">
           <Select.Value className="select-value">{selected?.label ?? "—"}</Select.Value>
           <Select.Icon className="select-icon">
             <Chevron />
@@ -64,7 +71,6 @@ export function Picker<T extends string | number>({
               {options.map((option) => (
                 <Select.Item key={String(option.value)} value={option.value} className="select-item">
                   <Select.ItemText>{option.label}</Select.ItemText>
-                  {option.hint ? <span className="muted">{option.hint}</span> : null}
                   <Select.ItemIndicator className="select-item-indicator">
                     <Check />
                   </Select.ItemIndicator>
@@ -74,7 +80,7 @@ export function Picker<T extends string | number>({
           </Select.Positioner>
         </Select.Portal>
       </Select.Root>
-    </div>
+    </Field>
   );
 }
 
@@ -86,12 +92,11 @@ export function Segmented<T extends string>({
 }: {
   label?: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: Option<T>[];
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="control">
-      {label ? <span className="control-label">{label}</span> : null}
+    <Field label={label}>
       <ToggleGroup
         className="toggle-group"
         value={[value]}
@@ -102,42 +107,39 @@ export function Segmented<T extends string>({
         }}
       >
         {options.map((option) => (
-          <Toggle key={option.value} value={option.value} className="toggle">
+          <Toggle key={String(option.value)} value={option.value} className="toggle">
             {option.label}
           </Toggle>
         ))}
       </ToggleGroup>
-    </div>
+    </Field>
   );
 }
 
-export function Amount({
+/** A slider over a list of choices: the value is the index, the label is what it stands for. */
+export function Steps<T extends string | number>({
   label,
   value,
-  min,
-  max,
-  step = 1,
+  steps,
   onChange,
-  format,
+  disabled,
 }: {
   label: string;
   value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
-  format?: (value: number) => string;
+  steps: T[];
+  onChange: (index: number) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="control">
-      <span className="control-label">{label}</span>
+    <Field label={label}>
       <Slider.Root
         className="slider"
         value={value}
-        min={min}
-        max={max}
-        step={step}
-        onValueChange={(next) => onChange(typeof next === "number" ? next : (next[0] ?? min))}
+        min={0}
+        max={steps.length - 1}
+        step={1}
+        disabled={disabled}
+        onValueChange={(next) => onChange(typeof next === "number" ? next : (next[0] ?? 0))}
       >
         <Slider.Control className="slider-control">
           <Slider.Track className="slider-track">
@@ -145,8 +147,36 @@ export function Amount({
             <Slider.Thumb className="slider-thumb" />
           </Slider.Track>
         </Slider.Control>
-        <span className="slider-value">{format ? format(value) : value}</span>
+        <span className="slider-value">{String(steps[value] ?? "")}</span>
       </Slider.Root>
+    </Field>
+  );
+}
+
+/** A text filter over whatever list it sits above. */
+export function Search({
+  label = "Filter",
+  value,
+  onChange,
+  placeholder,
+  grow,
+}: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  grow?: boolean;
+}) {
+  return (
+    <div className="control" style={grow ? { flex: 1, minWidth: 180 } : undefined}>
+      <span className="control-label">{label}</span>
+      <input
+        className="select-trigger"
+        style={{ width: grow ? "100%" : 200 }}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }
@@ -224,6 +254,27 @@ export function Panel({
       </div>
       <div className={flush ? "panel-body flush" : "panel-body"}>{children}</div>
     </section>
+  );
+}
+
+/** The read-out both charts show under the pointer, kept on screen at the right-hand edge. */
+export function HoverTip({ x, y, children }: { x: number; y: number; children: ReactNode }) {
+  return (
+    <div
+      className="tooltip"
+      style={{ left: Math.min(x + 14, window.innerWidth - 250), top: y + 14 }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function Reading({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 

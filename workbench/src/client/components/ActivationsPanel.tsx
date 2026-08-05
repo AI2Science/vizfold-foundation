@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import Bars from "./Bars.tsx";
+import FileTable from "./FileTable.tsx";
 import { Empty, Picker, Segmented, bytes } from "./ui.tsx";
 import { fileUrl } from "../api.ts";
 import type { RunDetail } from "../../shared/types.ts";
@@ -181,34 +182,7 @@ export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
       {activations.arrays.length > 0 ? (
         <section>
           <h3 style={{ marginBottom: 10 }}>Dense arrays</h3>
-          <div className="table-wrap">
-            <table className="data responsive">
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th className="num">Size</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {activations.arrays.map((file) => (
-                  <tr key={file.path}>
-                    <td data-label="File" className="path">
-                      {file.path}
-                    </td>
-                    <td data-label="Size" className="num">
-                      {bytes(file.size)}
-                    </td>
-                    <td data-label="File">
-                      <a href={fileUrl(run.id, file.path)} download>
-                        download
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <FileTable runId={run.id} files={activations.arrays} />
         </section>
       ) : null}
     </div>

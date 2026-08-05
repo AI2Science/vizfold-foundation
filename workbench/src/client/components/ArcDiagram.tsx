@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useToken } from "./theme.tsx";
+import { HoverTip, Reading } from "./ui.tsx";
 import type { AttentionHead, AttentionMap } from "../../shared/types.ts";
 
 /* An arc joins the two residues one attention head weighted most. Everything drawn here comes
@@ -208,23 +209,11 @@ export default function ArcDiagram({
       </figcaption>
 
       {hover ? (
-        <div
-          className="tooltip"
-          style={{ left: Math.min(hover.x + 14, window.innerWidth - 250), top: hover.y + 14 }}
-        >
-          <div className="row">
-            <span>from</span>
-            <strong>{residueLabel(map.sequence, hover.from)}</strong>
-          </div>
-          <div className="row">
-            <span>to</span>
-            <strong>{residueLabel(map.sequence, hover.to)}</strong>
-          </div>
-          <div className="row">
-            <span>weight</span>
-            <strong>{hover.weight.toFixed(6)}</strong>
-          </div>
-        </div>
+        <HoverTip x={hover.x} y={hover.y}>
+          <Reading label="from" value={residueLabel(map.sequence, hover.from)} />
+          <Reading label="to" value={residueLabel(map.sequence, hover.to)} />
+          <Reading label="weight" value={hover.weight.toFixed(6)} />
+        </HoverTip>
       ) : null}
     </figure>
   );

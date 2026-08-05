@@ -1083,10 +1083,6 @@ table.data th.num {
   pointer-events: none;
 }
 
-.target-grid {
-  display: grid;
-  gap: 16px;
-}
 
 /* ---------- charts ---------- */
 

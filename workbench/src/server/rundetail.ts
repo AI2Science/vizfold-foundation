@@ -4,7 +4,7 @@ import { getRun, listArtifacts } from "./db.ts";
 import { inventory, sequenceFor } from "./attention.ts";
 import { listFiles, runRoot } from "./runfiles.ts";
 import { readActivations } from "./traces.ts";
-import type { FoldTarget, RunDetail, RunFile } from "../shared/types.ts";
+import type { Artifact, FoldTarget, RunDetail, RunFile, RunRow } from "../shared/types.ts";
 
 /** A batch writes one structure per FASTA tag, and the run records those tags joined with `+`.
  *  The tag ends at `_model_`: a bare prefix test would give 1G1J_1 every 1G1J_10 file too. */
@@ -20,14 +20,21 @@ function preferred(structures: RunFile[]): RunFile | null {
   );
 }
 
-export async function readRunDetail(id: number): Promise<RunDetail | null> {
+/** The run row and where it writes — everything a request for one file needs, and nothing that
+ *  costs a walk of the run directory. */
+export function openRun(id: number): { run: RunRow; artifacts: Artifact[]; root: string | null } | null {
   const run = getRun(id);
   if (!run) return null;
-
   const artifacts = listArtifacts(id);
   // Artifacts register only once the run lands, so fall back to where the executor is writing —
   // structures show up per target while the fold is still going.
-  const root = runRoot(artifacts, id);
+  return { run, artifacts, root: runRoot(artifacts, id) };
+}
+
+export async function readRunDetail(id: number): Promise<RunDetail | null> {
+  const open = openRun(id);
+  if (!open) return null;
+  const { run, artifacts, root } = open;
   const { files, truncated } = root ? listFiles(root) : { files: [], truncated: false };
   const structures = files.filter((file) => file.kind === "structure");
 

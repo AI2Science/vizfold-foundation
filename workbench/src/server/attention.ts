@@ -22,26 +22,36 @@ function tagOf(path: string): string | null {
   return nested.length ? nested.join("/") : null;
 }
 
+/**
+ * What a path says about itself, or null when it is not an attention dump. The file name carries
+ * the whole description, so a request for one names its own source and no listing is needed to
+ * resolve it.
+ */
+export function describeSource(path: string): AttentionSource | null {
+  const match = NAME.exec(path.split("/").at(-1) ?? "");
+  if (!match || match[4] !== "txt") return null;
+  const [, kind, layer, residue] = match;
+  return {
+    path,
+    tag: tagOf(path),
+    kind: KIND_OF[kind!]!,
+    layer: Number(layer),
+    residue: residue === undefined ? null : residue === "avg" ? "avg" : Number(residue),
+    dense: null,
+  };
+}
+
 /** The attention text files among a run's files, each paired with the dense array beside it. */
 export function inventory(files: RunFile[]): AttentionSource[] {
   const dense = new Set(
     files.filter((file) => NAME.exec(file.name)?.[4] === "npz").map((file) => file.path),
   );
-  const sources: AttentionSource[] = [];
-  for (const file of files) {
-    const match = NAME.exec(file.name);
-    if (!match || match[4] !== "txt") continue;
-    const [, kind, layer, residue] = match;
+  const sources = files.flatMap((file) => {
+    const source = describeSource(file.path);
+    if (!source) return [];
     const beside = file.path.replace(/\.txt$/, ".npz");
-    sources.push({
-      path: file.path,
-      tag: tagOf(file.path),
-      kind: KIND_OF[kind!]!,
-      layer: Number(layer),
-      residue: residue === undefined ? null : residue === "avg" ? "avg" : Number(residue),
-      dense: dense.has(beside) ? beside : null,
-    });
-  }
+    return [{ ...source, dense: dense.has(beside) ? beside : null }];
+  });
   return sources.sort(
     (a, b) =>
       (a.tag ?? "").localeCompare(b.tag ?? "") ||

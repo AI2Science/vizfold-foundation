@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useTheme } from "./theme.tsx";
-import { Segmented } from "./ui.tsx";
+import { Field, Segmented } from "./ui.tsx";
 
 // 3Dmol reads `window` at import time, so it is imported inside the effect and never at module load.
 
@@ -118,8 +118,7 @@ export default function StructureViewer({ url, name }: { url: string; name: stri
             { value: "bfactor", label: "Confidence (B)" },
           ]}
         />
-        <div className="control">
-          <span className="control-label">View</span>
+        <Field label="View">
           <button
             type="button"
             className="button"
@@ -130,7 +129,7 @@ export default function StructureViewer({ url, name }: { url: string; name: stri
           >
             Reset
           </button>
-        </div>
+        </Field>
       </div>
     </div>
   );

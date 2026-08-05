@@ -7,7 +7,7 @@ import ActivationsPanel from "../components/ActivationsPanel.tsx";
 import AttentionPanel from "../components/AttentionPanel.tsx";
 import FilesPanel from "../components/FilesPanel.tsx";
 import StructureViewer from "../components/StructureViewer.tsx";
-import { Banner, Empty, Picker, Status, bytes, when } from "../components/ui.tsx";
+import { Banner, Empty, Field, Picker, Status, bytes, when } from "../components/ui.tsx";
 import { Link } from "../router.tsx";
 import type { RunDetail } from "../../shared/types.ts";
 
@@ -28,10 +28,7 @@ function Structures({ detail }: { detail: RunDetail }) {
             options={withStructure.map((one) => ({ value: one.tag, label: one.tag }))}
             onChange={setTag}
           />
-          <div className="control">
-            <span className="control-label">Residues</span>
-            <span>{target.sequence?.length ?? "—"}</span>
-          </div>
+          <Field label="Residues">{target.sequence?.length ?? "—"}</Field>
         </div>
       ) : null}
 

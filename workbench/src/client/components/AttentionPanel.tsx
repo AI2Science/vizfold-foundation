@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 
 import { fetchAttention, fileUrl, useAsync } from "../api.ts";
 import ArcDiagram from "./ArcDiagram.tsx";
-import { Amount, Banner, Empty, Picker, Segmented, bytes } from "./ui.tsx";
+import { Banner, Empty, Picker, Segmented, Steps, bytes } from "./ui.tsx";
 import type { AttentionSource, RunDetail } from "../../shared/types.ts";
 
 const KIND_LABEL: Record<AttentionSource["kind"], string> = {
@@ -17,55 +17,37 @@ const describe = (source: AttentionSource) =>
     source.residue === null ? "" : ` · residue ${source.residue}`
   }`;
 
+const unique = <T,>(values: T[]) => [...new Set(values)];
+
 export default function AttentionPanel({ detail }: { detail: RunDetail }) {
   const sources = detail.attention;
   const [view, setView] = useState<"arcs" | "table">("arcs");
   const [topKIndex, setTopKIndex] = useState(2);
-  const [picked, setPicked] = useState<string>("");
+  const [picked, setPicked] = useState("");
   const [head, setHead] = useState(0);
-
-  const tags = useMemo(
-    () => [...new Set(sources.map((source) => source.tag ?? ""))],
-    [sources],
-  );
-  const kinds = useMemo(
-    () => [...new Set(sources.map((source) => source.kind))],
-    [sources],
-  );
 
   // The picked path carries target, kind, layer and residue at once, so there is no second
   // selection to keep in sync — and a path that is no longer written falls back to the first.
   const current = sources.find((source) => source.path === picked) ?? sources[0];
   const tag = current?.tag ?? "";
-  const kind = current?.kind ?? kinds[0];
+  const kind = current?.kind ?? "msa_row";
+  const jump = (next: AttentionSource | undefined) => next && setPicked(next.path);
 
-  const inKind = sources.filter(
-    (source) => (source.tag ?? "") === tag && source.kind === kind,
-  );
-  const layers = [...new Set(inKind.map((source) => source.layer))].sort((a, b) => a - b);
-  const residues = [
-    ...new Set(
-      inKind
-        .filter((source) => source.layer === current?.layer)
-        .map((source) => String(source.residue ?? "")),
-    ),
-  ].filter(Boolean);
-
-  const jump = useCallback(
-    (next: AttentionSource | undefined) => {
-      if (next) setPicked(next.path);
-    },
-    [],
-  );
+  const tags = unique(sources.map((source) => source.tag ?? ""));
+  const kinds = unique(sources.map((source) => source.kind));
+  const inKind = sources.filter((source) => (source.tag ?? "") === tag && source.kind === kind);
+  const layers = unique(inKind.map((source) => source.layer)).sort((a, b) => a - b);
+  const residues = unique(
+    inKind
+      .filter((source) => source.layer === current?.layer)
+      .map((source) => String(source.residue ?? "")),
+  ).filter(Boolean);
 
   const topK = TOP_K[topKIndex] ?? 50;
   const runId = detail.run.id;
   const path = current?.path ?? "";
   const { data, error, loading } = useAsync(
-    (signal) =>
-      path
-        ? fetchAttention(runId, path, topK, signal)
-        : Promise.reject(new Error("No attention file selected.")),
+    (signal) => fetchAttention(runId, path, topK, signal),
     [runId, path, topK],
     null,
   );
@@ -93,8 +75,10 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
             value={tag}
             options={tags.map((one) => ({ value: one, label: one || "run" }))}
             onChange={(next) =>
-              jump(sources.find((source) => (source.tag ?? "") === next && source.kind === kind) ??
-                sources.find((source) => (source.tag ?? "") === next))
+              jump(
+                sources.find((source) => (source.tag ?? "") === next && source.kind === kind) ??
+                  sources.find((source) => (source.tag ?? "") === next),
+              )
             }
           />
         ) : null}
@@ -102,7 +86,7 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
         {kinds.length > 1 ? (
           <Picker
             label="Attention"
-            value={kind ?? "msa_row"}
+            value={kind}
             options={kinds.map((one) => ({ value: one, label: KIND_LABEL[one] }))}
             onChange={(next) =>
               jump(sources.find((source) => (source.tag ?? "") === tag && source.kind === next))
@@ -114,9 +98,7 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
           label="Layer"
           value={current?.layer ?? 0}
           options={layers.map((layer) => ({ value: layer, label: `layer ${layer}` }))}
-          onChange={(next) =>
-            jump(inKind.find((source) => source.layer === next))
-          }
+          onChange={(next) => jump(inKind.find((source) => source.layer === next))}
         />
 
         {residues.length > 0 ? (
@@ -143,14 +125,7 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
           />
         ) : null}
 
-        <Amount
-          label="Edges per head"
-          value={topKIndex}
-          min={0}
-          max={TOP_K.length - 1}
-          onChange={setTopKIndex}
-          format={(index) => String(TOP_K[index] ?? "")}
-        />
+        <Steps label="Edges per head" value={topKIndex} steps={TOP_K} onChange={setTopKIndex} />
 
         <Segmented
           label="View"
@@ -174,7 +149,11 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
           ) : null}
         </div>
 
-        {error ? <Banner tone="critical" title="Could not read that attention file">{error}</Banner> : null}
+        {error ? (
+          <Banner tone="critical" title="Could not read that attention file">
+            {error}
+          </Banner>
+        ) : null}
         {loading && !data ? <div className="skeleton" style={{ height: 220 }} /> : null}
 
         {data && shown ? (
@@ -220,9 +199,8 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
             <>
               {" · "}
               <a href={fileUrl(runId, current.dense)} download>
-                dense array ({bytes(
-                  detail.files.find((file) => file.path === current.dense)?.size ?? 0,
-                )})
+                dense array (
+                {bytes(detail.files.find((file) => file.path === current.dense)?.size ?? 0)})
               </a>
             </>
           ) : null}

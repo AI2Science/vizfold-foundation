@@ -1,24 +1,17 @@
 import { useState } from "react";
 
 import { useToken } from "./theme.tsx";
+import { HoverTip, Reading } from "./ui.tsx";
 
 export type Bar = { label: string; value: number; detail?: string };
 
+const format = (value: number) => value.toPrecision(3);
+const HEIGHT = 18;
+const GAP = 6;
+
 /** One measure, one axis: horizontal bars from zero, in the sequential hue's mid step. Values are
  *  direct-labelled while there are few enough rows to read, and every bar carries a hover read-out. */
-export default function Bars({
-  bars,
-  format = (value: number) => value.toPrecision(3),
-  unitLabel,
-  height = 18,
-  gap = 6,
-}: {
-  bars: Bar[];
-  format?: (value: number) => string;
-  unitLabel: string;
-  height?: number;
-  gap?: number;
-}) {
+export default function Bars({ bars, unitLabel }: { bars: Bar[]; unitLabel: string }) {
   const [hover, setHover] = useState<{ x: number; y: number; bar: Bar } | null>(null);
   const [fill, grid] = useToken("--accent", "--grid");
 
@@ -29,7 +22,7 @@ export default function Bars({
   const valueWidth = bars.length <= 24 ? 78 : 0;
   const plot = width - labelWidth - valueWidth - 8;
   const max = Math.max(...bars.map((bar) => Math.abs(bar.value)), Number.EPSILON);
-  const chartHeight = bars.length * (height + gap);
+  const chartHeight = bars.length * (HEIGHT + GAP);
 
   return (
     <div className="chart" data-fill="true">
@@ -53,7 +46,7 @@ export default function Bars({
         ))}
 
         {bars.map((bar, index) => {
-          const y = index * (height + gap);
+          const y = index * (HEIGHT + GAP);
           const length = Math.max(2, (Math.abs(bar.value) / max) * plot);
           return (
             <g
@@ -62,15 +55,15 @@ export default function Bars({
               onMouseMove={(event) => setHover({ x: event.clientX, y: event.clientY, bar })}
               onMouseLeave={() => setHover(null)}
             >
-              <rect x={0} y={y - gap / 2} width={width} height={height + gap} fill="transparent" />
-              <text x={0} y={y + height * 0.72} className="bar-label">
+              <rect x={0} y={y - GAP / 2} width={width} height={HEIGHT + GAP} fill="transparent" />
+              <text x={0} y={y + HEIGHT * 0.72} className="bar-label">
                 {bar.label}
               </text>
               <rect
                 x={labelWidth}
                 y={y}
                 width={length}
-                height={height}
+                height={HEIGHT}
                 rx={4}
                 fill={fill}
                 opacity={hover && hover.bar.label !== bar.label ? 0.55 : 1}
@@ -78,7 +71,7 @@ export default function Bars({
               {valueWidth ? (
                 <text
                   x={labelWidth + plot + 8}
-                  y={y + height * 0.72}
+                  y={y + HEIGHT * 0.72}
                   className="bar-label"
                   textAnchor="start"
                 >
@@ -99,19 +92,11 @@ export default function Bars({
       </svg>
 
       {hover ? (
-        <div
-          className="tooltip"
-          style={{ left: Math.min(hover.x + 14, window.innerWidth - 250), top: hover.y + 14 }}
-        >
-          <div className="row">
-            <strong>{hover.bar.label}</strong>
-          </div>
-          <div className="row">
-            <span>{unitLabel}</span>
-            <strong>{format(hover.bar.value)}</strong>
-          </div>
+        <HoverTip x={hover.x} y={hover.y}>
+          <strong>{hover.bar.label}</strong>
+          <Reading label={unitLabel} value={format(hover.bar.value)} />
           {hover.bar.detail ? <div className="muted">{hover.bar.detail}</div> : null}
-        </div>
+        </HoverTip>
       ) : null}
     </div>
   );

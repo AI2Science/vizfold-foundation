@@ -1,8 +1,8 @@
 import index from "../client/index.html";
-import { readAttention, sequenceFor } from "./attention.ts";
+import { describeSource, readAttention, sequenceFor } from "./attention.ts";
 import { databasePresent, listRuns } from "./db.ts";
 import { BACKENDS, BIN, DB_PATH, FOLDABLE, PORT, PREFIX, RUNS_DIR } from "./env.ts";
-import { readRunDetail } from "./rundetail.ts";
+import { openRun, readRunDetail } from "./rundetail.ts";
 import { resolveInside } from "./runfiles.ts";
 import { foldInBackground, listProteins, queueRun } from "./vizfold.ts";
 import type { Environment, Protein } from "../shared/types.ts";
@@ -122,21 +122,24 @@ const server = Bun.serve({
         const id = runIdOf(request.params.id);
         if (id === null) return fail("Not a run id.", 400);
         const url = new URL(request.url);
-        const wanted = url.searchParams.get("path") ?? "";
         const rawTopK = url.searchParams.get("topK");
         const topK = rawTopK === null || rawTopK === "all" ? null : Number(rawTopK);
         if (topK !== null && (!Number.isInteger(topK) || topK < 1)) {
           return fail("topK must be a positive integer or 'all'.", 400);
         }
 
-        const detail = await readRunDetail(id);
-        if (!detail || !detail.root) return fail(`No run ${id}.`, 404);
-        const source = detail.attention.find((candidate) => candidate.path === wanted);
-        if (!source) return fail("That run wrote no such attention file.", 404);
-        const full = resolveInside(detail.root, source.path);
-        if (!full) return fail("That path is outside the run.", 400);
+        const open = openRun(id);
+        if (!open?.root) return fail(`No run ${id}.`, 404);
+        // The name says which target, kind, layer and query residue it holds, so one file resolves
+        // without walking the run.
+        const source = describeSource(url.searchParams.get("path") ?? "");
+        if (!source) return fail("That is not an attention dump.", 400);
+        const full = resolveInside(open.root, source.path);
+        if (!full || !(await Bun.file(full).exists())) {
+          return fail("That run wrote no such attention file.", 404);
+        }
 
-        const sequence = sequenceFor(detail.run.input_id, detail.run.input_sequence, source.tag);
+        const sequence = sequenceFor(open.run.input_id, open.run.input_sequence, source.tag);
         return json(await readAttention(full, source, sequence, topK));
       },
     },
@@ -146,10 +149,9 @@ const server = Bun.serve({
       GET: async (request) => {
         const id = runIdOf(request.params.id);
         if (id === null) return fail("Not a run id.", 400);
-        const detail = await readRunDetail(id);
-        if (!detail || !detail.root) return fail(`No run ${id}.`, 404);
-        const wanted = new URL(request.url).searchParams.get("path") ?? "";
-        const full = resolveInside(detail.root, wanted);
+        const open = openRun(id);
+        if (!open?.root) return fail(`No run ${id}.`, 404);
+        const full = resolveInside(open.root, new URL(request.url).searchParams.get("path") ?? "");
         if (!full) return fail("That path is outside the run.", 400);
         const file = Bun.file(full);
         if (!(await file.exists())) return fail("No such file in this run.", 404);

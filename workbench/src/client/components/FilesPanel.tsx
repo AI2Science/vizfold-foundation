@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
-import { fileUrl } from "../api.ts";
-import { Banner, Empty, Segmented, bytes, when } from "./ui.tsx";
+import FileTable from "./FileTable.tsx";
+import { Banner, Empty, Field, Search, Segmented } from "./ui.tsx";
 import type { FileKind, RunDetail } from "../../shared/types.ts";
 
 const KINDS: { value: FileKind | "all"; label: string }[] = [
@@ -17,10 +17,7 @@ export default function FilesPanel({ detail }: { detail: RunDetail }) {
   const [kind, setKind] = useState<FileKind | "all">("all");
   const [query, setQuery] = useState("");
 
-  const present = useMemo(
-    () => new Set(detail.files.map((file) => file.kind)),
-    [detail.files],
-  );
+  const present = new Set(detail.files.map((file) => file.kind));
   const files = detail.files.filter(
     (file) =>
       (kind === "all" || file.kind === kind) &&
@@ -48,20 +45,10 @@ export default function FilesPanel({ detail }: { detail: RunDetail }) {
           onChange={setKind}
           options={KINDS.filter((option) => option.value === "all" || present.has(option.value))}
         />
-        <div className="control">
-          <span className="control-label">Filter</span>
-          <input
-            className="select-trigger"
-            style={{ minWidth: 200 }}
-            value={query}
-            placeholder="path contains…"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-        <div className="control">
-          <span className="control-label">Run directory</span>
+        <Search value={query} onChange={setQuery} placeholder="path contains…" />
+        <Field label="Run directory">
           <span className="path">{detail.root ?? "—"}</span>
-        </div>
+        </Field>
       </div>
 
       <div className="panel-body stack">
@@ -72,36 +59,7 @@ export default function FilesPanel({ detail }: { detail: RunDetail }) {
           </Banner>
         ) : null}
 
-        <div className="table-wrap">
-          <table className="data responsive">
-            <thead>
-              <tr>
-                <th>Path</th>
-                <th className="num">Size</th>
-                <th>Modified</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((file) => (
-                <tr key={file.path}>
-                  <td data-label="Path" className="path">
-                    {file.path}
-                  </td>
-                  <td data-label="Size" className="num">
-                    {bytes(file.size)}
-                  </td>
-                  <td data-label="Modified">{when(file.modified)}</td>
-                  <td data-label="Open">
-                    <a href={fileUrl(detail.run.id, file.path)} target="_blank" rel="noreferrer">
-                      open
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FileTable runId={detail.run.id} files={files} />
         {files.length === 0 ? <p className="note">Nothing matches that filter.</p> : null}
       </div>
     </div>

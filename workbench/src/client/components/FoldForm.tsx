@@ -1,9 +1,9 @@
 import { Toast } from "@base-ui-components/react/toast";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { startFold } from "../api.ts";
 import { useNavigate } from "../router.tsx";
-import { Banner, Empty, Picker, Tick, Toggler } from "./ui.tsx";
+import { Banner, Empty, Picker, Search, Tick, Toggler } from "./ui.tsx";
 import type { Environment, Protein } from "../../shared/types.ts";
 
 export default function FoldForm({
@@ -27,14 +27,10 @@ export default function FoldForm({
   // ESMFold folds one target per run; OpenFold takes the whole selection in one execution.
   const single = backend === "esmfold";
 
-  const shown = useMemo(
-    () =>
-      proteins.filter(
-        (protein) =>
-          query === "" ||
-          `${protein.id} ${protein.description}`.toLowerCase().includes(query.toLowerCase()),
-      ),
-    [proteins, query],
+  const shown = proteins.filter(
+    (protein) =>
+      query === "" ||
+      `${protein.id} ${protein.description}`.toLowerCase().includes(query.toLowerCase()),
   );
 
   if (!environment.cli.ok) {
@@ -120,16 +116,13 @@ export default function FoldForm({
             disabled={folding}
           />
         ) : null}
-        <div className="control" style={{ flex: 1, minWidth: 180 }}>
-          <span className="control-label">Search</span>
-          <input
-            className="select-trigger"
-            style={{ width: "100%" }}
-            value={query}
-            placeholder="id or description…"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+        <Search
+          label="Search"
+          value={query}
+          onChange={setQuery}
+          placeholder="id or description…"
+          grow
+        />
       </div>
 
       <p className="note">
