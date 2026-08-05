@@ -4,8 +4,9 @@ import { notFound } from "next/navigation";
 import path from "node:path";
 import { readdirSync } from "node:fs";
 import { getRun, listArtifacts, type ArtifactRow } from "@/lib/db";
-import { RUNS_DIR } from "@/lib/vizfold";
+import { IS_ARC, RUNS_DIR } from "@/lib/vizfold";
 import StructureViewer from "@/app/StructureViewer";
+import AttentionViewer from "@/app/AttentionViewer";
 import Poller from "@/app/Poller";
 
 export const dynamic = "force-dynamic";
@@ -35,11 +36,12 @@ const entry = (file: string, runsRoot: string, name = path.basename(file)): File
   isStructure: IS_STRUCTURE.test(file),
 });
 
-function browse(dir: string, runsRoot: string): FileEntry[] {
+function browse(dir: string, runsRoot: string, exclude: string[] = []): FileEntry[] {
   try {
     return readdirSync(dir, { recursive: true, withFileTypes: true })
       .filter((e) => e.isFile())
       .map((e) => path.join(e.parentPath, e.name))
+      .filter((file) => !exclude.some((nested) => file.startsWith(`${nested}/`)))
       .map((file) => entry(file, runsRoot, path.relative(dir, file)))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
@@ -149,11 +151,19 @@ export default async function RunPage({
           </div>
         ) : (
           artifacts.map((artifact) => {
+            // `attention/` is registered in its own right and sits inside the run output
+            // directory; it renders under its own heading rather than twice.
+            const nested = artifacts
+              .filter((other) => other.storage_uri.startsWith(`${artifact.storage_uri}/`))
+              .map((other) => other.storage_uri);
             // A file artifact is just a one-entry listing, so both kinds render the same way.
             const files =
               artifact.format === "directory"
-                ? browse(artifact.storage_uri, runsRoot)
+                ? browse(artifact.storage_uri, runsRoot, nested)
                 : [entry(artifact.storage_uri, runsRoot)];
+            // Arc diagrams come per layer and head, which is a gallery rather than a file list.
+            const arcs = files.filter((file) => IS_ARC.test(file.name));
+            const rest = files.filter((file) => !IS_ARC.test(file.name));
             return (
               <div key={artifact.id} className="artifact-block">
                 <h3>
@@ -164,22 +174,20 @@ export default async function RunPage({
                       : `(${artifact.format})`}
                   </span>
                 </h3>
-                {files.length === 0 ? (
-                  <p className="field-note">Empty.</p>
-                ) : (
-                  <ul className="file-list">
-                    {files.map((file) => (
-                      <li key={file.url}>
-                        <a href={file.url}>
-                          {file.isImage ? (
-                            <img src={file.url} alt={file.name} className="file-thumb" />
-                          ) : null}
-                          {file.name}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {files.length === 0 ? <p className="field-note">Empty.</p> : null}
+                <AttentionViewer images={arcs} />
+                <ul className="file-list">
+                  {rest.map((file) => (
+                    <li key={file.url}>
+                      <a href={file.url}>
+                        {file.isImage ? (
+                          <img src={file.url} alt={file.name} className="file-thumb" />
+                        ) : null}
+                        {file.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
             );
           })

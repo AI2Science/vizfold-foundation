@@ -276,6 +276,45 @@ textarea {
   border-radius: 8px;
 }
 
+.arc-main {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Every head at the layer, so the picked one is read against its neighbours. */
+.arc-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.arc-thumb {
+  display: grid;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.arc-thumb img {
+  width: 104px;
+  height: 78px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.arc-thumb.arc-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .structure-viewer {
   margin-top: 10px;
 }
