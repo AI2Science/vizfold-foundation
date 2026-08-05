@@ -20,6 +20,11 @@ export const FOLDABLE = BACKENDS ?? ["openfold", "esmfold"];
 /** Where the executor writes each run: `<RUNS_DIR>/<run id>`, alongside its submit log. */
 export const RUNS_DIR = `${PREFIX}/runs`;
 
+/** Arc diagrams, which AttentionViewer browses instead of the flat file list. It lives here, not
+ *  beside the viewer: a RegExp exported from a "use client" module reaches a server component as
+ *  a client reference rather than a regex. */
+export const IS_ARC = /_arc\.png$/i;
+
 const run = promisify(execFile);
 
 export type Protein = {

@@ -79,7 +79,7 @@ export default function StructureViewer({ url, name }: { url: string; name: stri
   );
 }
 
-function Segmented<T extends string>({ label, value, onChange, options }: {
+export function Segmented<T extends string>({ label, value, onChange, options }: {
   label: string;
   value: T;
   onChange: (v: T) => void;

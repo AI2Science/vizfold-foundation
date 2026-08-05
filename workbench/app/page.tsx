@@ -25,7 +25,7 @@ export default async function HomePage() {
           <h1 className="brand-title">VizFold</h1>
           <p className="subtitle">
             Fold a protein and inspect what the model computed — the predicted structure and the
-            attention behind it.
+            attention behind it. No run yet? See the <Link href="/demo">attention demo</Link>.
           </p>
         </div>
         <dl className="hero-stats">
