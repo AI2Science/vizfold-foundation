@@ -1,29 +1,19 @@
 #![cfg(test)]
 
-use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbErr, Statement};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement,
+};
 use serde_json::json;
 
 use crate::core::{
-    config, db, seed,
+    config, seed,
     services::{
-        artifact_types,
         execution_targets::{self, RegisterExecutionTargetInput},
         model_backends::{self, RegisterModelBackendInput},
         model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
         runs::{self, SubmitRunInput},
     },
 };
-
-async fn test_db() -> Result<DatabaseConnection, DbErr> {
-    let db = Database::connect("sqlite::memory:").await?;
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        "PRAGMA foreign_keys = ON".to_owned(),
-    ))
-    .await?;
-    db::migrate_database(&db).await?;
-    Ok(db)
-}
 
 fn sample_model_backend_input() -> RegisterModelBackendInput {
     RegisterModelBackendInput {
@@ -48,24 +38,58 @@ fn sample_model_backend_input() -> RegisterModelBackendInput {
 
 #[tokio::test]
 async fn seeds_artifact_type_catalog() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
 
     seed::seed_defaults(&db).await?;
     seed::seed_defaults(&db).await?;
 
-    let artifact_types = artifact_types::list_artifact_types(&db).await?;
-    assert_eq!(artifact_types.len(), 13);
-    let protein_structure = artifact_types::get_artifact_type_by_slug(&db, "protein_structure")
+    // The catalog is exactly the kinds a run can be classified as -- seeded from the same table
+    // the classifier reads, so a kind cannot exist in one and not the other.
+    let seeded: Vec<String> = crate::core::entities::artifact_types::Entity::find()
+        .all(&db)
         .await?
-        .expect("protein structure type should be seeded");
-    assert_eq!(protein_structure.default_format, "pdb");
-    assert_eq!(protein_structure.viewer_kind, "ngl_viewer");
+        .into_iter()
+        .map(|artifact_type| artifact_type.slug)
+        .collect();
+    let known: Vec<String> = crate::core::artifact_kinds::KINDS
+        .iter()
+        .map(|kind| kind.slug.to_owned())
+        .collect();
+    assert_eq!(seeded, known);
+
+    // A kind carries the hints for showing an instance, which is what the dashboard reads.
+    let structure = crate::core::entities::artifact_types::Entity::find()
+        .filter(crate::core::entities::artifact_types::Column::Slug.eq("protein_structure"))
+        .one(&db)
+        .await?
+        .expect("protein structure is a kind a fold produces");
+    assert_eq!(structure.default_format, "pdb");
+    assert_eq!(structure.display_mode, "embedded");
+    assert_eq!(structure.viewer_kind, "structure_viewer");
+
+    // An install upgraded in place holds rows an older catalog wrote, and the dashboard reads its
+    // viewer off them: seeding must bring an existing kind current, not leave it as it found it.
+    let mut stale: crate::core::entities::artifact_types::ActiveModel = structure.into();
+    stale.viewer_kind = sea_orm::Set("ngl_viewer".to_owned());
+    stale.label = sea_orm::Set("Protein structure (old)".to_owned());
+    let stale = crate::core::entities::artifact_types::Entity::update(stale)
+        .exec(&db)
+        .await?;
+    assert_eq!(stale.viewer_kind, "ngl_viewer");
+
+    seed::seed_defaults(&db).await?;
+    let refreshed = crate::core::entities::artifact_types::Entity::find_by_id(stale.id)
+        .one(&db)
+        .await?
+        .expect("the kind survives a re-seed");
+    assert_eq!(refreshed.viewer_kind, "structure_viewer");
+    assert_eq!(refreshed.label, "Protein structure");
     Ok(())
 }
 
 #[tokio::test]
 async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
 
     seed::seed_defaults(&db).await?;
     seed::seed_defaults(&db).await?;
@@ -106,7 +130,7 @@ async fn seeds_local_openfold_target_and_profile() -> Result<(), DbErr> {
 
 #[tokio::test]
 async fn seeds_local_esmfold_target_and_profile() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
 
     seed::seed_defaults(&db).await?;
     seed::seed_defaults(&db).await?;
@@ -173,7 +197,7 @@ fn sample_invocation_profile_input(
 
 #[tokio::test]
 async fn rejects_run_with_empty_input_id() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
     let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
@@ -206,7 +230,7 @@ async fn rejects_run_with_empty_input_id() -> Result<(), DbErr> {
 
 #[tokio::test]
 async fn rejects_run_with_empty_input_sequence() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
     let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
@@ -243,7 +267,7 @@ async fn rejects_run_with_empty_input_sequence() -> Result<(), DbErr> {
 
 #[tokio::test]
 async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
     let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
@@ -290,7 +314,7 @@ async fn rejects_run_with_mismatched_invocation_profile() -> Result<(), DbErr> {
 
 #[tokio::test]
 async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
     let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;
@@ -328,7 +352,7 @@ async fn rejects_non_object_json_parameters() -> Result<(), DbErr> {
 /// `ON DELETE RESTRICT` in the schema plus foreign keys on per connection is what enforces this.
 #[tokio::test]
 async fn a_backend_with_runs_cannot_be_deleted() -> Result<(), DbErr> {
-    let db = test_db().await?;
+    let db = crate::core::test_support::test_db().await?;
     let backend = model_backends::register_model_backend(&db, sample_model_backend_input()).await?;
     let target =
         execution_targets::register_execution_target(&db, sample_execution_target_input()).await?;

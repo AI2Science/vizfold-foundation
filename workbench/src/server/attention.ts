@@ -7,11 +7,6 @@ import type { AttentionHead, AttentionKind, AttentionMap, AttentionSource, RunFi
  *  saved by `save_attention_topk` (OpenFold's evoformer) and by ESMFold's trace adapter. */
 const NAME = /^(msa_row|triangle_start)_attn_layer(\d+)(?:_residue_idx_(\d+|avg))?\.(txt|npz)$/;
 
-const KIND_OF: Record<string, AttentionKind> = {
-  msa_row: "msa_row",
-  triangle_start: "triangle_start",
-};
-
 /** OpenFold nests attention per target (`attention/<tag>/…`); ESMFold writes it flat. Whatever
  *  sits between the `attention` directory and the file is the target it belongs to. */
 function tagOf(path: string): string | null {
@@ -34,7 +29,8 @@ export function describeSource(path: string): AttentionSource | null {
   return {
     path,
     tag: tagOf(path),
-    kind: KIND_OF[kind!]!,
+    // Capture 1 of NAME is exactly the two members of AttentionKind, so the regex is the check.
+    kind: kind as AttentionKind,
     layer: Number(layer),
     residue: residue === undefined ? null : residue === "avg" ? "avg" : Number(residue),
     dense: null,

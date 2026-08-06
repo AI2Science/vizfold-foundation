@@ -117,28 +117,53 @@ pub(super) enum Backend {
     Esmfold,
 }
 
-impl Backend {
-    pub(super) fn slug(self) -> &'static str {
-        match self {
-            Self::Openfold => "openfold",
-            Self::Esmfold => "esmfold",
-        }
-    }
-
+/// What a backend is called and where its scripts live -- the whole of what the two differ by,
+/// in one place, so adding a third is a row rather than a sweep through five `match` arms.
+struct Names {
+    slug: &'static str,
+    label: &'static str,
     /// Installer script, relative to the checkout: each backend owns one under `backends/<name>/install/`.
-    pub(super) fn installer(self) -> &'static str {
+    installer: &'static str,
+    /// Downloader dir, relative to the checkout. `None` for a backend that fetches at run time.
+    downloader_dir: Option<&'static str>,
+}
+
+const OPENFOLD: Names = Names {
+    slug: "openfold",
+    label: "OpenFold",
+    installer: config::INSTALLER,
+    downloader_dir: Some("downloaders/openfold"),
+};
+
+const ESMFOLD: Names = Names {
+    slug: "esmfold",
+    label: "ESMFold",
+    installer: "backends/esmfold/install/install.sh",
+    downloader_dir: None,
+};
+
+impl Backend {
+    fn names(self) -> &'static Names {
         match self {
-            Self::Openfold => config::INSTALLER,
-            Self::Esmfold => "backends/esmfold/install/install.sh",
+            Self::Openfold => &OPENFOLD,
+            Self::Esmfold => &ESMFOLD,
         }
     }
 
-    /// Downloader dir, relative to the checkout. `None` for ESMFold: it fetches weights at run time.
+    pub(super) fn slug(self) -> &'static str {
+        self.names().slug
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        self.names().label
+    }
+
+    pub(super) fn installer(self) -> &'static str {
+        self.names().installer
+    }
+
     pub(super) fn downloader_dir(self) -> Option<&'static str> {
-        match self {
-            Self::Openfold => Some("downloaders/openfold"),
-            Self::Esmfold => None,
-        }
+        self.names().downloader_dir
     }
 
     pub(super) fn env_prefix(self) -> PathBuf {
@@ -150,13 +175,6 @@ impl Backend {
 
     pub(super) fn is_installed(self) -> bool {
         self.env_prefix().is_dir()
-    }
-
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Openfold => "OpenFold",
-            Self::Esmfold => "ESMFold",
-        }
     }
 
     pub(super) fn dir(self, home: &Path) -> PathBuf {
@@ -415,6 +433,7 @@ mod tests {
     /// that reading is what bare `serve` hands the dashboard. One test, not two: they would race.
     #[test]
     fn backend_is_installed_tracks_its_own_env_prefix_key() {
+        let _env = crate::core::test_support::env_lock();
         let base = std::env::temp_dir().join(format!("vizfold-backend-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("openfold")).unwrap();
@@ -506,6 +525,7 @@ mod tests {
 
     #[test]
     fn openfold_install_paths_cover_generated_trees_but_not_run_outputs() {
+        let _env = crate::core::test_support::env_lock();
         let base = std::env::temp_dir().join(format!("vizfold-uninstall-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let _ = std::fs::remove_dir_all(&base);

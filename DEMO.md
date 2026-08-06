@@ -168,8 +168,20 @@ outputs appeared later:
 vizfold register-artifacts 1
 ```
 
-It is idempotent, and it never blocks a partial run: if a run failed it warns and registers only the
-directories that actually exist.
+It is idempotent, and it never blocks a partial run: it registers what is on disk, so a failed run
+records whatever it managed to write. Each file is classified from its path — the structures, the
+attention dumps and their dense arrays, the activation tensors, the trace summary, the alignments a
+run searched for itself — and the command reports what each kind holds:
+
+```text
+Artifacts by kind:
+KIND                  HELD  NEW
+--------------------  ----  ---
+attention_map         3     3
+attention_tensor      3     3
+protein_structure     4     4
+...
+```
 
 ## 4. Inspect the run
 
@@ -187,11 +199,21 @@ invocation_profile_id: 1
 submitted_at: 2026-07-24T16:22:35+00:00
 started_at: 2026-07-24T16:41:14+00:00
 completed_at: 2026-07-24T16:42:32+00:00
+artifacts by kind:
+KIND                  COUNT
+--------------------  -----
+attention_map         48
+attention_tensor      1
+protein_structure     2
+run_metadata          2
+run_output_directory  1
+
 artifacts:
-ID  TYPE ID  FORMAT     STORAGE URI
---  -------  ---------  -----------------------------------------------------
-1   12       directory  /work/nvme/bbol/yjayawardana/vizfold/runs/1
-2   13       directory  /work/nvme/bbol/yjayawardana/vizfold/runs/1/attention
+ID  KIND                  FORMAT     STORAGE URI
+--  --------------------  ---------  ------------------------------------------------------------------
+1   run_output_directory  directory  /work/nvme/bbol/yjayawardana/vizfold/runs/1
+2   protein_structure     pdb        …/runs/1/predictions/1UBQ_1_model_1_ptm_relaxed.pdb
+3   attention_map         txt        …/runs/1/attention/1UBQ_1/msa_row_attn_layer47.txt
 ```
 
 `vizfold list runs` (optionally `--status completed`) lists all runs.

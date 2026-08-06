@@ -2,7 +2,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
 };
 
-use crate::core::entities::{artifact_types, artifacts};
+use crate::core::entities::artifacts;
 
 use super::validation::require_json_object;
 
@@ -10,15 +10,6 @@ use super::validation::require_json_object;
 pub struct RecordArtifactInput {
     pub run_id: i32,
     pub artifact_type_id: i32,
-    pub format: String,
-    pub storage_uri: String,
-    pub metadata_json: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct RecordArtifactByTypeSlugInput {
-    pub run_id: i32,
-    pub artifact_type_slug: String,
     pub format: String,
     pub storage_uri: String,
     pub metadata_json: String,
@@ -52,29 +43,22 @@ pub async fn record_artifact_manifest_entry(
     .await
 }
 
-pub async fn record_artifact_manifest_entry_by_type_slug(
+/// Move an already-recorded artifact onto the kind the classifier now says it is. A run keeps its
+/// row -- the file on disk has not changed -- but what the catalog calls it can.
+pub async fn reclassify_artifact(
     db: &DatabaseConnection,
-    input: RecordArtifactByTypeSlugInput,
+    artifact_id: i32,
+    artifact_type_id: i32,
+    metadata_json: String,
 ) -> Result<artifacts::Model, DbErr> {
-    let artifact_type = artifact_types::Entity::find()
-        .filter(artifact_types::Column::Slug.eq(&input.artifact_type_slug))
+    require_json_object("artifact metadata", &metadata_json)?;
+
+    let mut artifact: artifacts::ActiveModel = artifacts::Entity::find_by_id(artifact_id)
         .one(db)
         .await?
-        .ok_or_else(|| {
-            DbErr::Custom(format!(
-                "artifact type '{}' was not found",
-                input.artifact_type_slug
-            ))
-        })?;
-    record_artifact_manifest_entry(
-        db,
-        RecordArtifactInput {
-            run_id: input.run_id,
-            artifact_type_id: artifact_type.id,
-            format: input.format,
-            storage_uri: input.storage_uri,
-            metadata_json: input.metadata_json,
-        },
-    )
-    .await
+        .ok_or_else(|| DbErr::Custom(format!("artifact {artifact_id} does not exist")))?
+        .into();
+    artifact.artifact_type_id = Set(artifact_type_id);
+    artifact.metadata_json = Set(metadata_json);
+    artifact.update(db).await
 }

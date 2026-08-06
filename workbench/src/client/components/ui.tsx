@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 /* Base UI ships behaviour, not looks: every part below is styled by `app.css` alone, so the
    dashboard has one design system rather than a component library's plus ours. */
 
-export function Chevron() {
+function Chevron() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
       <path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -18,9 +18,9 @@ export function Chevron() {
   );
 }
 
-export function Check({ size = 12 }: { size?: number }) {
+export function Check() {
   return (
-    <svg width={size} height={size} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
       <path d="M2.5 6.3 4.8 8.6 9.5 3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -122,13 +122,11 @@ export function Steps<T extends string | number>({
   value,
   steps,
   onChange,
-  disabled,
 }: {
   label: string;
   value: number;
   steps: T[];
   onChange: (index: number) => void;
-  disabled?: boolean;
 }) {
   return (
     <Field label={label}>
@@ -138,7 +136,6 @@ export function Steps<T extends string | number>({
         min={0}
         max={steps.length - 1}
         step={1}
-        disabled={disabled}
         onValueChange={(next) => onChange(typeof next === "number" ? next : (next[0] ?? 0))}
       >
         <Slider.Control className="slider-control">

@@ -1,3 +1,4 @@
+pub mod artifact_kinds;
 pub mod commands;
 pub mod config;
 pub mod db;

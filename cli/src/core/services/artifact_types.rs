@@ -1,6 +1,4 @@
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait, Set};
 
 use crate::core::entities::artifact_types;
 
@@ -42,12 +40,24 @@ pub async fn list_artifact_types(
     artifact_types::Entity::find().all(db).await
 }
 
-pub async fn get_artifact_type_by_slug(
+/// Bring a catalog row to what the code now says the kind is. The slug identifies the kind; the
+/// label, format and hints are the current definition of it.
+pub async fn update_artifact_type(
     db: &DatabaseConnection,
-    slug: &str,
-) -> Result<Option<artifact_types::Model>, DbErr> {
-    artifact_types::Entity::find()
-        .filter(artifact_types::Column::Slug.eq(slug))
+    id: i32,
+    input: RegisterArtifactTypeInput,
+) -> Result<artifact_types::Model, DbErr> {
+    require_json_object("artifact type metadata_schema", &input.metadata_schema_json)?;
+    let mut row: artifact_types::ActiveModel = artifact_types::Entity::find_by_id(id)
         .one(db)
-        .await
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("artifact type {id} does not exist")))?
+        .into();
+    row.label = Set(input.label);
+    row.default_format = Set(input.default_format);
+    row.display_mode = Set(input.display_mode);
+    row.viewer_kind = Set(input.viewer_kind);
+    row.description = Set(input.description);
+    row.metadata_schema_json = Set(input.metadata_schema_json);
+    row.update(db).await
 }

@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { fetchAttention, fileUrl, useAsync } from "../api.ts";
 import ArcDiagram from "./ArcDiagram.tsx";
-import { Banner, Empty, Picker, Segmented, Steps, bytes } from "./ui.tsx";
+import { Banner, Picker, Segmented, Steps, bytes } from "./ui.tsx";
 import type { AttentionSource, RunDetail } from "../../shared/types.ts";
 
 const KIND_LABEL: Record<AttentionSource["kind"], string> = {
@@ -51,17 +51,6 @@ export default function AttentionPanel({ detail }: { detail: RunDetail }) {
     [runId, path, topK],
     null,
   );
-
-  if (sources.length === 0) {
-    return (
-      <Empty title="No attention dumped for this run">
-        <p className="note">
-          Attention writes as the fold runs, into <code>attention/</code> under the run directory.
-          Fold with “dump attention maps” on to get it.
-        </p>
-      </Empty>
-    );
-  }
 
   const heads = data?.heads ?? [];
   const shown = heads.find((one) => one.head === head) ?? heads[0];

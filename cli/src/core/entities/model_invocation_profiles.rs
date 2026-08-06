@@ -13,43 +13,14 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::model_backends::Entity",
-        from = "Column::ModelBackendId",
-        to = "super::model_backends::Column::Id",
-        on_update = "Cascade",
-        on_delete = "Restrict"
-    )]
-    ModelBackend,
-    #[sea_orm(
-        belongs_to = "super::execution_targets::Entity",
-        from = "Column::ExecutionTargetId",
-        to = "super::execution_targets::Column::Id",
-        on_update = "Cascade",
-        on_delete = "Restrict"
-    )]
-    ExecutionTarget,
-    #[sea_orm(has_many = "super::runs::Entity")]
-    Runs,
-}
+#[derive(Copy, Clone, Debug, EnumIter)]
+pub enum Relation {}
 
-impl Related<super::model_backends::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ModelBackend.def()
-    }
-}
-
-impl Related<super::execution_targets::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ExecutionTarget.def()
-    }
-}
-
-impl Related<super::runs::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Runs.def()
+impl RelationTrait for Relation {
+    fn def(&self) -> RelationDef {
+        // The foreign keys live in the migration, which is what enforces them; nothing in the
+        // crate joins through the ORM, so there is no relation to hand back.
+        panic!("no ORM relations are declared for {}", Entity.table_name())
     }
 }
 

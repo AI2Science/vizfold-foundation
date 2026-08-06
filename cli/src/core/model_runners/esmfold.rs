@@ -65,10 +65,9 @@ mod tests {
     use serde_json::json;
 
     use crate::core::{
-        commands::CommandSpec,
         entities::{model_invocation_profiles, runs},
         preflight::PreflightStatus,
-        test_support::TestLayout,
+        test_support::{self, TestLayout},
     };
 
     use super::preflight_esmfold;
@@ -106,24 +105,6 @@ mod tests {
         }
     }
 
-    fn command(layout: &TestLayout) -> CommandSpec {
-        CommandSpec {
-            program: "python3".into(),
-            args: vec!["-u".into(), "run_openfold.py".into()],
-            current_dir: Some(layout.working_dir.clone()),
-            ..Default::default()
-        }
-    }
-
-    fn status(report: &crate::core::preflight::PreflightReport, name: &str) -> PreflightStatus {
-        report
-            .checks
-            .iter()
-            .find(|check| check.name == name)
-            .unwrap_or_else(|| panic!("{name} check should be present"))
-            .status
-    }
-
     #[test]
     fn passes_when_fasta_file_and_workspace_parent_exist() {
         let layout = TestLayout::new("6KWC_1");
@@ -131,16 +112,19 @@ mod tests {
         fs::write(&fasta, ">6KWC_1\nMSTNPKPQRITF\n").expect("fasta should be written");
 
         let report = preflight_esmfold(
-            &command(&layout),
+            &layout.command(),
             &invocation_profile(&layout.output_location),
             &run(json!({ "fasta": fasta, "model_device": "cpu" })),
         )
         .expect("preflight should inspect local paths");
 
         assert!(!report.has_failures());
-        assert_eq!(status(&report, "fasta"), PreflightStatus::Passed);
         assert_eq!(
-            status(&report, "output_dir parent"),
+            test_support::check_status(&report, "fasta"),
+            PreflightStatus::Passed
+        );
+        assert_eq!(
+            test_support::check_status(&report, "output_dir parent"),
             PreflightStatus::Passed
         );
         // No MSA/template checks for ESMFold.
@@ -151,13 +135,16 @@ mod tests {
     fn fails_when_fasta_file_is_missing() {
         let layout = TestLayout::new("6KWC_1");
         let report = preflight_esmfold(
-            &command(&layout),
+            &layout.command(),
             &invocation_profile(&layout.output_location),
             &run(json!({ "fasta": layout.fasta_dir.join("absent.fasta") })),
         )
         .expect("preflight should inspect the fasta path");
 
         assert!(report.has_failures());
-        assert_eq!(status(&report, "fasta"), PreflightStatus::Failed);
+        assert_eq!(
+            test_support::check_status(&report, "fasta"),
+            PreflightStatus::Failed
+        );
     }
 }

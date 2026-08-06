@@ -51,7 +51,7 @@ export async function startFold(body: {
   return payload.runId;
 }
 
-export type Async<T> = {
+type Async<T> = {
   data: T | null;
   error: string | null;
   loading: boolean;

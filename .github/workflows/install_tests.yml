@@ -11,13 +11,7 @@ jobs:
           fail=0
           for f in $(git ls-files '*.sh' '*.slurm'); do bash -n "$f" || fail=1; done
           exit $fail
-      - run: bash tests/launch_args.sh
-      - run: bash tests/site_config.sh
-      - run: bash tests/vocabulary.sh
-      - run: bash tests/link_mirror.sh
-      - run: bash tests/esmfold_env.sh
-      - run: bash tests/install_rc.sh
-      - run: bash tests/configure_repo.sh
-      - run: bash tests/libcuda_stub.sh
-      - run: bash tests/slurm_account.sh
-      - run: bash tests/wait_then_exec.sh
+      # Globbed, like the parse step above: a new tests/*.sh is run without editing this file.
+      - name: shell tests
+        run: |
+          for f in tests/*.sh; do echo "== $f"; bash "$f"; done

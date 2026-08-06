@@ -13,15 +13,6 @@ AttentionEdge = Tuple[int, int, float]
 AttentionHeads = Dict[int, List[AttentionEdge]]
 
 
-def filter_top_k_edges(heads: AttentionHeads, top_k: Optional[int] = None) -> AttentionHeads:
-    """Sort each head by descending weight and optionally keep only top-k edges."""
-    filtered = {}
-    for head_idx, conns in heads.items():
-        sorted_conns = sorted(conns, key=lambda x: x[2], reverse=True)
-        filtered[head_idx] = sorted_conns[:top_k] if top_k is not None else sorted_conns
-    return filtered
-
-
 def load_attention_map(connections_file: str, top_k: Optional[int] = None) -> AttentionHeads:
     """
     Load a combined attention text file into ``head_idx -> [(res_i, res_j, weight)]``.
@@ -66,7 +57,12 @@ def load_attention_map(connections_file: str, top_k: Optional[int] = None) -> At
                 ) from exc
             heads[current_head].append((int(res1), int(res2), weight))
 
-    return filter_top_k_edges(heads, top_k=top_k)
+    # Strongest first, trimmed to top_k -- `list[:None]` is the whole list, so one expression
+    # covers both the trimmed and the untrimmed read.
+    return {
+        head: sorted(edges, key=lambda edge: edge[2], reverse=True)[:top_k]
+        for head, edges in heads.items()
+    }
 
 
 def get_attention_file_path(
@@ -96,5 +92,18 @@ def parse_fasta_sequence(fasta_path: str) -> str:
         return "".join(line.strip() for line in f if not line.startswith(">"))
 
 
-# Backward-compatible name used by existing notebooks and scripts.
-load_all_heads = load_attention_map
+def extract_head_number(filename: str) -> int:
+    """Head index out of an attention image or trace filename, or -1 when it carries none."""
+    parts = filename.replace('.', '_').replace('-', '_').split('_')
+    for i, part in enumerate(parts):
+        if part.lower() == 'head' and i + 1 < len(parts):
+            try:
+                return int(parts[i + 1])
+            except ValueError:
+                pass
+        if part.lower().startswith('head'):
+            try:
+                return int(part.lower().replace('head', ''))
+            except ValueError:
+                pass
+    return -1

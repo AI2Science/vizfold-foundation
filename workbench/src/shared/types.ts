@@ -1,22 +1,17 @@
 /** The wire contract between the Bun server and the React client. Every field is read from the
  *  executor: its SQLite database, its run output directories, or the `vizfold` binary itself. */
 
-export type CliHealth = {
-  bin: string;
-  ok: boolean;
-  /** Why `list proteins` failed, when it did — shown instead of an empty picker. */
-  error: string | null;
-};
-
 export type Environment = {
   /** Backend slugs this dashboard serves. Empty means `vizfold serve` found none installed. */
   backends: string[];
-  /** False when VIZFOLD_BACKENDS is unset (`bun dev` by hand): nothing is filtered. */
-  backendsConfigured: boolean;
   prefix: string;
-  runsDir: string;
   database: { path: string; present: boolean };
-  cli: CliHealth;
+  cli: {
+    bin: string;
+    ok: boolean;
+    /** Why `list proteins` failed, when it did — shown instead of an empty picker. */
+    error: string | null;
+  };
 };
 
 export type Protein = {
@@ -41,14 +36,23 @@ export type RunRow = {
   error_message: string | null;
 };
 
+/** One produced result, and what its kind says about showing it. The executor classifies every
+ *  file a run wrote; the dashboard reads the classification rather than guessing from a name. */
 export type Artifact = {
   id: number;
-  format: string;
+  /** Path on disk, and the run-relative path the file routes resolve. */
   storage_uri: string;
+  path: string;
+  format: string;
+  size: number | null;
   type_slug: string;
   type_label: string;
-  viewer_kind: string;
+  /** `embedded` in a viewer, `download` as a link, `internal` for something read but not shown. */
   display_mode: string;
+  /** Which viewer the kind asks for: structure_viewer, arc_diagram, stat_panel, key_values … */
+  viewer_kind: string;
+  /** What the executor read off the file name: target, layer, attention type, stage, relaxed … */
+  metadata: Record<string, unknown>;
 };
 
 export type FileKind = "structure" | "image" | "text" | "tensor" | "archive" | "other";
@@ -148,6 +152,7 @@ export type Activations = {
 
 export type RunDetail = {
   run: RunRow;
+  /** Every produced result the executor classified. The tabs are built from the kinds present. */
   artifacts: Artifact[];
   /** The run's output directory, or null when nothing has been written yet. */
   root: string | null;

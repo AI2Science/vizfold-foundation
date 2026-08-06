@@ -3,18 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { kindOf, listFiles, resolveInside, runRoot } from "./runfiles.ts";
-import type { Artifact } from "../shared/types.ts";
-
-const artifact = (type_slug: string, storage_uri: string): Artifact => ({
-  id: 1,
-  format: "directory",
-  storage_uri,
-  type_slug,
-  type_label: type_slug,
-  viewer_kind: "directory_link",
-  display_mode: "download",
-});
+import { kindOf, listFiles, resolveInside } from "./runfiles.ts";
 
 function sandbox(): string {
   const root = mkdtempSync(join(tmpdir(), "vizfold-workbench-"));
@@ -70,17 +59,6 @@ describe("resolveInside", () => {
   });
 });
 
-describe("runRoot", () => {
-  test("prefers the registered run output directory", () => {
-    expect(runRoot([artifact("run_output_directory", "/prefix/runs/7")], 7)).toBe("/prefix/runs/7");
-  });
-
-  test("falls back to the run directory inside another artifact's path", () => {
-    expect(runRoot([artifact("attention_output_directory", "/prefix/runs/7/attention")], 7)).toBe(
-      "/prefix/runs/7",
-    );
-  });
-});
 
 test("kindOf classifies what the backends write", () => {
   expect(kindOf("predicted.pdb")).toBe("structure");

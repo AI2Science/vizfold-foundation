@@ -17,15 +17,14 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(has_many = "super::artifacts::Entity")]
-    Artifacts,
-}
+#[derive(Copy, Clone, Debug, EnumIter)]
+pub enum Relation {}
 
-impl Related<super::artifacts::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Artifacts.def()
+impl RelationTrait for Relation {
+    fn def(&self) -> RelationDef {
+        // The foreign keys live in the migration, which is what enforces them; nothing in the
+        // crate joins through the ORM, so there is no relation to hand back.
+        panic!("no ORM relations are declared for {}", Entity.table_name())
     }
 }
 

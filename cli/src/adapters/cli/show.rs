@@ -1,8 +1,10 @@
 use crate::core::services::{execution_targets, model_backends, model_invocation_profiles};
-use sea_orm::DbErr;
+use std::collections::{BTreeMap, HashMap};
+
+use sea_orm::{DbErr, EntityTrait};
 use serde_json::json;
 
-use crate::core::{examples, services::runs};
+use crate::core::{entities::artifact_types, examples, services::runs};
 
 /// Filesystem-only, so the dashboard can draw its dropdown without a connect and migrate.
 pub(super) fn list_proteins(json: bool) -> Result<(), DbErr> {
@@ -149,13 +151,39 @@ pub(super) async fn show_run(
         println!("error_message: {error_message}");
     }
 
-    println!("artifacts:");
+    // A run's outputs are worth reading as kinds first: how many of each, then the instances.
+    // One read of the catalog and one of the artifacts serves both tables.
+    let kinds: HashMap<i32, String> = artifact_types::Entity::find()
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|artifact_type| (artifact_type.id, artifact_type.slug))
+        .collect();
+    let slug_of = |artifact: &crate::core::entities::artifacts::Model| {
+        kinds
+            .get(&artifact.artifact_type_id)
+            .cloned()
+            .unwrap_or_else(|| artifact.artifact_type_id.to_string())
+    };
+
+    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+    for artifact in &result.artifacts {
+        *by_kind.entry(slug_of(artifact)).or_default() += 1;
+    }
+    println!("artifacts by kind:");
     print_table(
-        &["ID", "TYPE ID", "FORMAT", "STORAGE URI"],
+        &["KIND", "COUNT"],
+        by_kind
+            .iter()
+            .map(|(slug, count)| vec![slug.clone(), count.to_string()]),
+    );
+    println!("\nartifacts:");
+    print_table(
+        &["ID", "KIND", "FORMAT", "STORAGE URI"],
         result.artifacts.iter().map(|artifact| {
             vec![
                 artifact.id.to_string(),
-                artifact.artifact_type_id.to_string(),
+                slug_of(artifact),
                 artifact.format.clone(),
                 artifact.storage_uri.clone(),
             ]

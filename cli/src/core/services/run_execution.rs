@@ -6,7 +6,7 @@ use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 use crate::core::{
     commands::{CommandOutput, CommandRunner, CommandSpec},
     config,
-    entities::{execution_targets, model_backends, model_invocation_profiles, runs as run_entity},
+    entities::runs as run_entity,
     model_runners::{esmfold::preflight_esmfold, openfold::preflight_openfold, plan::plan_command},
     output_locations::resolve_output_location,
     preflight::PreflightReport,
@@ -57,20 +57,10 @@ pub async fn execute_run(
     let started_at = Utc::now();
     let mut kind = BackendKind::Openfold;
     let execution: Result<ExecutionOutcome, DbErr> = async {
-        let model_backend = model_backends::Entity::find_by_id(run.model_backend_id)
-            .one(db)
-            .await?
-            .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
+        let model_backend = super::require_backend(db, run.model_backend_id).await?;
         kind = BackendKind::from_slug(&model_backend.slug);
-        let execution_target = execution_targets::Entity::find_by_id(run.execution_target_id)
-            .one(db)
-            .await?
-            .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
-        let invocation_profile =
-            model_invocation_profiles::Entity::find_by_id(run.invocation_profile_id)
-                .one(db)
-                .await?
-                .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+        let execution_target = super::require_target(db, run.execution_target_id).await?;
+        let invocation_profile = super::require_profile(db, run.invocation_profile_id).await?;
 
         // Created up front, so a fresh install needs no mkdir; OpenFold also seeds its attention/ dir.
         let workspace = resolve_output_location(&invocation_profile, &run)?;
@@ -166,7 +156,7 @@ pub async fn execute_run(
                 )
                 .await?;
                 // Inline and idempotent: a completed run has its artifacts without a second command.
-                super::run_artifacts::register_known_run_artifacts(db, run_id).await?;
+                super::run_artifacts::register_run_artifacts(db, run_id).await?;
             } else {
                 let message = if output.stderr.trim().is_empty() {
                     format!(
@@ -319,16 +309,16 @@ mod tests {
         },
     };
 
-    use sea_orm::{ConnectionTrait, Database, DbErr, EntityTrait, Statement};
+    use sea_orm::{DbErr, EntityTrait};
     use serde_json::json;
 
     use crate::core::{
         commands::{CommandOutput, CommandRunner, CommandSpec, FakeCommandRunner},
-        config, db,
+        config,
         entities::runs as run_entity,
         services::{
             execution_targets::{self, RegisterExecutionTargetInput},
-            model_backends::{self, RegisterModelBackendInput},
+            model_backends::{self},
             model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
             runs::{self, SubmitRunInput},
         },
@@ -454,45 +444,14 @@ mod tests {
         }
     }
 
-    async fn test_db() -> Result<sea_orm::DatabaseConnection, DbErr> {
-        let db = Database::connect("sqlite::memory:").await?;
-        db.execute(Statement::from_string(
-            db.get_database_backend(),
-            "PRAGMA foreign_keys = ON".to_owned(),
-        ))
-        .await?;
-        db::migrate_database(&db).await?;
-        crate::core::seed::seed_defaults(&db).await?;
-        Ok(db)
-    }
-
     async fn create_run(
         db: &sea_orm::DatabaseConnection,
         layout: &TestLayout,
         invalid_working_dir: bool,
     ) -> Result<crate::core::entities::runs::Model, DbErr> {
-        let backend = model_backends::register_model_backend(
-            db,
-            RegisterModelBackendInput {
-                slug: "openfold-test".into(),
-                label: "OpenFold".into(),
-                version: None,
-                description: None,
-                artifact_capabilities_json: "{}".into(),
-                parameter_schema_json: json!({"type":"object","properties":{}}).to_string(),
-            },
-        )
-        .await?;
-        let target = execution_targets::register_execution_target(
-            db,
-            RegisterExecutionTargetInput {
-                slug: "local-test".into(),
-                target_type: "local".into(),
-                description: None,
-                available_resources_json: json!({"type":"object","properties":{}}).to_string(),
-            },
-        )
-        .await?;
+        let (backend, target) =
+            crate::core::test_support::local_backend_and_target(db, "openfold-test", "local-test")
+                .await?;
         let working_dir = if invalid_working_dir {
             layout.root.join("missing")
         } else {
@@ -589,7 +548,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_run_returns_clear_error() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let (runner, _, _) = runner(0, "");
         let error = execute_run(&db, 999, &runner)
             .await
@@ -600,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn successful_command_completes_run_and_uses_openfold_plan() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, called, command) = runner(0, "");
@@ -635,16 +594,19 @@ mod tests {
         let workspace = layout.output_location.join(run.id.to_string());
         assert!(workspace.is_dir());
         assert!(workspace.join("attention").is_dir());
-        // Output directories register inline on completion.
-        let artifacts =
-            crate::core::services::artifacts::list_artifacts_for_run(&db, run.id).await?;
-        assert_eq!(artifacts.len(), 2);
+        // What the run produced registers inline on completion. This one ran a stub command that
+        // wrote no files, so the workspace is the whole of it -- and it is registered as itself,
+        // not as a guess about what might appear later.
+        let kinds =
+            crate::core::services::run_artifacts::artifact_counts_by_kind(&db, run.id).await?;
+        assert_eq!(kinds.get("run_output_directory"), Some(&1));
+        assert_eq!(kinds.len(), 1, "{kinds:?}");
         Ok(())
     }
 
     #[tokio::test]
     async fn esmfold_run_completes_via_the_esmfold_path() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_esmfold_run(&db, &layout).await?;
         let (runner, called, command) = runner(0, "");
@@ -683,7 +645,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_zero_command_fails_run() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, _, _) = runner(7, "OpenFold failed");
@@ -699,7 +661,7 @@ mod tests {
 
     #[tokio::test]
     async fn failing_preflight_skips_runner_and_fails_run() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, true).await?;
         let (runner, called, _) = runner(0, "");
@@ -723,7 +685,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_error_after_preflight_passes_fails_run_and_propagates() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::seeded_db().await?;
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let runner = FakeCommandRunner::fails("boom");

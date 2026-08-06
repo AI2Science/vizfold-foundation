@@ -262,7 +262,7 @@ mod tests {
         commands::CommandSpec,
         entities::{execution_targets, model_backends, model_invocation_profiles, runs},
         preflight::{PreflightReport, PreflightStatus},
-        test_support::TestLayout,
+        test_support::{TestLayout, check_message, check_status},
     };
 
     use super::preflight_openfold as preflight_openfold_impl;
@@ -291,26 +291,6 @@ mod tests {
     ) -> Result<PreflightReport, DbErr> {
         let invocation_profile = preflight_invocation_profile();
         preflight_openfold_impl(command, &invocation_profile, run)
-    }
-
-    fn check_status(report: &PreflightReport, name: &str) -> PreflightStatus {
-        report
-            .checks
-            .iter()
-            .find(|check| check.name == name)
-            .unwrap_or_else(|| panic!("{name} check should be present"))
-            .status
-    }
-
-    fn check_message<'a>(report: &'a PreflightReport, name: &str) -> &'a str {
-        report
-            .checks
-            .iter()
-            .find(|check| check.name == name)
-            .unwrap_or_else(|| panic!("{name} check should be present"))
-            .message
-            .as_deref()
-            .unwrap_or_else(|| panic!("{name} check should have a message"))
     }
 
     fn model_backend() -> model_backends::Model {

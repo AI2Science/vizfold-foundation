@@ -1,14 +1,9 @@
 use std::path::Path;
 
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
-    QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait};
 
-use crate::core::entities::{
-    artifacts, execution_targets, model_backends, model_invocation_profiles, runs,
-};
+use crate::core::entities::{artifacts, runs};
 
 use super::validation::{reject_unknown_keys, require_json_object};
 
@@ -77,18 +72,9 @@ pub async fn submit_run(
     require_non_empty("input_id", &input.input_id)?;
     require_non_empty("input_sequence", &input.input_sequence)?;
 
-    let backend = model_backends::Entity::find_by_id(input.model_backend_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| DbErr::Custom("model backend does not exist".into()))?;
-    let target = execution_targets::Entity::find_by_id(input.execution_target_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| DbErr::Custom("execution target does not exist".into()))?;
-    let profile = model_invocation_profiles::Entity::find_by_id(input.invocation_profile_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let backend = super::require_backend(db, input.model_backend_id).await?;
+    let target = super::require_target(db, input.execution_target_id).await?;
+    let profile = super::require_profile(db, input.invocation_profile_id).await?;
 
     if profile.model_backend_id != input.model_backend_id
         || profile.execution_target_id != input.execution_target_id
@@ -174,10 +160,7 @@ pub async fn get_run_with_artifacts(
         return Ok(None);
     };
 
-    let artifacts = artifacts::Entity::find()
-        .filter(artifacts::Column::RunId.eq(run_id))
-        .all(db)
-        .await?;
+    let artifacts = super::artifacts::list_artifacts_for_run(db, run_id).await?;
     Ok(Some(RunWithArtifacts { run, artifacts }))
 }
 
@@ -185,56 +168,20 @@ pub async fn get_run_with_artifacts(
 mod tests {
     use std::path::Path;
 
-    use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbErr, Statement};
-    use serde_json::json;
+    use sea_orm::{DatabaseConnection, DbErr};
 
-    use crate::core::{
-        db,
-        services::{
-            execution_targets::{self, RegisterExecutionTargetInput},
-            model_backends::{self, RegisterModelBackendInput},
-            model_invocation_profiles::{self, RegisterModelInvocationProfileInput},
-        },
+    use crate::core::services::model_invocation_profiles::{
+        self, RegisterModelInvocationProfileInput,
     };
 
     use crate::core::output_locations::output_location_from;
 
     use super::{SubmitRunInput, UpdateRunStatusInput, runs, submit_run, update_run_status};
 
-    async fn test_db() -> Result<DatabaseConnection, DbErr> {
-        let db = Database::connect("sqlite::memory:").await?;
-        db.execute(Statement::from_string(
-            db.get_database_backend(),
-            "PRAGMA foreign_keys = ON".to_owned(),
-        ))
-        .await?;
-        db::migrate_database(&db).await?;
-        Ok(db)
-    }
-
     async fn create_test_run(db: &DatabaseConnection) -> Result<runs::Model, DbErr> {
-        let backend = model_backends::register_model_backend(
-            db,
-            RegisterModelBackendInput {
-                slug: "test-backend".into(),
-                label: "Test".into(),
-                version: None,
-                description: None,
-                artifact_capabilities_json: "{}".into(),
-                parameter_schema_json: json!({"type":"object","properties":{}}).to_string(),
-            },
-        )
-        .await?;
-        let target = execution_targets::register_execution_target(
-            db,
-            RegisterExecutionTargetInput {
-                slug: "test-target".into(),
-                target_type: "local".into(),
-                description: None,
-                available_resources_json: json!({"type":"object","properties":{}}).to_string(),
-            },
-        )
-        .await?;
+        let (backend, target) =
+            crate::core::test_support::local_backend_and_target(db, "test-backend", "test-target")
+                .await?;
         let profile = model_invocation_profiles::register_model_invocation_profile(
             db,
             RegisterModelInvocationProfileInput {
@@ -265,7 +212,7 @@ mod tests {
     /// `Option<Option<T>>`: outer `None` leaves the column alone, `Some(None)` writes NULL.
     #[tokio::test]
     async fn update_run_status_leaves_untouched_columns_alone() -> Result<(), DbErr> {
-        let db = test_db().await?;
+        let db = crate::core::test_support::test_db().await?;
         let run = create_test_run(&db).await?;
 
         let started_at = chrono::Utc::now();

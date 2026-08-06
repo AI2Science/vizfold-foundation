@@ -24,7 +24,7 @@ export default function RunsPage() {
         flush
       >
         {runs.loading && !runs.data ? (
-          <div style={{ padding: 18 }}>
+          <div className="panel-body">
             <div className="skeleton" style={{ height: 120 }} />
           </div>
         ) : (

@@ -143,6 +143,7 @@ mod tests {
     /// The reinstall invariant: uninstall takes exactly what install puts back, and nothing else.
     #[test]
     fn one_part_leaves_the_others_and_everything_shared_alone() {
+        let _env = crate::core::test_support::env_lock();
         let base = std::env::temp_dir().join(format!("vizfold-scoped-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
 
