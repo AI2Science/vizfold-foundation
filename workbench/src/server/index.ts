@@ -33,9 +33,7 @@ async function environment(): Promise<Environment> {
   const { error } = await proteins();
   return {
     backends: FOLDABLE,
-    backendsConfigured: BACKENDS !== null,
     prefix: PREFIX,
-    runsDir: RUNS_DIR,
     database: { path: DB_PATH, present: databasePresent() },
     cli: { bin: BIN, ok: error === null, error },
   };

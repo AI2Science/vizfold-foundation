@@ -38,32 +38,13 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 }
 
+/* The blank page painted before React runs: the toggle stamps `data-theme` before first paint,
+   so everything else is themed by the rule below and lives in exactly one place. */
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-
     --plane: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-raised: #232322;
-    --surface-sunken: #131312;
-
     --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --ink-muted: #898781;
-
-    --border: rgba(255, 255, 255, 0.12);
-    --border-strong: #383835;
-    --grid: #2c2c2a;
-
-    --accent: #3987e5;
-    --accent-ink: #0d0d0d;
-    --accent-wash: rgba(57, 135, 229, 0.16);
-
-    /* On a dark surface the ramp runs the other way: near-zero recedes into the surface. */
-    --seq-low: #184f95;
-    --seq-high: #cde2fb;
-
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -820,14 +801,6 @@ code,
   }
 }
 
-.tab-panel {
-  padding: 18px;
-}
-
-.tab-panel.flush {
-  padding: 0;
-}
-
 /* Base UI Toast */
 
 .toast-viewport {
@@ -975,13 +948,20 @@ table.data {
   font-size: 0.875rem;
 }
 
-table.data th {
-  text-align: left;
+/* The one small-caps label recipe: column heads, their stacked-layout stand-ins, and key names.
+   Type only — the stand-in is a `::before` inside a padded cell, so box properties stay below. */
+table.data th,
+table.data.responsive td::before,
+.kv dt {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-muted);
   font-weight: 600;
+}
+
+table.data th {
+  text-align: left;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -1040,11 +1020,6 @@ table.data th.num {
 
   table.data.responsive td::before {
     content: attr(data-label);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--ink-muted);
-    font-weight: 600;
   }
 
   table.data.responsive td.num {
@@ -1186,14 +1161,6 @@ table.data th.num {
 
 .kv > div {
   min-width: 0;
-}
-
-.kv dt {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-muted);
-  font-weight: 600;
 }
 
 .kv dd {

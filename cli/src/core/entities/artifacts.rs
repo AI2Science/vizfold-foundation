@@ -13,35 +13,14 @@ pub struct Model {
     pub created_at: DateTimeUtc,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::runs::Entity",
-        from = "Column::RunId",
-        to = "super::runs::Column::Id",
-        on_update = "Cascade",
-        on_delete = "Cascade"
-    )]
-    Run,
-    #[sea_orm(
-        belongs_to = "super::artifact_types::Entity",
-        from = "Column::ArtifactTypeId",
-        to = "super::artifact_types::Column::Id",
-        on_update = "Cascade",
-        on_delete = "Restrict"
-    )]
-    ArtifactType,
-}
+#[derive(Copy, Clone, Debug, EnumIter)]
+pub enum Relation {}
 
-impl Related<super::runs::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Run.def()
-    }
-}
-
-impl Related<super::artifact_types::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ArtifactType.def()
+impl RelationTrait for Relation {
+    fn def(&self) -> RelationDef {
+        // The foreign keys live in the migration, which is what enforces them; nothing in the
+        // crate joins through the ORM, so there is no relation to hand back.
+        panic!("no ORM relations are declared for {}", Entity.table_name())
     }
 }
 

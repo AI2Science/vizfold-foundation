@@ -8,9 +8,6 @@ from visualize_attention_data import (
     parse_fasta_sequence,
 )
 
-# Backward-compatible import path for notebooks/scripts that already use this file.
-load_all_heads = load_attention_map
-
 
 # ========== Arc Plotting ==========
 def plot_arc_diagram_with_labels(connections, residue_sequence, output_file='arc.png',

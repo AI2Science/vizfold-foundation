@@ -209,6 +209,7 @@ mod tests {
 
     #[test]
     fn a_reinstall_keeps_the_downloads_and_takes_everything_else() {
+        let _env = crate::core::test_support::env_lock();
         let base = std::env::temp_dir().join(format!("vizfold-reinstall-{}", std::process::id()));
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));
         let full = Backend::Openfold.install_paths(&prefix, &home);
@@ -232,6 +233,7 @@ mod tests {
     /// The data dir sits inside the state dir install also plants: removing that whole takes the databases.
     #[test]
     fn a_reinstall_removes_no_directory_the_downloads_live_under() {
+        let _env = crate::core::test_support::env_lock();
         let base = std::env::temp_dir().join(format!("vizfold-nested-data-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (prefix, home) = (base.join("prefix"), base.join("checkout"));

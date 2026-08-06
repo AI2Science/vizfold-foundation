@@ -76,13 +76,10 @@ vizfold install esmfold
 vizfold run 6KWC_1 --backend esmfold
 ```
 
-The site is `ice-slurm`: `ice-cpu` / `ice-gpu` partitions, `gpu:a100:1`. Two gotchas:
-
-- `OPENFOLD_GPU_*` governs ESMFold folds too — those settings are what an ESMFold run is `srun`'d
-  onto. The names are OpenFold-prefixed for historical reasons only.
-- The env is solved with micromamba against the GPU driver's CUDA, so a fold on the GPU partition
-  gets a torch the driver can load. The installer prints the driver version it detected, and the
-  verify step prints the torch build it ended up with.
+The site is `ice-slurm`: `ice-cpu` / `ice-gpu` partitions, `gpu:a100:1`. Two gotchas it shares with
+every cluster are documented once, in esmfold.md: that
+[`OPENFOLD_GPU_*` governs ESMFold folds too](esmfold.md#running-on-a-cluster), and that
+[torch is solved against the GPU driver's CUDA](esmfold.md#install).
 
 ## Verification Checklist
 

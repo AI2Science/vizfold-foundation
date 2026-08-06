@@ -12,7 +12,12 @@ Two rules the dashboard is built on:
    its run directories, or the `vizfold` binary. A panel that has no data does not render; it says
    what is missing and where it looked. Never check a sample output into the repo to make a view
    look populated.
-2. **Diagrams are computed from the run, not stored beside it.** Attention arcs are drawn in the
+2. **What a file is, is the executor's answer, not a guess here.** Every file a run produces is
+   registered with a kind (`cli/src/core/artifact_kinds.rs`), and the artifact rows carry the
+   viewer, the display mode and the coordinates read off the name — target, layer, attention type.
+   Read those. The extension table in `runfiles.ts` is the fallback for a run still going, which
+   has registered nothing yet; it is not the rule.
+3. **Diagrams are computed from the run, not stored beside it.** Attention arcs are drawn in the
    browser from the text dumps the backends write. If a view needs a new derived value, parse it on
    the server from what the run wrote.
 

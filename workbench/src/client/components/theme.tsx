@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 export type Theme = "light" | "dark";
@@ -19,7 +26,8 @@ function initial(): Theme {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initial);
 
-  useEffect(() => {
+  // Layout, not passive: this runs before paint, so no frame is ever drawn in the other theme.
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(KEY, theme);
   }, [theme]);

@@ -377,12 +377,14 @@ mod tests {
 
     /// `install repo` writes the config partway through its own process, so a cache that answered
     /// once for the lifetime of that process staged the dashboard under the default prefix instead
-    /// of the settled one. Serialised against the other config readers by the lock it takes.
+    /// of the settled one. It swaps the process-wide cache, so it takes `env_lock` to keep every
+    /// other config reader out while it does.
     #[test]
     fn reload_sees_a_config_written_after_the_first_read() {
+        let _env = crate::core::test_support::env_lock();
         let path = std::env::temp_dir().join(format!("vizfold-reload-{}.json", std::process::id()));
         let previous = std::env::var("VIZFOLD_CONFIG").ok();
-        // SAFETY: the reload below is the only reader of this file, and the variable is restored.
+        // SAFETY: `env_lock` above holds off every other reader, and the variable is restored.
         unsafe { std::env::set_var("VIZFOLD_CONFIG", &path) };
 
         let _ = std::fs::remove_file(&path);
@@ -407,7 +409,7 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
-        // SAFETY: single-threaded restore; the reload puts the shared cache back.
+        // SAFETY: `env_lock` is still held; the reload puts the shared cache back.
         unsafe {
             match previous {
                 Some(value) => std::env::set_var("VIZFOLD_CONFIG", value),

@@ -9,23 +9,22 @@ import FilesPanel from "../components/FilesPanel.tsx";
 import StructureViewer from "../components/StructureViewer.tsx";
 import { Banner, Empty, Field, Picker, Status, bytes, when } from "../components/ui.tsx";
 import { Link } from "../router.tsx";
-import type { RunDetail } from "../../shared/types.ts";
+import type { FoldTarget } from "../../shared/types.ts";
 
-function Structures({ detail }: { detail: RunDetail }) {
-  const withStructure = detail.targets.filter((target) => target.structure);
+function Structures({ runId, targets }: { runId: number; targets: FoldTarget[] }) {
   const [tag, setTag] = useState("");
-  const target = withStructure.find((one) => one.tag === tag) ?? withStructure[0];
+  const target = targets.find((one) => one.tag === tag) ?? targets[0];
 
   if (!target?.structure) return null;
 
   return (
     <div>
-      {withStructure.length > 1 ? (
+      {targets.length > 1 ? (
         <div className="control-row">
           <Picker
             label="Target"
             value={target.tag}
-            options={withStructure.map((one) => ({ value: one.tag, label: one.tag }))}
+            options={targets.map((one) => ({ value: one.tag, label: one.tag }))}
             onChange={setTag}
           />
           <Field label="Residues">{target.sequence?.length ?? "—"}</Field>
@@ -37,14 +36,14 @@ function Structures({ detail }: { detail: RunDetail }) {
           <strong>{target.tag}</strong>
           <span className="path">{target.structure.path}</span>
           <div className="spacer" />
-          <a className="button" href={fileUrl(detail.run.id, target.structure.path)} download>
+          <a className="button" href={fileUrl(runId, target.structure.path)} download>
             Download
           </a>
         </div>
 
         <StructureViewer
           key={target.structure.path}
-          url={fileUrl(detail.run.id, target.structure.path)}
+          url={fileUrl(runId, target.structure.path)}
           name={target.structure.name}
         />
 
@@ -56,7 +55,7 @@ function Structures({ detail }: { detail: RunDetail }) {
               .map((file, index) => (
                 <span key={file.path}>
                   {index > 0 ? ", " : ""}
-                  <a href={fileUrl(detail.run.id, file.path)} download>
+                  <a href={fileUrl(runId, file.path)} download>
                     {file.name}
                   </a>{" "}
                   <span className="muted">({bytes(file.size)})</span>
@@ -101,6 +100,14 @@ export default function RunPage({ id }: { id: number }) {
   const { run } = detail;
   const running = isActive(run.status);
   const structures = detail.targets.filter((target) => target.structure);
+
+  // How many of each kind the executor registered, for the badges. What a panel can draw is a
+  // separate question — it reads the trace files — so the tab still opens on the disk read, or it
+  // would open onto nothing when a kind is registered but its panel has no content.
+  const held = detail.artifacts.reduce<Record<string, number>>((counts, artifact) => {
+    counts[artifact.type_slug] = (counts[artifact.type_slug] ?? 0) + 1;
+    return counts;
+  }, {});
   const hasActivations =
     detail.activations.tensors.length > 0 ||
     detail.activations.arrays.length > 0 ||
@@ -114,14 +121,14 @@ export default function RunPage({ id }: { id: number }) {
       value: "structure",
       label: "Structure",
       count: structures.length,
-      render: () => <Structures detail={detail} />,
+      render: () => <Structures runId={run.id} targets={structures} />,
     });
   }
   if (detail.attention.length) {
     tabs.push({
       value: "attention",
       label: "Attention",
-      count: detail.attention.length,
+      count: held.attention_map ?? detail.attention.length,
       render: () => <AttentionPanel detail={detail} />,
     });
   }
@@ -129,7 +136,10 @@ export default function RunPage({ id }: { id: number }) {
     tabs.push({
       value: "activations",
       label: "Activations",
-      count: detail.activations.tensors.length + detail.activations.arrays.length || undefined,
+      count:
+        (held.activation_tensor ?? 0) + (held.attention_tensor ?? 0) ||
+        detail.activations.tensors.length + detail.activations.arrays.length ||
+        undefined,
       render: () => <ActivationsPanel detail={detail} />,
     });
   }
@@ -209,7 +219,7 @@ export default function RunPage({ id }: { id: number }) {
               <Tabs.Indicator className="tabs-indicator" />
             </Tabs.List>
             {tabs.map((one) => (
-              <Tabs.Panel key={one.value} value={one.value} className="tab-panel flush">
+              <Tabs.Panel key={one.value} value={one.value}>
                 {one.render()}
               </Tabs.Panel>
             ))}

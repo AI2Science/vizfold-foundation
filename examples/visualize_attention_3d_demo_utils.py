@@ -1,4 +1,3 @@
-import csv
 import numpy as np
 from pymol import cmd
 from pymol.cgo import CYLINDER, SPHERE
@@ -10,52 +9,11 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import os
 
-from visualize_attention_data import get_attention_file_path, load_attention_map
-
-
-# ========== Attention File I/O ==========
-load_all_heads = load_attention_map
-
-
-def load_connections(connections_file, top_k=None):
-    """
-    Loads connections (res1, res2, weight) from a text file.
-    Sorts by descending weight and selects top_k if specified.
-    """
-    connections = []
-
-    with open(connections_file, 'r') as f:
-        reader = csv.reader(f)
-        next(reader)  # Skip header
-        for row in reader:
-            res1 = int(row[0])
-            res2 = int(row[1])
-            weight = float(row[2])
-            connections.append((res1, res2, weight))
-
-    # Sort by weight descending
-    connections.sort(key=lambda x: x[2], reverse=True)
-
-    if top_k is not None:
-        connections = connections[:top_k]
-
-    return connections
-
-
-def extract_head_number(filename):
-    parts = filename.replace('.', '_').replace('-', '_').split('_')
-    for i, part in enumerate(parts):
-        if part.lower() == 'head' and i + 1 < len(parts):
-            try:
-                return int(parts[i + 1])
-            except ValueError:
-                pass
-        if part.lower().startswith('head'):
-            try:
-                return int(part.lower().replace('head', ''))
-            except ValueError:
-                pass
-    return -1
+from visualize_attention_data import (
+    extract_head_number,
+    get_attention_file_path,
+    load_attention_map,
+)
 
 
 # ========== Residue Indexing and Geometry ==========

@@ -17,12 +17,8 @@ Shell and config:
 
 ```bash
 for f in $(git ls-files '*.sh'); do bash -n "$f"; done
-bash tests/launch_args.sh
-bash tests/site_config.sh   # snapshot of every site's resolved config; -u to accept a change
-bash tests/vocabulary.sh    # rejects env names outside the 19-key config schema
-bash tests/link_mirror.sh   # the three uniclust30 layouts the AF2 mirrors ship
-bash tests/esmfold_env.sh   # the torch build a driver may keep, and the specs it asks for
-bash tests/install_rc.sh    # what the bootstrap appends to a shell rc, and appends only once
+# Every suite, the way CI runs them -- a new tests/*.sh is picked up without editing anything.
+for f in tests/*.sh; do echo "== $f"; bash "$f"; done
 ```
 
 Python is checked with `flake8 . --select=E9,F63,F7,F82`.

@@ -13,7 +13,7 @@ const GAP = 6;
  *  direct-labelled while there are few enough rows to read, and every bar carries a hover read-out. */
 export default function Bars({ bars, unitLabel }: { bars: Bar[]; unitLabel: string }) {
   const [hover, setHover] = useState<{ x: number; y: number; bar: Bar } | null>(null);
-  const [fill, grid] = useToken("--accent", "--grid");
+  const [fill] = useToken("--accent");
 
   if (bars.length === 0) return null;
 
@@ -41,7 +41,6 @@ export default function Bars({ bars, unitLabel }: { bars: Bar[]; unitLabel: stri
             x2={labelWidth + plot * fraction}
             y2={chartHeight}
             className="grid-line"
-            stroke={grid}
           />
         ))}
 

@@ -63,9 +63,8 @@ openfold-demo-output/
 # TypeScript incremental build info
 *.tsbuildinfo
 
-# Windows executable artifacts
+# Windows executable artifacts (*.pdb debug symbols fall under the pattern above)
 *.exe
-*.pdb
 
 # Session worktrees, never part of a release.
 .claude/worktrees/

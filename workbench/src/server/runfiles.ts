@@ -1,8 +1,7 @@
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
-import { RUNS_DIR } from "./env.ts";
-import type { Artifact, FileKind, RunFile } from "../shared/types.ts";
+import type { FileKind, RunFile } from "../shared/types.ts";
 
 const KINDS: [RegExp, FileKind][] = [
   [/\.(pdb|cif|ent)$/i, "structure"],
@@ -18,21 +17,6 @@ export const kindOf = (name: string): FileKind =>
 /** How many files one listing walks before it stops. A run that writes more than this is reported
  *  as truncated rather than quietly cut short. */
 const FILE_LIMIT = 4000;
-
-/** `<prefix>/runs/<id>`: what the artifact rows point at once the run lands, and where the
- *  executor is writing before then. */
-export function runRoot(artifacts: Artifact[], id: number): string | null {
-  const own = artifacts.find((artifact) => artifact.type_slug === "run_output_directory");
-  if (own) return own.storage_uri;
-  const marker = `${sep}runs${sep}${id}`;
-  for (const artifact of artifacts) {
-    const at = artifact.storage_uri.indexOf(marker);
-    if (at >= 0) return artifact.storage_uri.slice(0, at + marker.length);
-  }
-  if (!RUNS_DIR) return null;
-  const guess = join(RUNS_DIR, String(id));
-  return existsSync(guess) ? guess : null;
-}
 
 /** Every file under `root`, relative-pathed, oldest name first. Depth-first and bounded: an
  *  activation dump is thousands of tensors, and the browser has to render the list. */

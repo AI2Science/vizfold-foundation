@@ -130,7 +130,7 @@ slurm::run() {
     [ -n "$PREFIX" ] || die "no install prefix; set OPENFOLD_PREFIX or its <site>.json"
     # May already be set: inline env, slurm::discover, or a <site>.json template off its vars.
     ACCOUNT=$(interactive::resolve OPENFOLD_ACCOUNT "slurm account" "${OPENFOLD_ACCOUNT:-$(slurm::default_account)}")
-    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${ACCOUNT:+$ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
+    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$ACCOUNT}
     export OPENFOLD_PREFIX=$PREFIX OPENFOLD_HOME=$REPO OPENFOLD_ACCOUNT=$ACCOUNT
     SETUP=$OF/install/setup.sh
     mkdir -p "$PREFIX"

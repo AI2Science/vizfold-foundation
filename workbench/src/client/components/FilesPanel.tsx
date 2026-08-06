@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import FileTable from "./FileTable.tsx";
-import { Banner, Empty, Field, Search, Segmented } from "./ui.tsx";
+import { Banner, Field, Search, Segmented } from "./ui.tsx";
 import type { FileKind, RunDetail } from "../../shared/types.ts";
 
 const KINDS: { value: FileKind | "all"; label: string }[] = [
@@ -23,18 +23,6 @@ export default function FilesPanel({ detail }: { detail: RunDetail }) {
       (kind === "all" || file.kind === kind) &&
       (query === "" || file.path.toLowerCase().includes(query.toLowerCase())),
   );
-
-  if (detail.files.length === 0) {
-    return (
-      <Empty title="Nothing written yet">
-        <p className="note">
-          {detail.root
-            ? `The run directory ${detail.root} is empty.`
-            : "The executor has not created this run's output directory."}
-        </p>
-      </Empty>
-    );
-  }
 
   return (
     <div>
@@ -59,7 +47,7 @@ export default function FilesPanel({ detail }: { detail: RunDetail }) {
           </Banner>
         ) : null}
 
-        <FileTable runId={detail.run.id} files={files} />
+        <FileTable runId={detail.run.id} files={files} kinds={detail.artifacts} />
         {files.length === 0 ? <p className="note">Nothing matches that filter.</p> : null}
       </div>
     </div>

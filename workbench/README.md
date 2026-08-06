@@ -42,8 +42,11 @@ bun run typecheck
 
 ## What it shows
 
-Only what a run actually produced. A tab appears when the files behind it are on disk, and not
-before: no placeholder structures, no sample attention, no demo run. A fold that wrote nothing says
+Only what a run actually produced. Every file a run writes is registered under a true kind —
+protein structure, attention map, attention or activation tensor, trace summary, run metadata, the
+alignments it searched for itself — classified from its path by the executor, and the dashboard
+takes its viewer and display mode from that kind. A tab appears when the files behind it are on
+disk, and not before: no placeholder structures, no sample attention, no demo run. A fold that wrote nothing says
 so and names the directory it looked in.
 
 - **Structure** — the relaxed prediction per target in a 3Dmol viewer (cartoon/stick/line/sphere,
@@ -60,7 +63,8 @@ so and names the directory it looked in.
   bars, its `trace/index.json` as a tensor inventory (shape, dtype, size, download), its `meta.json`
   as the run's model/device/dtype header, plus every dense array on disk no index claims —
   OpenFold's `.npz` dumps and `_output_dict.pkl`.
-- **Files** — everything under the run directory, filterable, each one downloadable.
+- **Files** — everything under the run directory, filterable, each one downloadable, and named by
+  the kind the executor classified it as rather than by its extension.
 
 ## Layout
 

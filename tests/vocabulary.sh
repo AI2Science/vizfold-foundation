@@ -11,7 +11,7 @@ schema=$(printf '%s\n' $VIZFOLD_CONFIG_KEYS | sort)
 
 # Site keys the install consumes but never persists: a re-install re-reads the same file.
 install_only="OPENFOLD_ALLOCATION OPENFOLD_BASE OPENFOLD_BUILD_CPUS OPENFOLD_BUILD_GRES
-OPENFOLD_BUILD_MEM OPENFOLD_BUILD_TIME OPENFOLD_GPU_ACCOUNT_SUFFIX"
+OPENFOLD_BUILD_MEM OPENFOLD_BUILD_TIME"
 
 report() { # $1 label, $2 newline-separated offenders, $3 remedy
     if [ -z "$2" ]; then echo "ok   $1"; else

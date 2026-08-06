@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import Bars from "./Bars.tsx";
 import FileTable from "./FileTable.tsx";
-import { Empty, Picker, Segmented, bytes } from "./ui.tsx";
+import { Picker, Segmented, bytes } from "./ui.tsx";
 import { fileUrl } from "../api.ts";
 import type { RunDetail } from "../../shared/types.ts";
 
@@ -35,26 +35,15 @@ const META_ROWS: [string, string][] = [
   ["date_time", "Written"],
 ];
 
+/** A `{value: label}` record read as the option list a Segmented takes. */
+const optionsOf = <T extends string>(labels: Record<T, string>) =>
+  (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
+
 export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
   const { activations, run } = detail;
   const [measure, setMeasure] = useState<Measure>("norm_mean");
   const [attentionMeasure, setAttentionMeasure] = useState<AttentionMeasure>("entropy_proxy");
   const [group, setGroup] = useState<"activations" | "attention">("activations");
-
-  const hasSummary = activations.activationStats.length > 0 || activations.attentionStats.length > 0;
-  const hasAnything =
-    hasSummary || activations.tensors.length > 0 || activations.arrays.length > 0 || activations.meta;
-
-  if (!hasAnything) {
-    return (
-      <Empty title="This run stored no activations">
-        <p className="note">
-          Activations land under <code>trace/</code> for ESMFold, and as dense{" "}
-          <code>.npz</code>/<code>.pkl</code> dumps for OpenFold. Neither is on disk for this run.
-        </p>
-      </Empty>
-    );
-  }
 
   const tensors =
     group === "activations"
@@ -62,7 +51,7 @@ export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
       : activations.tensors.filter((tensor) => tensor.group === "attention");
 
   return (
-    <div className="stack" style={{ padding: 18 }}>
+    <div className="panel-body stack">
       {activations.meta ? (
         <dl className="kv">
           {META_ROWS.filter(([key]) => activations.meta?.[key] !== undefined).map(([key, label]) => (
@@ -82,10 +71,7 @@ export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
             <Segmented
               value={measure}
               onChange={setMeasure}
-              options={(Object.keys(MEASURE_LABEL) as Measure[]).map((key) => ({
-                value: key,
-                label: MEASURE_LABEL[key],
-              }))}
+              options={optionsOf(MEASURE_LABEL)}
             />
           </div>
           <Bars
@@ -110,10 +96,7 @@ export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
             <Segmented
               value={attentionMeasure}
               onChange={setAttentionMeasure}
-              options={(Object.keys(ATTENTION_LABEL) as AttentionMeasure[]).map((key) => ({
-                value: key,
-                label: ATTENTION_LABEL[key],
-              }))}
+              options={optionsOf(ATTENTION_LABEL)}
             />
           </div>
           <Bars
@@ -182,7 +165,7 @@ export default function ActivationsPanel({ detail }: { detail: RunDetail }) {
       {activations.arrays.length > 0 ? (
         <section>
           <h3 style={{ marginBottom: 10 }}>Dense arrays</h3>
-          <FileTable runId={run.id} files={activations.arrays} />
+          <FileTable runId={run.id} files={activations.arrays} kinds={detail.artifacts} />
         </section>
       ) : null}
     </div>

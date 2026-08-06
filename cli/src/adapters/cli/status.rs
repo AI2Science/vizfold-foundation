@@ -457,6 +457,7 @@ mod tests {
     /// Never cloned and drifted need different fixes; both once read BROKEN and pointed at the updater.
     #[test]
     fn an_absent_checkout_is_not_a_broken_one() {
+        let _env = crate::core::test_support::env_lock();
         let dir = std::env::temp_dir().join(format!("vizfold-repo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(config::INSTALLER).parent().unwrap()).unwrap();
@@ -481,6 +482,7 @@ mod tests {
 
     #[test]
     fn checked_keys_are_all_in_the_schema() {
+        let _env = crate::core::test_support::env_lock();
         let checked = super::CHECKED_PATHS
             .iter()
             .chain(super::OPENFOLD_PATHS)

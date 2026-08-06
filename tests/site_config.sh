@@ -40,7 +40,7 @@ resolve() {
     # What slurm::run settles before handing off to setup.sh.
     export OPENFOLD_PREFIX=${OPENFOLD_PREFIX:-$(slurm::default_prefix)}
     export OPENFOLD_ACCOUNT=${OPENFOLD_ACCOUNT:-$(slurm::default_account)}
-    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-${OPENFOLD_ACCOUNT:+$OPENFOLD_ACCOUNT${OPENFOLD_GPU_ACCOUNT_SUFFIX:-}}}
+    export OPENFOLD_GPU_ACCOUNT=${OPENFOLD_GPU_ACCOUNT:-$OPENFOLD_ACCOUNT}
 
     . "$SANDBOX/setup-defs.sh"
     export CONDA_PREFIX=$OPENFOLD_PREFIX/envs/vizfold-openfold

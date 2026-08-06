@@ -8,20 +8,15 @@ use crate::core::{
     config,
     entities::{
         execution_targets as execution_target_entity, model_backends as model_backend_entity,
-        model_invocation_profiles as model_invocation_profile_entity,
     },
     examples,
     output_locations::resolve_output_location,
     preflight::PreflightStatus,
-    services::{
-        artifacts, model_invocation_profiles,
-        run_artifacts::{self, register_known_run_artifacts},
-        run_execution::execute_run,
-        runs,
-    },
+    services::{model_invocation_profiles, run_artifacts, run_execution::execute_run, runs},
 };
 
 use super::args::{Backend, RunArgs};
+use super::show::print_table;
 
 /// A GPU partition with no allocation held means the fold is srun'd onto a GPU node regardless of this host.
 pub(super) fn on_gpu_partition(context: config::SlurmContext, partition: Option<&str>) -> bool {
@@ -90,32 +85,36 @@ pub(super) async fn register_artifacts(
         )));
     }
 
-    let profile = model_invocation_profile_entity::Entity::find_by_id(run.invocation_profile_id)
-        .one(database)
-        .await?
-        .ok_or_else(|| DbErr::Custom("model invocation profile does not exist".into()))?;
+    let profile =
+        crate::core::services::require_profile(database, run.invocation_profile_id).await?;
     let workspace = resolve_output_location(&profile, &run)?;
-    let existing = artifacts::list_artifacts_for_run(database, run_id).await?;
-    register_known_run_artifacts(database, run_id).await?;
+    let added = run_artifacts::register_run_artifacts(database, run_id).await?;
+    let held = run_artifacts::artifact_counts_by_kind(database, run_id).await?;
 
     println!("Registered artifacts for run {run_id}");
     println!("\nOutput workspace:\n  {}", workspace.display());
-    println!("\nArtifacts:");
-    // The service's own list: the call above registers what exists, so the two questions are one.
-    for (artifact_type, path) in run_artifacts::known_directories(&workspace) {
-        let storage_uri = path.display().to_string();
-        let state = if !path.is_dir() {
-            "skipped -- no such directory"
-        } else if existing
-            .iter()
-            .any(|artifact| artifact.storage_uri == storage_uri)
-        {
-            "already present"
-        } else {
-            "registered"
-        };
-        println!("  [{state}] {artifact_type} -> {storage_uri}");
+    if held.is_empty() {
+        println!("\nNothing written yet: the run produced no files to register.");
+        return Ok(());
     }
+
+    // What each kind holds now, and how much of it this pass is responsible for -- a re-register
+    // over an unchanged workspace is all zeros, which is the answer to "did anything land".
+    println!("\nArtifacts by kind:");
+    print_table(
+        &["KIND", "HELD", "NEW"],
+        held.iter().map(|(slug, count)| {
+            vec![
+                slug.clone(),
+                count.to_string(),
+                added
+                    .get(slug.as_str())
+                    .copied()
+                    .unwrap_or_default()
+                    .to_string(),
+            ]
+        }),
+    );
     Ok(())
 }
 
@@ -209,7 +208,7 @@ pub(super) async fn run_run(
         report_execution(database, run_id).await?;
         println!();
     }
-    register_known_run_artifacts(database, run_id).await?;
+    run_artifacts::register_run_artifacts(database, run_id).await?;
 
     let run = runs::get_run_with_artifacts(database, run_id)
         .await?
@@ -356,14 +355,19 @@ pub(super) fn batch_inputs_dir() -> PathBuf {
     config::prefix().join("runs/inputs")
 }
 
-/// cwd first, then the checkout: a relative target means what the shell means by it.
-pub(super) fn local_path(target: &str) -> PathBuf {
-    let path = Path::new(target);
+/// cwd first, then `base`: a relative path means what the shell means by it, and an absolute one
+/// resolves to itself because `cwd.join(absolute)` is that absolute path.
+fn beside_cwd_or(path: &Path, base: &Path) -> PathBuf {
     std::env::current_dir()
         .ok()
         .map(|cwd| cwd.join(path))
         .filter(|candidate| candidate.exists())
-        .unwrap_or_else(|| config::openfold_home().join(path))
+        .unwrap_or_else(|| base.join(path))
+}
+
+/// cwd first, then the checkout: a relative target means what the shell means by it.
+pub(super) fn local_path(target: &str) -> PathBuf {
+    beside_cwd_or(Path::new(target), &config::openfold_home())
 }
 
 /// One directory of symlinks, so OpenFold's single `fasta_dir` can name a whole batch. Each link
@@ -670,18 +674,8 @@ pub(super) fn canonicalize_local_path(
     path: &str,
     working_dir: &str,
 ) -> Result<String, DbErr> {
-    let original_path = Path::new(path);
-    if original_path.is_absolute() {
-        return canonicalize_at(field, path, original_path);
-    }
-    std::env::current_dir()
-        .ok()
-        .map(|cwd| cwd.join(original_path))
-        .filter(|candidate| candidate.exists())
-        .map_or_else(
-            || canonicalize_at(field, path, &PathBuf::from(working_dir).join(original_path)),
-            |candidate| canonicalize_at(field, path, &candidate),
-        )
+    let resolved = beside_cwd_or(Path::new(path), Path::new(working_dir));
+    canonicalize_at(field, path, &resolved)
 }
 
 pub(super) fn canonicalize_at(
@@ -724,9 +718,6 @@ pub(super) fn seed_required_error() -> DbErr {
 mod tests {
     use super::super::test_support::run_args;
     use super::*;
-    use sea_orm::{ConnectionTrait, Database, Statement};
-
-    use crate::core::{db, seed};
 
     fn fake_target(id: &str, fasta: &str) -> Target {
         Target {
@@ -771,26 +762,18 @@ mod tests {
         assert!(long.starts_with("1UBQ_1+19more-"), "{long}");
     }
 
-    async fn seeded_database() -> Result<sea_orm::DatabaseConnection, DbErr> {
-        let database = Database::connect("sqlite::memory:").await?;
-        database
-            .execute(Statement::from_string(
-                database.get_database_backend(),
-                "PRAGMA foreign_keys = ON".to_owned(),
-            ))
-            .await?;
-        db::migrate_database(&database).await?;
-        seed::seed_defaults(&database).await?;
-        Ok(database)
-    }
-
+    // The guard is held across awaits on purpose: `#[tokio::test]` gives each test its own
+    // current-thread runtime driving one future, so nothing inside this runtime can want the lock,
+    // and the contention it exists to serialise is between test threads.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn submit_openfold_run_uses_seeded_records() -> Result<(), DbErr> {
+        let _env = crate::core::test_support::env_lock();
         let local_path = std::fs::canonicalize(crate::core::config::openfold_home())
             .expect("OpenFold home should be canonicalizable")
             .display()
             .to_string();
-        let database = seeded_database().await?;
+        let database = crate::core::test_support::seeded_db().await?;
 
         // A real FASTA, so this pins the id and sequence derivation too.
         let fasta = std::fs::canonicalize(
@@ -862,6 +845,7 @@ mod tests {
     /// Regression: a bundled example names a directory, and ESMFold's `--fasta` needs the file in it.
     #[test]
     fn an_example_resolves_to_its_fasta_file_not_its_directory() {
+        let _env = crate::core::test_support::env_lock();
         let resolved = super::resolve_targets(&["6KWC_1".to_owned()]).expect("6KWC_1 resolves");
         let [target] = resolved.as_slice() else {
             panic!("one target, got {}", resolved.len());
@@ -873,9 +857,11 @@ mod tests {
         );
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn two_targets_submit_one_run_over_a_staged_directory() -> Result<(), DbErr> {
-        let database = seeded_database().await?;
+        let _env = crate::core::test_support::env_lock();
+        let database = crate::core::test_support::seeded_db().await?;
         let home = config::openfold_home().display().to_string();
         let args = run_args(&["1UBQ_1", "6KWC_1", "--data-dir", &home]);
         let resolved = super::resolve_targets(&args.targets)?;
@@ -920,7 +906,7 @@ mod tests {
 
     #[tokio::test]
     async fn esmfold_refuses_more_than_one_target() -> Result<(), DbErr> {
-        let database = seeded_database().await?;
+        let database = crate::core::test_support::seeded_db().await?;
         let args = run_args(&["1UBQ_1", "6KWC_1", "--backend", "esmfold"]);
         let resolved = super::resolve_targets(&args.targets)?;
 
@@ -970,9 +956,11 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn submit_openfold_run_reports_missing_local_path() -> Result<(), DbErr> {
-        let database = seeded_database().await?;
+        let _env = crate::core::test_support::env_lock();
+        let database = crate::core::test_support::seeded_db().await?;
         let missing_path = "definitely-missing-vizfold-local-path";
         let args = run_args(&["6KWC_1", "--data-dir", missing_path]);
 

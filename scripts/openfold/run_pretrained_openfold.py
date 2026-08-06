@@ -35,7 +35,6 @@ logging.basicConfig()
 logger = logging.getLogger(__file__)
 logger.setLevel(level=logging.INFO)
 
-import torch
 torch_versions = torch.__version__.split(".")
 torch_major_version = int(torch_versions[0])
 torch_minor_version = int(torch_versions[1])
@@ -425,9 +424,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    seed = 42
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    # Seeding lives in main(), off --data_random_seed; anything here is overwritten before use.
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "fasta_dir", type=str,

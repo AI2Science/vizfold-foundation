@@ -31,8 +31,8 @@ function mix(low: string, high: string, t: number): string {
       Number.parseInt(full.slice(4, 6), 16),
     ];
   };
-  const [r1, g1, b1] = parse(low || "#86b6ef");
-  const [r2, g2, b2] = parse(high || "#0d366b");
+  const [r1, g1, b1] = parse(low);
+  const [r2, g2, b2] = parse(high);
   const clamp = Math.min(1, Math.max(0, t));
   const channel = (a: number, b: number) => Math.round(a + (b - a) * clamp);
   return `rgb(${channel(r1, r2)} ${channel(g1, g2)} ${channel(b1, b2)})`;

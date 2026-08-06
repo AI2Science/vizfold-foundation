@@ -9,4 +9,4 @@ Still missing: a status and notes per pair, so an unsupported combination can be
 
 Artifact capabilities, parameter schemas, target resources, profile config, and run parameters are stored as JSON strings in SQLite. The validation helpers live in cli/src/core/services/validation.rs and are called from both the services and the model runners.
 
-The CLI adapter writes only through the core services and touches entities directly only for reads (cli/src/adapters/cli.rs:1470, 1481, 1732, 1737). Still open: move JSON parsing to the adapter boundary so the core receives `serde_json::Value`.
+The CLI adapter writes only through the core services and touches entities directly only for reads (the read paths under cli/src/adapters/cli/). Still open: move JSON parsing to the adapter boundary so the core receives `serde_json::Value`.

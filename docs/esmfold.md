@@ -23,7 +23,7 @@ no such metadata: `pip install torch` takes whatever CUDA is newest, and on a cl
 lags that, the fold reaches a GPU node and dies with "the NVIDIA driver on your system is too old".
 
 The installer prints the driver version it detected, asks for a CUDA build and caps `cuda-version` at
-that driver. Where it finds no driver it asks for neither, so a CPU node or a laptop resolves to the
+that driver; the verify step prints the torch build it ended up with. Where it finds no driver it asks for neither, so a CPU node or a laptop resolves to the
 build it can actually run rather than failing or dragging in a GPU stack. An env already holding a
 torch this machine cannot use is rebuilt rather than kept. `OPENFOLD_DRIVER_CUDA` in
 `~/.config/vizfold/vizfold.json` overrides the detection — set it on a GPU cluster whose login node

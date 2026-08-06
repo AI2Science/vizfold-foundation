@@ -35,7 +35,7 @@ vizfold install openfold
 
 The binary ships only itself, so `install repo` clones the matching checkout to `$HOME/vizfold-repo`
 for the installer scripts, the bundled proteins and the dashboard, and provisions the dashboard's
-Node environment and dependencies so `serve` starts rather than installs. It then settles the site and
+Bun runtime and dependencies so `serve` starts rather than installs. It then settles the site and
 writes `~/.config/vizfold/vizfold.json` — which cluster, which prefix, which AlphaFold2 mirror holds
 the protein databases, what the scheduler takes — so `status` reads `config ok` before any backend is
 installed, and a backend install only has to build its environment. Nothing clones as a side effect:
@@ -269,11 +269,11 @@ The dashboard folds with, and lists runs from, the backends it was told to serve
 others stay in the database, out of sight.
 
 ```text
-install             Install the checkout everything runs from (`base`), or a model backend from it
+install             Install the checkout everything runs from (`repo`), or a model backend from it
 download            Download a backend's data (OpenFold AlphaFold2 databases/params)
 status              Show resolved config, which backends are installed, and whether it all checks out
 uninstall           Remove one part, or everything the install generated
-update              Move the checkout to this binary's release (`base`), or reinstall a backend from it
+update              Move the checkout to this binary's release (`repo`), or reinstall a backend from it
 self-update         Replace this binary with the latest release. Run `update repo` after, for the checkout
 serve               Start the workbench dashboard, over the given backends (default: all installed)
 list                List executor records
@@ -283,7 +283,7 @@ register-artifacts  Register known artifacts for a completed run
 completions         Print this shell's tab-completion script. `install.sh` wires it into your shell rc
 ```
 
-Completion covers subcommands, flags, and the values of a fixed set — `install <TAB>` offers `base`,
+Completion covers subcommands, flags, and the values of a fixed set — `install <TAB>` offers `repo`,
 `openfold`, `esmfold`. The bootstrap eval's the binary's own output rather than writing a script out,
 so a `self-update` cannot leave a stale one behind. To wire it up by hand, or for a shell the
 bootstrap does not touch:

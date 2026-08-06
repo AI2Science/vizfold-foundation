@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from visualize_attention_data import (
+    extract_head_number,
     get_attention_file_path,
     load_attention_map,
     parse_fasta_sequence,
@@ -34,6 +35,14 @@ class TestVisualizeAttentionData(unittest.TestCase):
             get_attention_file_path("/tmp/attn", "triangle_start", 47, residue_idx=18),
             "/tmp/attn/triangle_start_attn_layer47_residue_idx_18.txt",
         )
+
+    def test_extract_head_number_reads_the_head_out_of_a_filename(self):
+        self.assertEqual(extract_head_number("msa_row_head_3_layer_47_6KWC_arc.png"), 3)
+        self.assertEqual(
+            extract_head_number("tri_start_res_1_head_0_layer_47_6KWC_arc.png"), 0
+        )
+        self.assertEqual(extract_head_number("head12_layer_2.png"), 12)
+        self.assertEqual(extract_head_number("no_head_here.png"), -1)
 
     def test_parse_fasta_sequence_joins_sequence_lines(self):
         with tempfile.TemporaryDirectory() as tmpdir:
