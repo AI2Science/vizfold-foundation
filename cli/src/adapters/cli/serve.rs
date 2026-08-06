@@ -10,13 +10,11 @@ use super::shell::run_to_completion;
 /// `serve` still calls it: an install that predates the dashboard, or a cleared prefix, self-heals.
 pub(super) fn ensure_dashboard(workbench: &Path, backends: &str) -> Result<PathBuf, DbErr> {
     let bun_bin = ensure_bun()?;
-    let node_modules = workbench.join("node_modules");
-    let empty =
-        std::fs::read_dir(&node_modules).map_or(true, |mut entries| entries.next().is_none());
-    if empty {
-        println!("Installing workbench dependencies (bun install)...");
-        run_bun(workbench, &bun_bin, &["install"], backends, None)?;
-    }
+    // Unconditionally: `bun install` is what knows whether the tree matches the lockfile, and a
+    // non-empty node_modules is no answer -- an install upgraded across the dashboard's rewrite has
+    // one full of the dependencies the old one needed and none of these.
+    println!("Installing workbench dependencies (bun install)...");
+    run_bun(workbench, &bun_bin, &["install"], backends, None)?;
     Ok(bun_bin)
 }
 
@@ -123,12 +121,15 @@ pub(super) fn system_bun_bin() -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
-/// The release asset for this machine. The musl builds are statically linked, so they run on a
-/// cluster whose glibc predates the gnu build's floor.
+/// The release asset for this machine. Bun's `-musl` builds are not static -- they name musl's
+/// loader as their interpreter -- so on a glibc cluster they fail to exec at all, with the bare
+/// `No such file or directory` the kernel gives a missing interpreter. Pick by which loader is here.
 pub(super) fn bun_asset() -> Result<&'static str, DbErr> {
     match std::env::consts::ARCH {
-        "x86_64" => Ok("bun-linux-x64-musl"),
-        "aarch64" => Ok("bun-linux-aarch64-musl"),
+        "x86_64" if musl_loader("x86_64") => Ok("bun-linux-x64-musl"),
+        "x86_64" => Ok("bun-linux-x64"),
+        "aarch64" if musl_loader("aarch64") => Ok("bun-linux-aarch64-musl"),
+        "aarch64" => Ok("bun-linux-aarch64"),
         other => Err(DbErr::Custom(format!(
             "no Bun release for {other}; install bun >= {}.{} yourself and re-run",
             MIN_BUN.0, MIN_BUN.1
@@ -136,11 +137,16 @@ pub(super) fn bun_asset() -> Result<&'static str, DbErr> {
     }
 }
 
+/// musl installs its loader at one fixed path, and a glibc-only system has nothing there.
+pub(super) fn musl_loader(arch: &str) -> bool {
+    Path::new(&format!("/lib/ld-musl-{arch}.so.1")).exists()
+}
+
 /// Bun from PATH when new enough, else one downloaded beside the workbench -- kept out of every
 /// backend env, and off `$HOME`, which is the quota'd filesystem this staging exists to avoid.
 pub(super) fn ensure_bun() -> Result<PathBuf, DbErr> {
     let bin = config::env_dir("workbench").join("bin");
-    if bin.join("bun").is_file() {
+    if bun_runs(&bin.join("bun")) {
         return Ok(bin);
     }
     if let Some(system) = system_bun_bin() {
@@ -172,7 +178,26 @@ pub(super) fn ensure_bun() -> Result<PathBuf, DbErr> {
         std::os::unix::fs::PermissionsExt::from_mode(0o755),
     )
     .map_err(|error| DbErr::Custom(format!("failed to make bun executable: {error}")))?;
+    // A Bun that cannot exec here fails with the kernel's bare `No such file or directory`, about a
+    // file that plainly exists, from wherever the server first calls it. Say it now, and say why.
+    if !bun_runs(&bin.join("bun")) {
+        return Err(DbErr::Custom(format!(
+            "downloaded {asset} to '{}', but it does not run on this machine; install bun >= {}.{} yourself and re-run",
+            bin.join("bun").display(),
+            MIN_BUN.0,
+            MIN_BUN.1
+        )));
+    }
     Ok(bin)
+}
+
+/// Whether a provisioned Bun actually runs here. Presence is not enough: an install that fetched
+/// the wrong asset once holds a file that exists and cannot exec, and would keep returning it.
+pub(super) fn bun_runs(bun: &Path) -> bool {
+    std::process::Command::new(bun)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| bun_is_new_enough(&String::from_utf8_lossy(&output.stdout)))
 }
 
 /// `unzip` where the machine has it, else Python's zipfile module -- a login node has one or the
@@ -306,12 +331,24 @@ mod tests {
     }
 
     #[test]
-    fn bun_asset_is_the_static_build_for_this_machine() {
-        // Only the two architectures the releases are published for; both musl, so a cluster whose
-        // glibc predates the gnu build still runs the dashboard.
-        assert!(matches!(
-            super::bun_asset(),
-            Ok("bun-linux-x64-musl") | Ok("bun-linux-aarch64-musl")
-        ));
+    fn bun_asset_matches_this_machine_s_c_library() {
+        // Only the two architectures the releases are published for, and the `-musl` asset only
+        // where musl's loader is -- it is the interpreter that build names, not a bundled one.
+        let asset = super::bun_asset().expect("a published architecture");
+        assert!(
+            matches!(
+                asset,
+                "bun-linux-x64"
+                    | "bun-linux-aarch64"
+                    | "bun-linux-x64-musl"
+                    | "bun-linux-aarch64-musl"
+            ),
+            "unexpected asset {asset}"
+        );
+        assert_eq!(
+            asset.ends_with("-musl"),
+            super::musl_loader(std::env::consts::ARCH),
+            "{asset} does not match the loader this machine has"
+        );
     }
 }
