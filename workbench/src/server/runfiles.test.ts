@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,11 +45,14 @@ describe("listFiles", () => {
 });
 
 describe("resolveInside", () => {
-  test("resolves a path within the run", () => {
+  test("resolves a path within the run to the file it names", () => {
     const root = join(sandbox(), "run");
-    expect(resolveInside(root, "attention/1UBQ_1/msa_row_attn_layer0.txt")).toBe(
-      join(root, "attention/1UBQ_1/msa_row_attn_layer0.txt"),
-    );
+    const wanted = "attention/1UBQ_1/msa_row_attn_layer0.txt";
+    const resolved = resolveInside(root, wanted);
+    // Containment is decided on the run root's real path, so a symlinked root resolves through it:
+    // on macOS the temp directory is exactly that, `/var/…` standing for `/private/var/…`.
+    expect(resolved).toBe(realpathSync(join(root, wanted)));
+    expect(readFileSync(resolved!, "utf8")).toBe("Layer 0, Head 0\n");
   });
 
   test("refuses to climb out of the run", () => {
