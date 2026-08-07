@@ -273,6 +273,15 @@ target is a bundled example, so a FASTA of your own runs the full search unless 
 otherwise. Pass `--use-precomputed-alignments=false` to run the full MSA search instead (much slower; needs the full
 databases).
 
+### `run N has never run, but '…/runs/N' already holds output`
+
+The workspace is `$OPENFOLD_PREFIX/runs/<run-id>`, so a run id that comes round again — a rebuilt
+database, a deleted row, a directory that outlived the run that wrote it — would land on someone
+else's output and register every file in it as this run's. A run that has never started refuses one.
+Move the directory aside and re-run, or pass `--reuse-workspace` when you know the output is this
+run's. Re-running a run that already started is unaffected: its own partial output is what a retry
+should find.
+
 ### `srun: Requested time limit is invalid` / `Invalid account or account/partition combination`
 
 The GPU partition and time cap come from the site profile (`sites/<ClusterName>.json`); the account

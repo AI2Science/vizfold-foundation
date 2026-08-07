@@ -44,10 +44,34 @@ pub struct ExecutionOutcome {
     pub output: Option<CommandOutput>,
 }
 
+/// A run's workspace is `<output location>/<run id>`, so an id that comes round again -- a database
+/// rebuilt, a row deleted, a directory outliving the run that made it -- lands on someone else's
+/// output. Registration would then attribute every one of those files to this run, and the
+/// dashboard would draw them: the arcs of a protein this run never folded.
+///
+/// A run that has already started owns what is there; that is a retry, and its own partial output
+/// is exactly what it should find. A run that has never started must find nothing.
+fn claim_workspace(workspace: &Path, run: &run_entity::Model, reuse: bool) -> Result<(), DbErr> {
+    if reuse || run.started_at.is_some() {
+        return Ok(());
+    }
+    let occupied = std::fs::read_dir(workspace).is_ok_and(|mut entries| entries.next().is_some());
+    if !occupied {
+        return Ok(());
+    }
+    Err(DbErr::Custom(format!(
+        "run {} has never run, but '{}' already holds output; move it aside, or pass \
+         --reuse-workspace to fold into it anyway",
+        run.id,
+        workspace.display()
+    )))
+}
+
 pub async fn execute_run(
     db: &DatabaseConnection,
     run_id: i32,
     runner: &dyn CommandRunner,
+    reuse_workspace: bool,
 ) -> Result<ExecutionOutcome, DbErr> {
     let run = run_entity::Entity::find_by_id(run_id)
         .one(db)
@@ -64,6 +88,7 @@ pub async fn execute_run(
 
         // Created up front, so a fresh install needs no mkdir; OpenFold also seeds its attention/ dir.
         let workspace = resolve_output_location(&invocation_profile, &run)?;
+        claim_workspace(&workspace, &run, reuse_workspace)?;
         let to_create = match kind {
             BackendKind::Openfold => workspace.join("attention"),
             BackendKind::Esmfold => workspace.clone(),
@@ -550,10 +575,75 @@ mod tests {
     async fn missing_run_returns_clear_error() -> Result<(), DbErr> {
         let db = crate::core::test_support::seeded_db().await?;
         let (runner, _, _) = runner(0, "");
-        let error = execute_run(&db, 999, &runner)
+        let error = execute_run(&db, 999, &runner, false)
             .await
             .expect_err("missing run should error");
         assert!(error.to_string().contains("run 999 does not exist"));
+        Ok(())
+    }
+
+    /// Delta handed us the real case: `runs/4` still held a complete ESMFold run from ten days
+    /// earlier, and a fresh OpenFold run folded into it. Every one of those files then registered
+    /// as run 4's, and the dashboard drew a 43-residue protein this run never folded.
+    #[tokio::test]
+    async fn a_run_that_never_ran_refuses_a_workspace_that_is_not_empty() -> Result<(), DbErr> {
+        let db = crate::core::test_support::seeded_db().await?;
+        let layout = TestLayout::new("test_input");
+        let run = create_run(&db, &layout, false).await?;
+        let workspace = layout.output_location.join(run.id.to_string());
+        std::fs::create_dir_all(&workspace).expect("workspace");
+        std::fs::write(workspace.join("predicted.pdb"), "ATOM\n").expect("someone else's output");
+
+        let (refused, never_called, _) = runner(0, "");
+        let error = execute_run(&db, run.id, &refused, false)
+            .await
+            .expect_err("a fresh run must not inherit output it did not write");
+        assert!(
+            error.to_string().contains("already holds output"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !never_called.load(Ordering::SeqCst),
+            "nothing should have folded"
+        );
+
+        // The escape hatch, for output the user knows is theirs.
+        let (allowed, called, _) = runner(0, "");
+        execute_run(&db, run.id, &allowed, true).await?;
+        assert!(called.load(Ordering::SeqCst));
+        Ok(())
+    }
+
+    /// A retry is the one case where finding output is right: it is the run's own, from the attempt
+    /// that failed, and `started_at` is what says so.
+    #[tokio::test]
+    async fn a_run_that_already_started_keeps_its_own_workspace() -> Result<(), DbErr> {
+        let db = crate::core::test_support::seeded_db().await?;
+        let layout = TestLayout::new("test_input");
+        let run = create_run(&db, &layout, false).await?;
+        let (failing, _, _) = runner(1, "boom");
+        execute_run(&db, run.id, &failing, false).await?;
+        let failed = run_entity::Entity::find_by_id(run.id)
+            .one(&db)
+            .await?
+            .expect("run exists");
+        assert_eq!(failed.status, "failed");
+        assert!(failed.started_at.is_some());
+        std::fs::write(
+            layout
+                .output_location
+                .join(run.id.to_string())
+                .join("partial.pdb"),
+            "ATOM\n",
+        )
+        .expect("partial output");
+
+        let (retry, called, _) = runner(0, "");
+        execute_run(&db, run.id, &retry, false).await?;
+        assert!(
+            called.load(Ordering::SeqCst),
+            "a retry must be allowed to run"
+        );
         Ok(())
     }
 
@@ -563,7 +653,7 @@ mod tests {
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, called, command) = runner(0, "");
-        execute_run(&db, run.id, &runner).await?;
+        execute_run(&db, run.id, &runner, false).await?;
         assert!(called.load(Ordering::SeqCst));
         let command = command
             .lock()
@@ -611,7 +701,7 @@ mod tests {
         let run = create_esmfold_run(&db, &layout).await?;
         let (runner, called, command) = runner(0, "");
 
-        execute_run(&db, run.id, &runner).await?;
+        execute_run(&db, run.id, &runner, false).await?;
 
         assert!(called.load(Ordering::SeqCst));
         let command = command
@@ -649,7 +739,7 @@ mod tests {
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, false).await?;
         let (runner, _, _) = runner(7, "OpenFold failed");
-        execute_run(&db, run.id, &runner).await?;
+        execute_run(&db, run.id, &runner, false).await?;
         let updated = run_entity::Entity::find_by_id(run.id)
             .one(&db)
             .await?
@@ -665,7 +755,7 @@ mod tests {
         let layout = TestLayout::new("test_input");
         let run = create_run(&db, &layout, true).await?;
         let (runner, called, _) = runner(0, "");
-        let result = execute_run(&db, run.id, &runner).await?;
+        let result = execute_run(&db, run.id, &runner, false).await?;
         assert!(!called.load(Ordering::SeqCst));
         assert!(result.output.is_none());
         assert!(result.report.has_failures());
@@ -690,7 +780,7 @@ mod tests {
         let run = create_run(&db, &layout, false).await?;
         let runner = FakeCommandRunner::fails("boom");
 
-        let error = execute_run(&db, run.id, &runner)
+        let error = execute_run(&db, run.id, &runner, false)
             .await
             .expect_err("runner error should propagate");
         assert!(error.to_string().contains("boom"));
