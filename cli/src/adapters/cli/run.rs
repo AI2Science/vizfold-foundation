@@ -122,9 +122,10 @@ pub(super) async fn register_artifacts(
 pub(super) async fn report_execution(
     database: &sea_orm::DatabaseConnection,
     run_id: i32,
+    reuse_workspace: bool,
 ) -> Result<(), DbErr> {
     println!("Executing run {run_id}");
-    let outcome = execute_run(database, run_id, &LocalCommandRunner).await?;
+    let outcome = execute_run(database, run_id, &LocalCommandRunner, reuse_workspace).await?;
 
     let label = if outcome.report.has_failures() {
         "failed"
@@ -203,9 +204,9 @@ pub(super) async fn run_run(
     };
 
     if args.json {
-        execute_run(database, run_id, &LocalCommandRunner).await?;
+        execute_run(database, run_id, &LocalCommandRunner, args.reuse_workspace).await?;
     } else {
-        report_execution(database, run_id).await?;
+        report_execution(database, run_id, args.reuse_workspace).await?;
         println!();
     }
     run_artifacts::register_run_artifacts(database, run_id).await?;

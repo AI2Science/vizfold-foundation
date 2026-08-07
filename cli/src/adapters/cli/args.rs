@@ -302,6 +302,11 @@ pub(super) struct RunArgs {
     /// Print only the run as JSON, for tools driving the CLI.
     #[arg(long)]
     pub(super) json: bool,
+    /// Fold into the run's workspace even when it already holds output. A run that has never run
+    /// refuses one, since an id that comes round again would otherwise inherit -- and register --
+    /// files it never produced.
+    #[arg(long)]
+    pub(super) reuse_workspace: bool,
     /// OpenFold data directory. Defaults to the config `OPENFOLD_DATA_DIR`.
     #[arg(long)]
     pub(super) data_dir: Option<String>,
