@@ -1,0 +1,155 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 700px;
+                 background-color: #ffffff;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"color": "#97c2fc", "id": 0, "label": "PRO1", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 7, "label": "LEU8", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 15, "label": "LYS16", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 3, "label": "GLN4", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 1, "label": "ILE2", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 25, "label": "ALA26", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 2, "label": "ALA3", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 53, "label": "GLY54", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 9, "label": "GLY10", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 54, "label": "GLU55", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 23, "label": "SER24", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 4, "label": "ILE5", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 57, "label": "SER58", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 12, "label": "ASP13", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 8, "label": "GLU9", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 5, "label": "HIS6", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 26, "label": "ILE27", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 22, "label": "VAL23", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 19, "label": "ILE20", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 55, "label": "LEU56", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 6, "label": "ILE7", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 46, "label": "LYS47", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 49, "label": "PHE50", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 21, "label": "GLU22", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 10, "label": "ARG11", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 33, "label": "PRO34", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 20, "label": "ARG21", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 40, "label": "ILE41", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 18, "label": "LEU19", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 27, "label": "SER28", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 31, "label": "ASP32", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 35, "label": "THR36", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 42, "label": "THR43", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 17, "label": "THR18", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 24, "label": "GLU25", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 11, "label": "SER12", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 28, "label": "ARG29", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 37, "label": "VAL38", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 50, "label": "GLY51", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 13, "label": "GLU14", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 30, "label": "LEU31", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 16, "label": "GLU17", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 14, "label": "GLN15", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 47, "label": "GLY48", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 36, "label": "SER37", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 32, "label": "ALA33", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 34, "label": "LEU35", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 45, "label": "ALA46", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 29, "label": "SER30", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 43, "label": "GLU44", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 58, "label": "LYS59", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 48, "label": "HIS49", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 38, "label": "ARG39", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 51, "label": "ILE52", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 41, "label": "ILE42", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 44, "label": "MET45", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 52, "label": "GLY53", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 56, "label": "ALA57", "shape": "dot", "size": 10}, {"color": "#97c2fc", "id": 39, "label": "VAL40", "shape": "dot", "size": 10}]);
+                  edges = new vis.DataSet([{"from": 0, "to": 7, "value": 0.0011543831605643634, "width": 1}, {"from": 0, "to": 15, "value": 0.0009414951350831468, "width": 1}, {"from": 0, "to": 3, "value": 0.00045735982510618244, "width": 1}, {"from": 1, "to": 25, "value": 0.0024343054349112445, "width": 1}, {"from": 2, "to": 53, "value": 0.004160607416739365, "width": 1}, {"from": 2, "to": 9, "value": 0.001090080657648625, "width": 1}, {"from": 3, "to": 54, "value": 0.001609543892581147, "width": 1}, {"from": 3, "to": 23, "value": 0.0003603643286965764, "width": 1}, {"from": 4, "to": 57, "value": 0.003650507209369781, "width": 1}, {"from": 4, "to": 12, "value": 0.0026689388381843956, "width": 1}, {"from": 4, "to": 8, "value": 0.001292545699662045, "width": 1}, {"from": 4, "to": 7, "value": 0.00040771897873467507, "width": 1}, {"from": 5, "to": 26, "value": 0.004053327231285762, "width": 1}, {"from": 5, "to": 22, "value": 0.002415925698931466, "width": 1}, {"from": 5, "to": 19, "value": 0.0011143323059413077, "width": 1}, {"from": 5, "to": 55, "value": 0.0007838024913374291, "width": 1}, {"from": 6, "to": 26, "value": 0.002104015936397525, "width": 1}, {"from": 6, "to": 46, "value": 0.001779968448923473, "width": 1}, {"from": 6, "to": 49, "value": 0.001288107906715864, "width": 1}, {"from": 6, "to": 9, "value": 0.0007902800676995187, "width": 1}, {"from": 7, "to": 21, "value": 0.0019315369928593444, "width": 1}, {"from": 7, "to": 10, "value": 0.00044042698048174706, "width": 1}, {"from": 8, "to": 33, "value": 0.0033126919705285477, "width": 1}, {"from": 8, "to": 20, "value": 0.0008807487971417485, "width": 1}, {"from": 9, "to": 22, "value": 0.002478071153380101, "width": 1}, {"from": 9, "to": 40, "value": 0.002001863905076801, "width": 1}, {"from": 9, "to": 19, "value": 0.0012805406372737632, "width": 1}, {"from": 9, "to": 18, "value": 0.0008908277941170287, "width": 1}, {"from": 9, "to": 27, "value": 0.0008717226924997463, "width": 1}, {"from": 9, "to": 12, "value": 0.000595799406240656, "width": 1}, {"from": 10, "to": 31, "value": 0.004106665255285311, "width": 1}, {"from": 10, "to": 35, "value": 0.004105583685053999, "width": 1}, {"from": 10, "to": 42, "value": 0.003996978457966623, "width": 1}, {"from": 10, "to": 17, "value": 0.0022993652300731093, "width": 1}, {"from": 10, "to": 24, "value": 0.0008735442681381119, "width": 1}, {"from": 10, "to": 18, "value": 0.0006347725727560293, "width": 1}, {"from": 11, "to": 28, "value": 0.0030094239908151727, "width": 1}, {"from": 12, "to": 37, "value": 0.003857426712283352, "width": 1}, {"from": 12, "to": 31, "value": 0.0017900167419695543, "width": 1}, {"from": 12, "to": 57, "value": 0.0017416108749779874, "width": 1}, {"from": 12, "to": 50, "value": 0.001419242534706441, "width": 1}, {"from": 13, "to": 30, "value": 0.0006464834628857644, "width": 1}, {"from": 13, "to": 16, "value": 0.0003880417172278086, "width": 1}, {"from": 14, "to": 47, "value": 0.0013276548836380219, "width": 1}, {"from": 15, "to": 27, "value": 0.0014125223446755483, "width": 1}, {"from": 15, "to": 18, "value": 0.0004067182465063943, "width": 1}, {"from": 16, "to": 36, "value": 0.0035975061783819983, "width": 1}, {"from": 16, "to": 28, "value": 0.0014182804702237936, "width": 1}, {"from": 16, "to": 35, "value": 0.001323821175273132, "width": 1}, {"from": 17, "to": 31, "value": 0.0016058000819074074, "width": 1}, {"from": 17, "to": 20, "value": 0.00041258152004487405, "width": 1}, {"from": 18, "to": 37, "value": 0.0025435170769258788, "width": 1}, {"from": 18, "to": 28, "value": 0.0017674592796691274, "width": 1}, {"from": 18, "to": 24, "value": 0.001378161228198402, "width": 1}, {"from": 18, "to": 21, "value": 0.0005665151949863143, "width": 1}, {"from": 19, "to": 33, "value": 0.00248663836775768, "width": 1}, {"from": 19, "to": 24, "value": 0.0023123376842763004, "width": 1}, {"from": 19, "to": 26, "value": 0.0006469985356869154, "width": 1}, {"from": 19, "to": 22, "value": 0.0005638604336585161, "width": 1}, {"from": 20, "to": 47, "value": 0.0034326881852440863, "width": 1}, {"from": 20, "to": 54, "value": 0.0031904512931971124, "width": 1}, {"from": 20, "to": 33, "value": 0.0015088698770984962, "width": 1}, {"from": 20, "to": 30, "value": 0.0007876553456169341, "width": 1}, {"from": 20, "to": 23, "value": 0.0007005474182632385, "width": 1}, {"from": 21, "to": 32, "value": 0.002212303286900945, "width": 1}, {"from": 21, "to": 24, "value": 0.0007465625868060271, "width": 1}, {"from": 22, "to": 36, "value": 0.0021697459357636366, "width": 1}, {"from": 22, "to": 34, "value": 0.0017348407789592503, "width": 1}, {"from": 22, "to": 45, "value": 0.0009568439862537422, "width": 1}, {"from": 22, "to": 25, "value": 0.0006901602256858467, "width": 1}, {"from": 23, "to": 40, "value": 0.0024884583018338446, "width": 1}, {"from": 23, "to": 34, "value": 0.002071245038421817, "width": 1}, {"from": 23, "to": 29, "value": 0.0011220594581998096, "width": 1}, {"from": 23, "to": 42, "value": 0.0010845699652407106, "width": 1}, {"from": 23, "to": 26, "value": 0.0003762911182663574, "width": 1}, {"from": 24, "to": 28, "value": 0.004397705419475779, "width": 1}, {"from": 24, "to": 55, "value": 0.003495591314043804, "width": 1}, {"from": 24, "to": 43, "value": 0.002140054264959852, "width": 1}, {"from": 24, "to": 32, "value": 0.0019981678264312623, "width": 1}, {"from": 25, "to": 40, "value": 0.00424066819092871, "width": 1}, {"from": 25, "to": 42, "value": 0.0013262036612098264, "width": 1}, {"from": 25, "to": 57, "value": 0.0011819331948598605, "width": 1}, {"from": 25, "to": 28, "value": 0.000510736760640224, "width": 1}, {"from": 26, "to": 45, "value": 0.0033886651596199773, "width": 1}, {"from": 26, "to": 40, "value": 0.001966351305619007, "width": 1}, {"from": 26, "to": 43, "value": 0.0019203329209583908, "width": 1}, {"from": 26, "to": 33, "value": 0.001554171514688647, "width": 1}, {"from": 26, "to": 34, "value": 0.0005489216101775325, "width": 1}, {"from": 27, "to": 53, "value": 0.003857775800791429, "width": 1}, {"from": 27, "to": 58, "value": 0.003784650915553725, "width": 1}, {"from": 27, "to": 48, "value": 0.003504887472094072, "width": 1}, {"from": 27, "to": 38, "value": 0.0008422836674567818, "width": 1}, {"from": 27, "to": 43, "value": 0.0006606904819036524, "width": 1}, {"from": 28, "to": 34, "value": 0.0007821532531542344, "width": 1}, {"from": 28, "to": 31, "value": 0.0004275213799004472, "width": 1}, {"from": 29, "to": 51, "value": 0.0036960529870558954, "width": 1}, {"from": 29, "to": 48, "value": 0.0033677826505774692, "width": 1}, {"from": 29, "to": 35, "value": 0.002428555597685931, "width": 1}, {"from": 29, "to": 41, "value": 0.0020152752464884017, "width": 1}, {"from": 29, "to": 47, "value": 0.0014939027275565836, "width": 1}, {"from": 29, "to": 32, "value": 0.00039029972286871545, "width": 1}, {"from": 30, "to": 48, "value": 0.001715668206666036, "width": 1}, {"from": 30, "to": 37, "value": 0.0006548405889557565, "width": 1}, {"from": 30, "to": 33, "value": 0.0005733209186194789, "width": 1}, {"from": 31, "to": 48, "value": 0.0019275816332706892, "width": 1}, {"from": 31, "to": 44, "value": 0.0012949192278203974, "width": 1}, {"from": 31, "to": 38, "value": 0.00084221620951808, "width": 1}, {"from": 31, "to": 34, "value": 0.00043096091210859675, "width": 1}, {"from": 32, "to": 47, "value": 0.002398006647750402, "width": 1}, {"from": 32, "to": 42, "value": 0.0004139692746439505, "width": 1}, {"from": 33, "to": 44, "value": 0.002526742534103627, "width": 1}, {"from": 33, "to": 43, "value": 0.0017981213675193756, "width": 1}, {"from": 33, "to": 36, "value": 0.000656783484932193, "width": 1}, {"from": 34, "to": 52, "value": 0.0013686965798898809, "width": 1}, {"from": 34, "to": 37, "value": 0.0005410380222885193, "width": 1}, {"from": 35, "to": 56, "value": 0.0038984899596373967, "width": 1}, {"from": 35, "to": 38, "value": 0.0005762301102802006, "width": 1}, {"from": 36, "to": 54, "value": 0.0035091958618235566, "width": 1}, {"from": 36, "to": 41, "value": 0.0008746637007034902, "width": 1}, {"from": 36, "to": 39, "value": 0.0006332328372668229, "width": 1}, {"from": 36, "to": 51, "value": 0.0004379870123477381, "width": 1}, {"from": 37, "to": 40, "value": 0.0005130823493089807, "width": 1}, {"from": 37, "to": 41, "value": 0.0004368308300176023, "width": 1}, {"from": 38, "to": 42, "value": 0.0007302031028780813, "width": 1}, {"from": 38, "to": 41, "value": 0.0006073270761148426, "width": 1}, {"from": 39, "to": 42, "value": 0.0006424443273388152, "width": 1}, {"from": 40, "to": 52, "value": 0.0012401659025712169, "width": 1}, {"from": 40, "to": 43, "value": 0.0005103901971846535, "width": 1}, {"from": 41, "to": 48, "value": 0.0012388551958331248, "width": 1}, {"from": 41, "to": 44, "value": 0.0004063339129370477, "width": 1}, {"from": 42, "to": 45, "value": 0.00041656496009771283, "width": 1}, {"from": 43, "to": 54, "value": 0.0015172203575392004, "width": 1}, {"from": 43, "to": 49, "value": 0.0012084181191865475, "width": 1}, {"from": 43, "to": 53, "value": 0.0011994516236414983, "width": 1}, {"from": 44, "to": 56, "value": 0.0027788983912709797, "width": 1}, {"from": 44, "to": 55, "value": 0.002376927336142908, "width": 1}, {"from": 44, "to": 47, "value": 0.00039705915272357094, "width": 1}, {"from": 45, "to": 50, "value": 0.0023633657304866934, "width": 1}, {"from": 45, "to": 48, "value": 0.0005489559681395677, "width": 1}, {"from": 46, "to": 55, "value": 0.0024074573329673585, "width": 1}, {"from": 46, "to": 49, "value": 0.000568506693065353, "width": 1}, {"from": 47, "to": 54, "value": 0.0020147641540013304, "width": 1}, {"from": 47, "to": 50, "value": 0.0005120220286975865, "width": 1}, {"from": 48, "to": 51, "value": 0.0003837152574952059, "width": 1}, {"from": 49, "to": 52, "value": 0.0007797411528481362, "width": 1}, {"from": 51, "to": 54, "value": 0.00046267712015803764, "width": 1}, {"from": 52, "to": 58, "value": 0.0021208570444215522, "width": 1}, {"from": 53, "to": 56, "value": 0.0007516432740416292, "width": 1}, {"from": 54, "to": 57, "value": 0.0006252205727385044, "width": 1}, {"from": 55, "to": 58, "value": 0.0007861953916896567, "width": 1}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {
+    "configure": {
+        "enabled": false
+    },
+    "edges": {
+        "color": {
+            "inherit": true
+        },
+        "smooth": {
+            "enabled": true,
+            "type": "dynamic"
+        }
+    },
+    "interaction": {
+        "dragNodes": true,
+        "hideEdgesOnDrag": false,
+        "hideNodesOnDrag": false
+    },
+    "physics": {
+        "enabled": true,
+        "stabilization": {
+            "enabled": true,
+            "fit": true,
+            "iterations": 1000,
+            "onlyDynamicEdges": false,
+            "updateInterval": 50
+        }
+    }
+};
+
+                  
+
+
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>
