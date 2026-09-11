@@ -7,8 +7,8 @@ import shutil
 import threading
 import sys
 import multiprocessing
-from flask import Flask, render_template, request, jsonify, send_from_directory, Response
-from werkzeug.middleware.proxy_fix import ProxyFix
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response, redirect, url_for
+from auth import OAuthSSO
 
 # Ensure project root is importable when running from web_app
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -26,9 +26,39 @@ DATA_DIR = "/storage/ice1/shared/d-pace_community/alphafold/alphafold_2.3.2_data
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-@app.route('/')
+app.secret_key = os.urandom(32)
+
+sso = OAuthSSO(
+    app,
+    client_name="keycloak",
+    client_id="flask-app",
+    client_secret="tLcopq0p1mRawbjV9JBuvEwz17snf8QK",
+    server_metadata_url="http://localhost:8080/realms/dev/.well-known/openid-configuration",
+)
+
+
+@app.route("/login")
+def login():
+    return sso.login()
+
+
+@app.route("/auth")
+def auth_callback():
+    return sso.callback()
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    return sso.logout()
+
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    if not sso.logged_in():
+        return redirect(url_for("login"))
+
+    return render_template("index.html")
+
 
 def stream_output(process, pdb_file, protein_id, prediction_id):
     """Stream output from subprocess to client."""
