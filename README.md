@@ -17,3 +17,8 @@ This project is licensed under the [Apache License 2.0](https://www.apache.org/l
 See the [LICENSE](./LICENSE) file for details.
 
 ---
+
+This fork attempts to combine the features provided in the previous attention-related heatmap visualization pull requests (namely #16, #21, and #28) into a single pull request.
+
+Sample Output
+<img width="2371" height="585" alt="msa_row_heatmap_layer_47_6KWC" src="https://github.com/user-attachments/assets/029a67d6-674f-42bc-bc57-2c2d6b623e7c" />
