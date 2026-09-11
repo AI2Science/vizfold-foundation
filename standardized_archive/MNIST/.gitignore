@@ -1,0 +1,17 @@
+# datasets
+data/
+
+# generated archives
+*.zarr
+
+# virtual environments
+zarr_env/
+venv/
+.env/
+
+# python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
