@@ -17,6 +17,8 @@ cutlass/
 *.txt
 *.pdb
 *.pkl
+*.pickle
+*.pt
 *.fasta
 *.sto
 *.a3m

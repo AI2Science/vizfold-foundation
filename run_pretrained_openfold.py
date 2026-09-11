@@ -544,3 +544,10 @@ if __name__ == "__main__":
             --model_device for better performance"""
         )
     main(args)
+
+
+from visualize_dimensionality_reduction import plot_2d_embedding
+
+# Create labels (e.g., residue type, secondary structure)
+residue_labels = [1, 1, 2, 2, 0, 0, ...]  # Example: 0=helix, 1=sheet, 2=loop
+
