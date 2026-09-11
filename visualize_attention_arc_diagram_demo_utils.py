@@ -2,43 +2,14 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from visualize_attention_data import (
+    get_attention_file_path,
+    load_attention_map,
+    parse_fasta_sequence,
+)
 
-# ========== Input Parsing ==========
-def load_all_heads(connections_file, top_k=None):
-    heads = {}
-    current_head = None
-    with open(connections_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            if line.lower().startswith('layer'):
-                parts = line.replace(',', '').split()
-                head_idx = int(parts[-1])
-                current_head = head_idx
-                heads[current_head] = []
-            else:
-                res1, res2, weight = map(float, line.split())
-                heads[current_head].append((int(res1), int(res2), weight))
-
-    for head_idx, conns in heads.items():
-        conns.sort(key=lambda x: x[2], reverse=True)
-        if top_k is not None:
-            heads[head_idx] = conns[:top_k]
-
-    return heads
-
-
-def parse_fasta_sequence(fasta_path):
-    """
-    Parse a single-entry FASTA file and return the sequence string.
-    """
-    with open(fasta_path, 'r') as f:
-        lines = f.readlines()
-    
-    seq_lines = [line.strip() for line in lines if not line.startswith('>')]
-    sequence = ''.join(seq_lines)
-    return sequence
+# Backward-compatible import path for notebooks/scripts that already use this file.
+load_all_heads = load_attention_map
 
 
 # ========== Arc Plotting ==========
@@ -116,8 +87,8 @@ def generate_arc_diagrams(
     os.makedirs(output_dir, exist_ok=True)
 
     if attention_type == "msa_row":
-        file_path = os.path.join(attention_dir, f"msa_row_attn_layer{layer_idx}.txt")
-        heads = load_all_heads(file_path, top_k=top_k)
+        file_path = get_attention_file_path(attention_dir, attention_type, layer_idx)
+        heads = load_attention_map(file_path, top_k=top_k)
         pngs = []
 
         for head_idx, connections in heads.items():
@@ -131,12 +102,14 @@ def generate_arc_diagrams(
         assert residue_indices is not None, "residue_indices required for triangle_start attention"
 
         for res_idx in residue_indices:
-            file_path = os.path.join(attention_dir, f"triangle_start_attn_layer{layer_idx}_residue_idx_{res_idx}.txt")
+            file_path = get_attention_file_path(
+                attention_dir, attention_type, layer_idx, residue_idx=res_idx
+            )
             if not os.path.exists(file_path):
                 print(f"[Warning] Missing file for residue {res_idx}")
                 continue
 
-            heads = load_all_heads(file_path, top_k=top_k)
+            heads = load_attention_map(file_path, top_k=top_k)
             pngs = []
 
             for head_idx, connections in heads.items():

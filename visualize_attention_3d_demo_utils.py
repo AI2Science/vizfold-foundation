@@ -10,39 +10,11 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import os
 
+from visualize_attention_data import get_attention_file_path, load_attention_map
+
 
 # ========== Attention File I/O ==========
-def load_all_heads(connections_file, top_k=None):
-    """
-    Loads all heads' connections from a combined text file.
-    Returns a dict mapping head_index -> list of (res1, res2, weight).
-    """
-    heads = {}
-    current_head = None
-
-    with open(connections_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            if line.lower().startswith('layer'):
-                # New head section
-                parts = line.replace(',', '').split()
-                head_idx = int(parts[-1])
-                current_head = head_idx
-                heads[current_head] = []
-            else:
-                # Residue-residue-weight line
-                res1, res2, weight = map(float, line.split())
-                heads[current_head].append((int(res1), int(res2), weight))
-
-    # Sort each head's connections
-    for head_idx, conns in heads.items():
-        conns.sort(key=lambda x: x[2], reverse=True)
-        if top_k is not None:
-            heads[head_idx] = conns[:top_k]
-
-    return heads
+load_all_heads = load_attention_map
 
 
 def load_connections(connections_file, top_k=None):
@@ -297,8 +269,8 @@ def plot_pymol_attention_heads(
     os.makedirs(output_dir, exist_ok=True)
 
     if attention_type == "msa_row":
-        msa_file = os.path.join(attention_dir, f"msa_row_attn_layer{layer_idx}.txt")
-        msa_heads = load_all_heads(msa_file, top_k=top_k)
+        msa_file = get_attention_file_path(attention_dir, attention_type, layer_idx)
+        msa_heads = load_attention_map(msa_file, top_k=top_k)
 
         image_paths = []
         for head_idx, connections in msa_heads.items():
@@ -316,12 +288,14 @@ def plot_pymol_attention_heads(
         assert residue_indices is not None, "Must supply residue_indices for triangle attention"
 
         for res_idx in residue_indices:
-            tri_file = os.path.join(attention_dir, f"triangle_start_attn_layer{layer_idx}_residue_idx_{res_idx}.txt")
+            tri_file = get_attention_file_path(
+                attention_dir, attention_type, layer_idx, residue_idx=res_idx
+            )
             if not os.path.exists(tri_file):
                 print(f"[Warning] Missing attention file for residue {res_idx}")
                 continue
 
-            tri_heads = load_all_heads(tri_file, top_k=top_k)
+            tri_heads = load_attention_map(tri_file, top_k=top_k)
             res_pngs = []
             for head_idx, connections in tri_heads.items():
                 output_png = os.path.join(output_dir, f"tri_start_residue_{res_idx}_head_{head_idx}_layer_{layer_idx}_{protein}.png")

@@ -106,6 +106,7 @@ Single_Sequence_Inference.md
 Multimer_Inference.md
 OpenFold_Training_Setup.md
 Training_OpenFold.md
+Head_Visualization_Heatmap_Network.md
 ```
 
 ```{toctree}
