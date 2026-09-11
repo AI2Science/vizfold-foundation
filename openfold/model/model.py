@@ -90,6 +90,7 @@ class AlphaFold(nn.Module):
         attention_config = {
             "demo_attn": config.attention_config.get("demo_attn", False),
             "triangle_residue_idx": config.attention_config.get("triangle_residue_idx"),
+            "top_k": config.attention_config.get("top_k", 500),
         }
 
         # Main trunk + structure module

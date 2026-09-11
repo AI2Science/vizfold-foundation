@@ -726,7 +726,8 @@ class EvoformerBlock(MSABlock):
             # compute top-k and save to text file for demo
             if self.attention_config.get("demo_attn", False) and hasattr(ATTENTION_METADATA, "recent_attention"):
                 triangle_residue_idx = self.attention_config.get("triangle_residue_idx", None)
-                save_all_topk_from_recent_attention(self.attn_map_dir, triangle_residue_idx, top_k=500)
+                top_k = self.attention_config.get("top_k", 500)
+                save_all_topk_from_recent_attention(self.attn_map_dir, triangle_residue_idx, top_k=top_k)
                 # Clear after use to free memory
                 ATTENTION_METADATA.recent_attention.clear()
         return m, z
